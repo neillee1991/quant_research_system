@@ -18,13 +18,13 @@ class FactorRequest(BaseModel):
 
 
 def _load_stock_data(ts_code: str, start: str, end: str) -> pl.DataFrame:
-    conditions = ["ts_code = ?"]
+    conditions = ["ts_code = %s"]
     params = [ts_code]
     if start:
-        conditions.append("trade_date >= ?")
+        conditions.append("trade_date >= %s")
         params.append(start)
     if end:
-        conditions.append("trade_date <= ?")
+        conditions.append("trade_date <= %s")
         params.append(end)
     where = " AND ".join(conditions)
     return db_client.query(

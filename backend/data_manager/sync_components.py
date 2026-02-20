@@ -265,7 +265,8 @@ class SyncTaskExecutor(ISyncTaskExecutor):
     def execute_task(
         self,
         task_config: Dict[str, Any],
-        target_date: Optional[str] = None
+        target_date: Optional[str] = None,
+        end_date: Optional[str] = None
     ) -> bool:
         """执行同步任务"""
         task_id = task_config["task_id"]
@@ -284,7 +285,7 @@ class SyncTaskExecutor(ISyncTaskExecutor):
             if sync_type == "full":
                 return self._execute_full_sync(task_config)
             elif sync_type == "incremental":
-                return self._execute_incremental_sync(task_config, target_date)
+                return self._execute_incremental_sync(task_config, target_date, end_date)
             else:
                 raise SyncConfigError(f"Unknown sync type: {sync_type}")
 
@@ -313,7 +314,8 @@ class SyncTaskExecutor(ISyncTaskExecutor):
     def _execute_incremental_sync(
         self,
         task: Dict[str, Any],
-        target_date: Optional[str] = None
+        target_date: Optional[str] = None,
+        end_date: Optional[str] = None
     ) -> bool:
         """执行增量同步"""
         task_id = task["task_id"]
@@ -327,9 +329,12 @@ class SyncTaskExecutor(ISyncTaskExecutor):
                 if last_date
                 else DEFAULT_START_DATE
             )
-            target_date = DateUtils.today()
+            # 如果指定了 end_date，使用它；否则使用今天
+            target_date = end_date if end_date else DateUtils.today()
         else:
             start_date = target_date
+            # 如果指定了 end_date，使用它；否则使用 target_date
+            target_date = end_date if end_date else target_date
 
         if start_date > target_date:
             logger.info(f"Task {task_id} already up to date")

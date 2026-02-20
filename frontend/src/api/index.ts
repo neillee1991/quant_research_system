@@ -22,16 +22,39 @@ export const dataApi = {
 
   // 同步任务管理
   listSyncTasks: () => api.get('/data/sync/tasks'),
-  syncTask: (taskId: string, targetDate?: string) =>
-    longRunningApi.post(`/data/sync/task/${taskId}`, null, { params: { target_date: targetDate } }),
+  syncTask: (taskId: string, targetDate?: string, startDate?: string, endDate?: string) =>
+    longRunningApi.post(`/data/sync/task/${taskId}`, null, {
+      params: {
+        target_date: targetDate,
+        start_date: startDate,
+        end_date: endDate
+      }
+    }),
   syncAllTasks: (targetDate?: string) =>
     longRunningApi.post('/data/sync/all', null, { params: { target_date: targetDate } }),
   getTaskStatus: (taskId: string) => api.get(`/data/sync/status/${taskId}`),
+  getTaskConfig: (taskId: string) => api.get(`/data/sync/task/${taskId}/config`),
+  updateTaskConfig: (taskId: string, config: any) => api.put(`/data/sync/task/${taskId}/config`, config),
+  createTask: (config: any) => api.post('/data/sync/tasks', config),
+  deleteTask: (taskId: string) => api.delete(`/data/sync/tasks/${taskId}`),
 
   // 数据库管理
   listTables: () => api.get('/data/tables'),
+  truncateTable: (tableName: string) => api.delete(`/data/tables/${tableName}`),
   executeQuery: (sql: string, limit = 1000) =>
     api.post('/data/query', null, { params: { sql, limit } }),
+
+  // 调度管理
+  startScheduler: () => api.post('/data/sync/scheduler/start'),
+  stopScheduler: () => api.post('/data/sync/scheduler/stop'),
+  loadSchedules: () => api.post('/data/sync/scheduler/load'),
+  getAllSchedules: () => api.get('/data/sync/scheduler/schedules'),
+  enableTaskSchedule: (taskId: string, schedule: string, cronExpression?: string) =>
+    api.post(`/data/sync/scheduler/task/${taskId}/enable`, null, {
+      params: { schedule, cron_expression: cronExpression }
+    }),
+  disableTaskSchedule: (taskId: string) => api.post(`/data/sync/scheduler/task/${taskId}/disable`),
+  getTaskScheduleInfo: (taskId: string) => api.get(`/data/sync/scheduler/task/${taskId}`),
 };
 
 export const factorApi = {

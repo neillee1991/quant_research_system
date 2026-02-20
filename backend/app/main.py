@@ -1,9 +1,35 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
+from app.core.logger import logger
 from app.core.exceptions import QuantException, quant_exception_handler, general_exception_handler
 from app.api.v1 import data_merged as data, factor, strategy, ml
+from data_manager.scheduler import sync_scheduler
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """应用生命周期管理"""
+    # 启动时执行
+    logger.info("Starting application...")
+    try:
+        sync_scheduler.start()
+        sync_scheduler.load_schedules_from_config()
+        logger.info("Sync scheduler started and loaded schedules")
+    except Exception as e:
+        logger.error(f"Failed to start scheduler: {e}")
+
+    yield
+
+    # 关闭时执行
+    logger.info("Shutting down application...")
+    try:
+        sync_scheduler.shutdown()
+        logger.info("Sync scheduler stopped")
+    except Exception as e:
+        logger.error(f"Failed to stop scheduler: {e}")
 
 
 def create_app() -> FastAPI:
@@ -12,6 +38,7 @@ def create_app() -> FastAPI:
         version="1.0.0",
         docs_url="/docs",
         redoc_url="/redoc",
+        lifespan=lifespan
     )
 
     app.add_middleware(

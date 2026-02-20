@@ -26,7 +26,7 @@ class SimpleBacktestRequest(BaseModel):
 
 def _load_data(ts_code: str, start: str, end: str) -> pl.DataFrame:
     return db_client.query(
-        "SELECT * FROM daily_data WHERE ts_code=? AND trade_date>=? AND trade_date<=? ORDER BY trade_date",
+        "SELECT * FROM daily_data WHERE ts_code=%s AND trade_date>=%s AND trade_date<=%s ORDER BY trade_date",
         [ts_code, start, end],
     )
 

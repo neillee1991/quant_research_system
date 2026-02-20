@@ -1,10 +1,10 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom';
 import { Layout, Menu } from 'antd';
-import { DatabaseOutlined, FundOutlined, RobotOutlined } from '@ant-design/icons';
+import { DatabaseOutlined, ExperimentOutlined, FundOutlined } from '@ant-design/icons';
 import DataCenter from './pages/DataCenter';
-import StrategyLab from './pages/StrategyLab';
-import MLAuto from './pages/MLAuto';
+import FactorCenter from './pages/FactorCenter';
+import StrategyCenter from './pages/StrategyCenter';
 import './styles/global.css';
 
 const { Sider, Content } = Layout;
@@ -34,7 +34,7 @@ const App: React.FC = () => (
             textShadow: '0 0 10px rgba(0, 212, 255, 0.5)',
             letterSpacing: '1px'
           }}>
-            ⚡ QuantResearch
+            ⚡ 量化研究系统
           </div>
           <div style={{
             color: '#94a3b8',
@@ -42,31 +42,28 @@ const App: React.FC = () => (
             marginTop: '4px',
             letterSpacing: '0.5px'
           }}>
-            AI-Powered Trading System
+            AI 驱动的量化交易平台
           </div>
         </div>
         <Menu
           theme="dark"
           mode="inline"
-          style={{
-            background: 'transparent',
-            border: 'none'
-          }}
+          style={{ background: 'transparent', border: 'none' }}
           items={[
             {
               key: '/',
               icon: <DatabaseOutlined style={{ fontSize: 16 }} />,
-              label: <NavLink to="/" style={{ fontWeight: 500 }}>Data Center</NavLink>
+              label: <NavLink to="/" style={{ fontWeight: 500 }}>数据中心</NavLink>
+            },
+            {
+              key: '/factor',
+              icon: <ExperimentOutlined style={{ fontSize: 16 }} />,
+              label: <NavLink to="/factor" style={{ fontWeight: 500 }}>因子中心</NavLink>
             },
             {
               key: '/strategy',
               icon: <FundOutlined style={{ fontSize: 16 }} />,
-              label: <NavLink to="/strategy" style={{ fontWeight: 500 }}>Strategy Lab</NavLink>
-            },
-            {
-              key: '/ml',
-              icon: <RobotOutlined style={{ fontSize: 16 }} />,
-              label: <NavLink to="/ml" style={{ fontWeight: 500 }}>AutoML</NavLink>
+              label: <NavLink to="/strategy" style={{ fontWeight: 500 }}>策略中心</NavLink>
             },
           ]}
         />
@@ -75,8 +72,8 @@ const App: React.FC = () => (
         <Content style={{ minHeight: '100vh', padding: '24px' }}>
           <Routes>
             <Route path="/" element={<DataCenter />} />
-            <Route path="/strategy" element={<StrategyLab />} />
-            <Route path="/ml" element={<MLAuto />} />
+            <Route path="/factor" element={<FactorCenter />} />
+            <Route path="/strategy" element={<StrategyCenter />} />
           </Routes>
         </Content>
       </Layout>

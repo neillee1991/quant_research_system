@@ -63,11 +63,11 @@ class RefactoredSyncEngine:
             log_manager=self.log_manager
         )
 
-    def sync_task(self, task_id: str, target_date: Optional[str] = None) -> bool:
+    def sync_task(self, task_id: str, target_date: Optional[str] = None, end_date: Optional[str] = None) -> bool:
         """同步单个任务"""
         try:
             task = self.config_manager.get_task(task_id)
-            return self.task_executor.execute_task(task, target_date)
+            return self.task_executor.execute_task(task, target_date, end_date)
         except Exception as e:
             logger.error(f"Failed to sync task {task_id}: {e}")
             return False
@@ -120,7 +120,8 @@ class RefactoredSyncEngine:
                 "sync_type": task.get("sync_type", ""),
                 "schedule": task.get("schedule", ""),
                 "last_sync_date": last_sync_date,
-                "table_name": task.get("table_name", "")
+                "table_name": task.get("table_name", ""),
+                "date_field": task.get("date_field", "trade_date")
             }
         except Exception as e:
             logger.error(f"Failed to get task status: {e}")

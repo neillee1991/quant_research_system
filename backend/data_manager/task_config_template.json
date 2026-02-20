@@ -1,0 +1,147 @@
+{
+  "task_templates": {
+    "by_date_template": {
+      "task_id": "example_by_date",
+      "api_name": "daily_basic",
+      "description": "按日期同步所有股票的数据",
+      "sync_mode": "by_date",
+      "sync_type": "incremental",
+      "schedule": "daily",
+      "enabled": true,
+      "params": {
+        "trade_date": "{date}",
+        "fields": "ts_code,trade_date,close,turnover_rate,pe,pb"
+      },
+      "date_field": "trade_date",
+      "primary_keys": ["ts_code", "trade_date"],
+      "table_name": "daily_basic",
+      "api_limit": 5000,
+      "offset": 0,
+      "schema": {
+        "ts_code": {"type": "VARCHAR", "nullable": false, "comment": "股票代码"},
+        "trade_date": {"type": "VARCHAR", "nullable": false, "comment": "交易日期"}
+      }
+    },
+    "by_stock_template": {
+      "task_id": "example_by_stock",
+      "api_name": "daily",
+      "description": "按股票同步历史数据",
+      "sync_mode": "by_stock",
+      "sync_type": "incremental",
+      "schedule": "daily",
+      "enabled": true,
+      "params": {
+        "ts_code": "{stock_code}",
+        "start_date": "{start_date}",
+        "end_date": "{end_date}",
+        "fields": "ts_code,trade_date,open,high,low,close,vol,amount"
+      },
+      "date_field": "trade_date",
+      "primary_keys": ["ts_code", "trade_date"],
+      "table_name": "daily_data",
+      "api_limit": 5000,
+      "stock_batch_size": 50,
+      "offset": 0,
+      "stock_source": {
+        "type": "table",
+        "table_name": "stock_basic",
+        "code_column": "ts_code",
+        "filter": "list_status = 'L'"
+      },
+      "schema": {
+        "ts_code": {"type": "VARCHAR", "nullable": false, "comment": "股票代码"},
+        "trade_date": {"type": "VARCHAR", "nullable": false, "comment": "交易日期"},
+        "open": {"type": "DOUBLE PRECISION", "nullable": true, "comment": "开盘价"},
+        "high": {"type": "DOUBLE PRECISION", "nullable": true, "comment": "最高价"},
+        "low": {"type": "DOUBLE PRECISION", "nullable": true, "comment": "最低价"},
+        "close": {"type": "DOUBLE PRECISION", "nullable": true, "comment": "收盘价"},
+        "vol": {"type": "DOUBLE PRECISION", "nullable": true, "comment": "成交量"},
+        "amount": {"type": "DOUBLE PRECISION", "nullable": true, "comment": "成交额"}
+      }
+    },
+    "full_sync_template": {
+      "task_id": "example_full",
+      "api_name": "stock_basic",
+      "description": "全量同步基础数据",
+      "sync_mode": "full",
+      "sync_type": "full",
+      "schedule": "weekly",
+      "enabled": true,
+      "params": {
+        "exchange": "",
+        "list_status": "L",
+        "fields": "ts_code,symbol,name,area,industry,market,list_date"
+      },
+      "primary_keys": ["ts_code"],
+      "table_name": "stock_basic",
+      "api_limit": 5000,
+      "offset": 0,
+      "auto_add_trade_date": true,
+      "schema": {
+        "ts_code": {"type": "VARCHAR", "nullable": false, "comment": "股票代码"},
+        "symbol": {"type": "VARCHAR", "nullable": true, "comment": "股票简称"},
+        "name": {"type": "VARCHAR", "nullable": true, "comment": "股票名称"},
+        "trade_date": {"type": "VARCHAR", "nullable": true, "comment": "同步日期"}
+      }
+    }
+  },
+  "configuration_guide": {
+    "sync_mode": {
+      "by_date": "按日期同步，每次调用获取指定日期所有股票的数据。适用于 daily_basic, moneyflow 等接口",
+      "by_stock": "按股票同步，遍历所有股票，每只股票调用一次API获取历史数据。适用于需要获取单只股票完整历史的场景",
+      "full": "全量同步，一次性获取所有数据，不涉及日期或股票遍历。适用于 stock_basic, trade_cal 等基础数据"
+    },
+    "sync_type": {
+      "incremental": "增量同步，只同步新增的数据（基于日期）",
+      "full": "全量同步，每次都获取完整数据"
+    },
+    "params": {
+      "placeholders": {
+        "{date}": "当前同步日期，格式 YYYYMMDD",
+        "{start_date}": "开始日期，格式 YYYYMMDD",
+        "{end_date}": "结束日期，格式 YYYYMMDD",
+        "{stock_code}": "股票代码，如 000001.SZ"
+      }
+    },
+    "api_limit": "API 单次调用的 limit 参数，同时也是数据库写入的批次大小。系统会自动分页获取所有数据（通过 limit 和 offset）。例如：总共 10000 行数据，api_limit=5000 时会调用 2 次（offset=0 和 offset=5000），然后分批写入数据库",
+    "stock_batch_size": "按股票同步时，每批处理的股票数量",
+    "offset": "数据偏移量，用于分页获取大量数据",
+    "stock_source": {
+      "type": "获取股票列表的方式：table(从数据库表) | api(从API) | static(固定列表)",
+      "table_name": "股票列表所在的表名",
+      "code_column": "股票代码列名",
+      "filter": "筛选条件，SQL WHERE 子句"
+    },
+    "auto_add_trade_date": "全量同步时是否自动添加 trade_date 字段（当前日期）"
+  },
+  "usage_examples": [
+    {
+      "scenario": "每日同步所有股票的基本指标",
+      "use_template": "by_date_template",
+      "modifications": {
+        "task_id": "daily_basic",
+        "api_name": "daily_basic",
+        "params.trade_date": "{date}"
+      }
+    },
+    {
+      "scenario": "补全某只股票的历史数据",
+      "use_template": "by_stock_template",
+      "modifications": {
+        "task_id": "daily_history",
+        "sync_mode": "by_stock",
+        "params.ts_code": "{stock_code}",
+        "params.start_date": "{start_date}",
+        "params.end_date": "{end_date}"
+      }
+    },
+    {
+      "scenario": "每周更新股票基础信息",
+      "use_template": "full_sync_template",
+      "modifications": {
+        "task_id": "stock_basic",
+        "schedule": "weekly"
+      }
+    }
+  ]
+}

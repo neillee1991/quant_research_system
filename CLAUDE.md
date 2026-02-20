@@ -26,7 +26,7 @@ python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 ### Frontend (React + TypeScript)
-
+a chinese frontend
 ```bash
 cd frontend
 npm install
