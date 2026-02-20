@@ -536,15 +536,28 @@ const DataCenter: React.FC = () => {
             style={{ marginBottom: '24px', border: 'none' }}
             title={<span style={{ color: '#00d4ff', fontSize: '18px', fontWeight: 600 }}>⚡ Sync Task Management</span>}
             extra={
-              <Button
-                type="primary"
-                icon={<SyncOutlined />}
-                onClick={handleSyncAll}
-                className="glow-button"
-                style={{ height: '40px', padding: '0 24px' }}
-              >
-                Sync All Tasks
-              </Button>
+              <Space>
+                <Button
+                  icon={<ReloadOutlined />}
+                  onClick={() => {
+                    syncTasks.forEach((task) => loadTaskStatus(task.task_id));
+                    message.success('Task statuses refreshed');
+                  }}
+                  type="default"
+                  style={{ height: '40px' }}
+                >
+                  Refresh
+                </Button>
+                <Button
+                  type="primary"
+                  icon={<SyncOutlined />}
+                  onClick={handleSyncAll}
+                  className="glow-button"
+                  style={{ height: '40px', padding: '0 24px' }}
+                >
+                  Sync All Tasks
+                </Button>
+              </Space>
             }
           >
             <Table
