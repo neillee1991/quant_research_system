@@ -221,13 +221,13 @@ def get_sync_status(
     limit: int = Query(1000, le=10000, description="返回记录数限制"),
     source: Optional[str] = Query(None, description="按来源筛选"),
     data_type: Optional[str] = Query(None, description="按数据类型筛选"),
-    start_date: Optional[str] = Query(None, description="按最后同步日期筛选（起始）"),
-    end_date: Optional[str] = Query(None, description="按最后同步日期筛选（结束）")
+    start_date: Optional[str] = Query(None, description="按同步日期筛选（起始）"),
+    end_date: Optional[str] = Query(None, description="按同步日期筛选（结束）")
 ):
     """
-    获取同步状态（支持筛选）
+    获取同步历史记录（支持筛选）
 
-    返回同步日志，支持按来源、类型、日期筛选
+    返回所有同步历史记录，支持按来源、类型、日期筛选
     """
     try:
         conditions = []
@@ -240,14 +240,20 @@ def get_sync_status(
             conditions.append("data_type = %s")
             params.append(data_type)
         if start_date:
-            conditions.append("last_date >= %s")
+            conditions.append("sync_date >= %s")
             params.append(start_date)
         if end_date:
-            conditions.append("last_date <= %s")
+            conditions.append("sync_date <= %s")
             params.append(end_date)
 
         where_clause = " AND ".join(conditions) if conditions else "1=1"
-        sql = f"SELECT * FROM sync_log WHERE {where_clause} ORDER BY updated_at DESC LIMIT {limit}"
+        sql = f"""
+            SELECT id, source, data_type, last_date, sync_date, rows_synced, status, created_at
+            FROM sync_log_history
+            WHERE {where_clause}
+            ORDER BY created_at DESC
+            LIMIT {limit}
+        """
 
         df = db_client.query(sql, tuple(params) if params else ())
         return {

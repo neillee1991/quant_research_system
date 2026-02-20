@@ -50,10 +50,14 @@ interface TaskStatus {
 }
 
 interface SyncLog {
+  id: number;
   source: string;
   data_type: string;
   last_date: string;
-  updated_at: string;
+  sync_date: string;
+  rows_synced: number;
+  status: string;
+  created_at: string;
 }
 
 interface TableInfo {
@@ -603,18 +607,35 @@ const DataCenter: React.FC = () => {
             <Table
               dataSource={syncLogs}
               columns={[
+                { title: 'ID', dataIndex: 'id', key: 'id', width: 80 },
                 { title: 'Source', dataIndex: 'source', key: 'source', width: 150 },
                 { title: 'Type', dataIndex: 'data_type', key: 'data_type', width: 150 },
-                { title: 'Last Date', dataIndex: 'last_date', key: 'last_date', width: 120 },
+                { title: 'Sync Date', dataIndex: 'sync_date', key: 'sync_date', width: 120 },
                 {
-                  title: 'Updated',
-                  dataIndex: 'updated_at',
-                  key: 'updated_at',
+                  title: 'Rows Synced',
+                  dataIndex: 'rows_synced',
+                  key: 'rows_synced',
+                  width: 120,
+                  render: (count: number) => count.toLocaleString()
+                },
+                {
+                  title: 'Status',
+                  dataIndex: 'status',
+                  key: 'status',
+                  width: 100,
+                  render: (status: string) => (
+                    <Tag color={status === 'success' ? 'green' : 'red'}>{status}</Tag>
+                  )
+                },
+                {
+                  title: 'Created At',
+                  dataIndex: 'created_at',
+                  key: 'created_at',
                   width: 180,
                   render: (text: string) => new Date(text).toLocaleString()
                 },
               ]}
-              rowKey={(record, index) => `${record.data_type}-${record.last_date}-${index ?? 0}`}
+              rowKey="id"
               size="small"
               pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (total) => `Total ${total} logs` }}
               className="tech-table"

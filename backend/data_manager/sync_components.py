@@ -90,9 +90,10 @@ class SyncLogManager:
             logger.warning(f"Failed to get last sync date for {task_id}: {e}")
         return None
 
-    def update_sync_log(self, task_id: str, sync_date: str) -> None:
-        """更新同步日志"""
+    def update_sync_log(self, task_id: str, sync_date: str, rows_synced: int = 0) -> None:
+        """更新同步日志（同时记录历史）"""
         try:
+            # 1. 更新 sync_log 表（保留最新状态）
             log_data = pl.DataFrame({
                 "source": ["tushare_config"],
                 "data_type": [task_id],
@@ -104,7 +105,33 @@ class SyncLogManager:
                 log_data,
                 ["source", "data_type"]
             )
-            logger.debug(f"Updated sync log for {task_id}: {sync_date}")
+
+            # 2. 插入 sync_log_history 表（记录历史）
+            history_data = pl.DataFrame({
+                "source": ["tushare_config"],
+                "data_type": [task_id],
+                "last_date": [sync_date],
+                "sync_date": [sync_date],
+                "rows_synced": [rows_synced],
+                "status": ["success"],
+                "created_at": [datetime.now()]
+            })
+            # 使用 execute 直接插入，不使用 upsert
+            sql = """
+                INSERT INTO sync_log_history (source, data_type, last_date, sync_date, rows_synced, status, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """
+            self.repository.execute(sql, (
+                "tushare_config",
+                task_id,
+                sync_date,
+                sync_date,
+                rows_synced,
+                "success",
+                datetime.now()
+            ))
+
+            logger.debug(f"Updated sync log for {task_id}: {sync_date}, rows: {rows_synced}")
         except Exception as e:
             logger.error(f"Failed to update sync log: {e}")
 
@@ -274,11 +301,13 @@ class SyncTaskExecutor(ISyncTaskExecutor):
         df = self.api_client.call_api(api_name, **params)
         if df is None or df.is_empty():
             logger.warning(f"No data for {task_id}")
+            self.log_manager.update_sync_log(task_id, DateUtils.today(), 0)
             return False
 
+        rows_count = len(df)
         self.repository.upsert(task["table_name"], df, task["primary_keys"])
-        self.log_manager.update_sync_log(task_id, DateUtils.today())
-        logger.info(f"Full sync completed for {task_id}: {len(df)} rows")
+        self.log_manager.update_sync_log(task_id, DateUtils.today(), rows_count)
+        logger.info(f"Full sync completed for {task_id}: {rows_count} rows")
         return True
 
     def _execute_incremental_sync(
@@ -316,10 +345,15 @@ class SyncTaskExecutor(ISyncTaskExecutor):
 
             if df is not None and not df.is_empty():
                 self.repository.upsert(task["table_name"], df, task["primary_keys"])
-                total_rows += len(df)
-                logger.info(f"Synced {task_id} for {date_str}: {len(df)} rows")
+                rows_count = len(df)
+                total_rows += rows_count
+                logger.info(f"Synced {task_id} for {date_str}: {rows_count} rows")
 
-            self.log_manager.update_sync_log(task_id, date_str)
+                # 记录每次同步的历史
+                self.log_manager.update_sync_log(task_id, date_str, rows_count)
+            else:
+                # 即使没有数据也记录
+                self.log_manager.update_sync_log(task_id, date_str, 0)
 
         logger.info(f"Incremental sync completed for {task_id}: {total_rows} total rows")
         return True
