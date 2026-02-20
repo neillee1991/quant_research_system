@@ -1,0 +1,255 @@
+/* 全局科技风格样式 */
+
+:root {
+  /* 主色调 - 科技蓝 */
+  --primary-color: #00d4ff;
+  --primary-glow: rgba(0, 212, 255, 0.3);
+  --secondary-color: #7c3aed;
+  --accent-color: #10b981;
+
+  /* 背景色 */
+  --bg-dark: #0a0e27;
+  --bg-darker: #050814;
+  --bg-card: rgba(15, 23, 42, 0.8);
+  --bg-card-hover: rgba(30, 41, 59, 0.9);
+
+  /* 边框和分割线 */
+  --border-color: rgba(100, 116, 139, 0.2);
+  --border-glow: rgba(0, 212, 255, 0.5);
+
+  /* 文字颜色 */
+  --text-primary: #f1f5f9;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+}
+
+/* 全局背景渐变 */
+body {
+  margin: 0;
+  padding: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background: var(--bg-darker);
+  color: var(--text-primary);
+}
+
+/* 科技感背景动画 */
+.tech-background {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background:
+    radial-gradient(ellipse at top, rgba(0, 212, 255, 0.05) 0%, transparent 50%),
+    radial-gradient(ellipse at bottom, rgba(124, 58, 237, 0.05) 0%, transparent 50%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* 卡片样式 */
+.tech-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  backdrop-filter: blur(10px);
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+}
+
+.tech-card:hover {
+  background: var(--bg-card-hover);
+  border-color: var(--border-glow);
+  box-shadow: 0 8px 16px rgba(0, 212, 255, 0.2);
+  transform: translateY(-2px);
+}
+
+/* 发光按钮 */
+.glow-button {
+  background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+  border: none;
+  color: white;
+  font-weight: 600;
+  box-shadow: 0 4px 15px var(--primary-glow);
+  transition: all 0.3s ease;
+}
+
+.glow-button:hover {
+  box-shadow: 0 6px 20px var(--primary-glow);
+  transform: translateY(-2px);
+}
+
+/* 数据表格样式 */
+.tech-table .ant-table {
+  background: transparent;
+}
+
+.tech-table .ant-table-thead > tr > th {
+  background: rgba(15, 23, 42, 0.6);
+  color: var(--primary-color);
+  border-bottom: 2px solid var(--border-glow);
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 12px;
+  letter-spacing: 0.5px;
+}
+
+.tech-table .ant-table-tbody > tr {
+  background: rgba(15, 23, 42, 0.3);
+  transition: all 0.2s ease;
+}
+
+.tech-table .ant-table-tbody > tr:hover {
+  background: rgba(30, 41, 59, 0.5);
+  box-shadow: 0 0 10px rgba(0, 212, 255, 0.1);
+}
+
+.tech-table .ant-table-tbody > tr > td {
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-primary);
+}
+
+/* 标签页样式 */
+.tech-tabs .ant-tabs-nav {
+  background: rgba(15, 23, 42, 0.5);
+  border-radius: 8px;
+  padding: 4px;
+  margin-bottom: 24px;
+}
+
+.tech-tabs .ant-tabs-tab {
+  color: var(--text-secondary);
+  font-weight: 500;
+  transition: all 0.3s ease;
+}
+
+.tech-tabs .ant-tabs-tab:hover {
+  color: var(--primary-color);
+}
+
+.tech-tabs .ant-tabs-tab-active {
+  background: linear-gradient(135deg, rgba(0, 212, 255, 0.1), rgba(124, 58, 237, 0.1));
+  border-radius: 6px;
+}
+
+.tech-tabs .ant-tabs-tab-active .ant-tabs-tab-btn {
+  color: var(--primary-color);
+  text-shadow: 0 0 10px var(--primary-glow);
+}
+
+.tech-tabs .ant-tabs-ink-bar {
+  background: linear-gradient(90deg, var(--primary-color), var(--secondary-color));
+  height: 3px;
+}
+
+/* 输入框样式 */
+.tech-input {
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  border-radius: 8px;
+  transition: all 0.3s ease;
+}
+
+.tech-input:focus,
+.tech-input:hover {
+  border-color: var(--primary-color);
+  box-shadow: 0 0 10px var(--primary-glow);
+}
+
+/* 统计卡片 */
+.stat-card {
+  background: linear-gradient(135deg, rgba(0, 212, 255, 0.1), rgba(124, 58, 237, 0.1));
+  border: 1px solid var(--border-glow);
+  border-radius: 12px;
+  padding: 20px;
+  text-align: center;
+  transition: all 0.3s ease;
+}
+
+.stat-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 20px rgba(0, 212, 255, 0.3);
+}
+
+.stat-card .stat-value {
+  font-size: 32px;
+  font-weight: 700;
+  background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.stat-card .stat-label {
+  color: var(--text-secondary);
+  font-size: 14px;
+  margin-top: 8px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+/* 加载动画 */
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 10px var(--primary-glow);
+  }
+  50% {
+    box-shadow: 0 0 20px var(--primary-glow);
+  }
+}
+
+.loading-pulse {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+/* 滚动条样式 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-darker);
+}
+
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, var(--primary-color), var(--secondary-color));
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--primary-color);
+}
+
+/* 代码块样式 */
+.code-block {
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 16px;
+  font-family: 'Courier New', monospace;
+  color: var(--accent-color);
+  overflow-x: auto;
+}
+
+/* 徽章样式 */
+.tech-badge {
+  background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+  color: white;
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* 分割线 */
+.tech-divider {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--border-glow), transparent);
+  margin: 24px 0;
+}

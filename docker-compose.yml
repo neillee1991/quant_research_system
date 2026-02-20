@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: quant_postgres
+    environment:
+      POSTGRES_DB: quant_research
+      POSTGRES_USER: quant_user
+      POSTGRES_PASSWORD: quant_pass_2024
+      POSTGRES_INITDB_ARGS: "-E UTF8 --locale=C"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U quant_user -d quant_research"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # pgAdmin 可选 - 如果网络问题无法拉取镜像，可以注释掉
+  # 使用命令行工具或其他 PostgreSQL 客户端代替
+  # pgadmin:
+  #   image: dpage/pgadmin4:latest
+  #   container_name: quant_pgadmin
+  #   environment:
+  #     PGADMIN_DEFAULT_EMAIL: admin@quant.com
+  #     PGADMIN_DEFAULT_PASSWORD: admin123
+  #     PGADMIN_CONFIG_SERVER_MODE: 'False'
+  #   ports:
+  #     - "5050:80"
+  #   volumes:
+  #     - pgadmin_data:/var/lib/pgadmin
+  #   depends_on:
+  #     - postgres
+  #   restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local
+  # pgadmin_data:
+  #   driver: local
