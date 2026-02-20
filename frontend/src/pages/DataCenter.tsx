@@ -46,6 +46,14 @@ interface TaskStatus {
   schedule: string;
   last_sync_date: string | null;
   table_name: string;
+  table_latest_date?: string | null;
+}
+
+interface SyncLog {
+  source: string;
+  data_type: string;
+  last_date: string;
+  updated_at: string;
 }
 
 interface TableInfo {
@@ -60,7 +68,7 @@ const DataCenter: React.FC = () => {
   const [stocks, setStocks] = useState<string[]>([]);
   const [selected, setSelected] = useState<string>('');
   const [dailyData, setDailyData] = useState<any[]>([]);
-  const [syncLogs, setSyncLogs] = useState<any[]>([]);
+  const [syncLogs, setSyncLogs] = useState<SyncLog[]>([]);
   const [loading, setLoading] = useState(false);
 
   // 新增状态
@@ -73,21 +81,32 @@ const DataCenter: React.FC = () => {
   const [queryLoading, setQueryLoading] = useState(false);
   const [syncingTasks, setSyncingTasks] = useState<Set<string>>(new Set());
 
+  // 同步日志筛选状态
+  const [logFilters, setLogFilters] = useState({
+    source: undefined as string | undefined,
+    dataType: undefined as string | undefined,
+    startDate: undefined as string | undefined,
+    endDate: undefined as string | undefined,
+  });
+
+  // 同步参数模态框
+  const [syncModalVisible, setSyncModalVisible] = useState(false);
+  const [syncModalTask, setSyncModalTask] = useState<SyncTask | null>(null);
+  const [syncTargetDate, setSyncTargetDate] = useState<string>('');
+
   useEffect(() => {
     loadInitialData();
   }, []);
 
   const loadInitialData = async () => {
     try {
-      const [stocksRes, logsRes, tasksRes, tablesRes] = await Promise.all([
+      const [stocksRes, tasksRes, tablesRes] = await Promise.all([
         dataApi.listStocks(),
-        dataApi.getSyncStatus(),
         dataApi.listSyncTasks(),
         dataApi.listTables(),
       ]);
 
       setStocks(stocksRes.data.stocks || []);
-      setSyncLogs(logsRes.data.logs || []);
       setSyncTasks(tasksRes.data.tasks || []);
       setTables(tablesRes.data.tables || []);
 
@@ -96,8 +115,25 @@ const DataCenter: React.FC = () => {
       for (const task of tasks) {
         loadTaskStatus(task.task_id);
       }
+
+      // 加载同步日志
+      loadSyncLogs();
     } catch (error) {
       message.error('Failed to load data');
+    }
+  };
+
+  const loadSyncLogs = async () => {
+    try {
+      const res = await dataApi.getSyncStatus(
+        logFilters.source,
+        logFilters.dataType,
+        logFilters.startDate,
+        logFilters.endDate
+      );
+      setSyncLogs(res.data.logs || []);
+    } catch (error) {
+      console.error('Failed to load sync logs');
     }
   };
 
@@ -121,11 +157,29 @@ const DataCenter: React.FC = () => {
   };
 
   const handleSyncTask = async (taskId: string) => {
+    const task = syncTasks.find(t => t.task_id === taskId);
+    if (!task) return;
+
+    // 显示同步参数模态框
+    setSyncModalTask(task);
+    setSyncTargetDate('');
+    setSyncModalVisible(true);
+  };
+
+  const executeSyncTask = async () => {
+    if (!syncModalTask) return;
+
+    const taskId = syncModalTask.task_id;
     setSyncingTasks((prev) => new Set(prev).add(taskId));
+    setSyncModalVisible(false);
+
     try {
-      await dataApi.syncTask(taskId);
+      await dataApi.syncTask(taskId, syncTargetDate || undefined);
       message.success(`Task ${taskId} sync started`);
-      setTimeout(() => loadTaskStatus(taskId), 2000);
+      setTimeout(() => {
+        loadTaskStatus(taskId);
+        loadSyncLogs();
+      }, 2000);
     } catch (error) {
       message.error(`Failed to sync task ${taskId}`);
     } finally {
@@ -139,10 +193,12 @@ const DataCenter: React.FC = () => {
 
   const handleSyncAll = async () => {
     try {
+      // Sync all tasks with latest data only (no target_date parameter)
       await dataApi.syncAllTasks();
-      message.success('All tasks sync started in background');
+      message.success('All tasks sync started in background (latest data only)');
       setTimeout(() => {
         syncTasks.forEach((task) => loadTaskStatus(task.task_id));
+        loadSyncLogs();
       }, 3000);
     } catch (error) {
       message.error('Failed to start sync');
@@ -296,6 +352,18 @@ const DataCenter: React.FC = () => {
       render: (_: any, record: SyncTask) => {
         const status = taskStatuses[record.task_id];
         return status?.last_sync_date || <span style={{ color: '#999' }}>Never</span>;
+      },
+    },
+    {
+      title: 'Table Latest Date',
+      key: 'table_latest_date',
+      width: 140,
+      render: (_: any, record: SyncTask) => {
+        const status = taskStatuses[record.task_id];
+        if (syncingTasks.has(record.task_id)) {
+          return <Tag color="processing" icon={<SyncOutlined spin />}>Syncing...</Tag>;
+        }
+        return status?.table_latest_date || <span style={{ color: '#999' }}>N/A</span>;
       },
     },
     { title: 'Table', dataIndex: 'table_name', key: 'table_name', width: 120 },
@@ -490,18 +558,65 @@ const DataCenter: React.FC = () => {
             className="tech-card"
             style={{ marginTop: 16, border: 'none' }}
             title={<span style={{ color: '#00d4ff', fontSize: '16px', fontWeight: 600 }}>📋 Sync Logs</span>}
+            extra={
+              <Button
+                icon={<ReloadOutlined />}
+                onClick={loadSyncLogs}
+                size="small"
+                type="link"
+              >
+                Refresh
+              </Button>
+            }
           >
+            <Space style={{ marginBottom: 16 }} wrap>
+              <Select
+                placeholder="Filter by Source"
+                style={{ width: 180 }}
+                allowClear
+                onChange={(value) => setLogFilters({ ...logFilters, source: value })}
+              >
+                <Select.Option value="tushare_config">tushare_config</Select.Option>
+              </Select>
+              <Select
+                placeholder="Filter by Type"
+                style={{ width: 180 }}
+                allowClear
+                onChange={(value) => setLogFilters({ ...logFilters, dataType: value })}
+              >
+                {syncTasks.map(task => (
+                  <Select.Option key={task.task_id} value={task.task_id}>{task.task_id}</Select.Option>
+                ))}
+              </Select>
+              <Input
+                placeholder="Start Date (YYYYMMDD)"
+                style={{ width: 180 }}
+                onChange={(e) => setLogFilters({ ...logFilters, startDate: e.target.value })}
+              />
+              <Input
+                placeholder="End Date (YYYYMMDD)"
+                style={{ width: 180 }}
+                onChange={(e) => setLogFilters({ ...logFilters, endDate: e.target.value })}
+              />
+              <Button type="primary" onClick={loadSyncLogs}>Apply Filters</Button>
+            </Space>
             <Table
               dataSource={syncLogs}
               columns={[
-                { title: 'Source', dataIndex: 'source', key: 'source' },
-                { title: 'Type', dataIndex: 'data_type', key: 'data_type' },
-                { title: 'Last Date', dataIndex: 'last_date', key: 'last_date' },
-                { title: 'Updated', dataIndex: 'updated_at', key: 'updated_at' },
+                { title: 'Source', dataIndex: 'source', key: 'source', width: 150 },
+                { title: 'Type', dataIndex: 'data_type', key: 'data_type', width: 150 },
+                { title: 'Last Date', dataIndex: 'last_date', key: 'last_date', width: 120 },
+                {
+                  title: 'Updated',
+                  dataIndex: 'updated_at',
+                  key: 'updated_at',
+                  width: 180,
+                  render: (text: string) => new Date(text).toLocaleString()
+                },
               ]}
-              rowKey={(record, index) => `${record.data_type}-${index ?? 0}`}
+              rowKey={(record, index) => `${record.data_type}-${record.last_date}-${index ?? 0}`}
               size="small"
-              pagination={{ pageSize: 10 }}
+              pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (total) => `Total ${total} logs` }}
               className="tech-table"
             />
           </Card>
@@ -616,6 +731,44 @@ const DataCenter: React.FC = () => {
           </Card>
         </TabPane>
       </Tabs>
+
+      {/* Sync Parameter Modal */}
+      <Modal
+        title={`Sync Task: ${syncModalTask?.task_id || ''}`}
+        open={syncModalVisible}
+        onOk={executeSyncTask}
+        onCancel={() => setSyncModalVisible(false)}
+        okText="Start Sync"
+        cancelText="Cancel"
+      >
+        <Space direction="vertical" style={{ width: '100%' }} size="large">
+          <Descriptions bordered size="small">
+            <Descriptions.Item label="Task ID" span={3}>{syncModalTask?.task_id}</Descriptions.Item>
+            <Descriptions.Item label="Description" span={3}>{syncModalTask?.description}</Descriptions.Item>
+            <Descriptions.Item label="Type" span={3}>
+              <Tag color={syncModalTask?.sync_type === 'incremental' ? 'blue' : 'green'}>
+                {syncModalTask?.sync_type}
+              </Tag>
+            </Descriptions.Item>
+            <Descriptions.Item label="Table" span={3}>{syncModalTask?.table_name}</Descriptions.Item>
+          </Descriptions>
+
+          <div>
+            <div style={{ marginBottom: 8, fontWeight: 500 }}>Target Date (Optional)</div>
+            <Input
+              placeholder="YYYYMMDD (leave empty for latest data only)"
+              value={syncTargetDate}
+              onChange={(e) => setSyncTargetDate(e.target.value)}
+              maxLength={8}
+            />
+            <div style={{ marginTop: 8, color: '#999', fontSize: 12 }}>
+              {syncModalTask?.sync_type === 'incremental'
+                ? '💡 Leave empty to sync only the latest day. Specify a date to sync from that date to today.'
+                : '💡 Leave empty to perform a full sync. Specify a date to sync data for that specific date.'}
+            </div>
+          </div>
+        </Space>
+      </Modal>
     </div>
   );
 };

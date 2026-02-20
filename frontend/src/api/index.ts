@@ -17,7 +17,8 @@ export const dataApi = {
     api.get('/data/daily', { params: { ts_code: tsCode, start_date: startDate, end_date: endDate, limit } }),
   triggerSync: (tsCode?: string, source = 'tushare') =>
     longRunningApi.post('/data/sync', null, { params: { ts_code: tsCode, source } }), // 使用长超时
-  getSyncStatus: () => api.get('/data/sync/status'),
+  getSyncStatus: (source?: string, dataType?: string, startDate?: string, endDate?: string, limit = 1000) =>
+    api.get('/data/sync/status', { params: { source, data_type: dataType, start_date: startDate, end_date: endDate, limit } }),
 
   // 同步任务管理
   listSyncTasks: () => api.get('/data/sync/tasks'),

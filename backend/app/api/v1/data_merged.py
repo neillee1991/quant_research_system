@@ -110,13 +110,13 @@ def list_sync_tasks():
 @router.post("/data/sync/task/{task_id}", response_model=SyncResponse)
 def sync_single_task(
     task_id: str,
-    target_date: Optional[str] = Query(None, description="目标日期 YYYYMMDD")
+    target_date: Optional[str] = Query(None, description="目标日期 YYYYMMDD，不指定则同步最新一天")
 ):
     """
     同步指定任务
 
     - **task_id**: 任务ID（如 daily_basic, stock_basic）
-    - **target_date**: 目标日期，不指定则同步到今天
+    - **target_date**: 目标日期，不指定则只同步最新一天（增量任务）或执行一次（全量任务）
     """
     try:
         success = sync_engine.sync_task(task_id, target_date)
@@ -142,14 +142,16 @@ def sync_single_task(
 
 @router.post("/data/sync/all", response_model=SyncResponse)
 def sync_all_tasks(
-    target_date: Optional[str] = Query(None, description="目标日期 YYYYMMDD")
+    target_date: Optional[str] = Query(None, description="目标日期 YYYYMMDD，不指定则只同步最新一天")
 ):
     """
-    同步所有启用的任务
+    同步所有启用的任务（仅最新数据）
 
     后台执行，避免超时。同步所有在配置文件中启用的任务。
+    - 增量任务：只同步最新一天
+    - 全量任务：执行一次完整同步
 
-    - **target_date**: 目标日期，不指定则同步到今天
+    - **target_date**: 目标日期，不指定则同步最新一天
     """
     try:
         import threading
@@ -216,17 +218,38 @@ def sync_by_schedule(
 
 @router.get("/data/sync/status")
 def get_sync_status(
-    limit: int = Query(100, le=1000, description="返回记录数限制")
+    limit: int = Query(1000, le=10000, description="返回记录数限制"),
+    source: Optional[str] = Query(None, description="按来源筛选"),
+    data_type: Optional[str] = Query(None, description="按数据类型筛选"),
+    start_date: Optional[str] = Query(None, description="按最后同步日期筛选（起始）"),
+    end_date: Optional[str] = Query(None, description="按最后同步日期筛选（结束）")
 ):
     """
-    获取同步状态
+    获取同步状态（支持筛选）
 
-    返回最近的同步日志，包括各个任务的最后同步时间
+    返回同步日志，支持按来源、类型、日期筛选
     """
     try:
-        df = db_client.query(
-            f"SELECT * FROM sync_log ORDER BY updated_at DESC LIMIT {limit}"
-        )
+        conditions = []
+        params = []
+
+        if source:
+            conditions.append("source = %s")
+            params.append(source)
+        if data_type:
+            conditions.append("data_type = %s")
+            params.append(data_type)
+        if start_date:
+            conditions.append("last_date >= %s")
+            params.append(start_date)
+        if end_date:
+            conditions.append("last_date <= %s")
+            params.append(end_date)
+
+        where_clause = " AND ".join(conditions) if conditions else "1=1"
+        sql = f"SELECT * FROM sync_log WHERE {where_clause} ORDER BY updated_at DESC LIMIT {limit}"
+
+        df = db_client.query(sql, tuple(params) if params else ())
         return {
             "logs": df.to_dicts() if not df.is_empty() else [],
             "count": len(df)
@@ -239,7 +262,7 @@ def get_sync_status(
 @router.get("/data/sync/status/{task_id}")
 def get_task_status(task_id: str):
     """
-    获取指定任务的同步状态
+    获取指定任务的同步状态（包含表中最新日期）
 
     - **task_id**: 任务ID
     """
@@ -251,6 +274,21 @@ def get_task_status(task_id: str):
                 status_code=404,
                 detail=f"Task {task_id} not found"
             )
+
+        # 获取表中最新日期
+        table_name = status_info.get("table_name")
+        if table_name:
+            try:
+                # 尝试获取表中最新的 trade_date
+                max_date_sql = f"SELECT MAX(trade_date) as max_date FROM {table_name}"
+                df = db_client.query(max_date_sql)
+                if not df.is_empty() and df["max_date"][0]:
+                    status_info["table_latest_date"] = df["max_date"][0]
+                else:
+                    status_info["table_latest_date"] = None
+            except Exception as e:
+                logger.warning(f"Failed to get latest date for {table_name}: {e}")
+                status_info["table_latest_date"] = None
 
         return status_info
     except HTTPException:
