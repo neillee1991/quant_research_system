@@ -737,14 +737,18 @@ const DataCenter: React.FC = () => {
                         </Col>
                         <Col span={4}>
                           <div style={{ color: '#94a3b8', fontSize: '12px', marginBottom: '4px' }}>调度</div>
-                          <Tag style={{
-                            background: 'rgba(124, 58, 237, 0.2)',
-                            border: '1px solid #7c3aed',
-                            color: '#7c3aed',
-                            fontWeight: 500
-                          }}>
-                            {task.schedule}
-                          </Tag>
+                          {taskScheduleInfo?.schedule_type ? (
+                            <Tag style={{
+                              background: 'rgba(124, 58, 237, 0.2)',
+                              border: '1px solid #7c3aed',
+                              color: '#7c3aed',
+                              fontWeight: 500
+                            }}>
+                              {taskScheduleInfo.schedule_type}
+                            </Tag>
+                          ) : (
+                            <span style={{ color: '#666', fontSize: '12px' }}>-</span>
+                          )}
                         </Col>
                         <Col span={4}>
                           <div style={{ color: '#94a3b8', fontSize: '12px', marginBottom: '4px' }}>调度状态</div>

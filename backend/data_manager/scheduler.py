@@ -124,11 +124,24 @@ class SyncScheduler:
         try:
             job = self.scheduler.get_job(task_id)
             if job:
+                # 解析 trigger 获取调度类型
+                trigger_str = str(job.trigger)
+                schedule_type = "custom"
+
+                # 判断调度类型
+                if "hour='2'" in trigger_str and "day_of_week" not in trigger_str and "day=" not in trigger_str:
+                    schedule_type = "daily"
+                elif "day_of_week='mon'" in trigger_str or "day_of_week='0'" in trigger_str:
+                    schedule_type = "weekly"
+                elif "day='1'" in trigger_str and "day_of_week" not in trigger_str:
+                    schedule_type = "monthly"
+
                 return {
                     "task_id": job.id,
                     "name": job.name,
                     "next_run_time": job.next_run_time.isoformat() if job.next_run_time else None,
-                    "trigger": str(job.trigger)
+                    "trigger": trigger_str,
+                    "schedule_type": schedule_type
                 }
             return None
         except Exception as e:
@@ -139,11 +152,23 @@ class SyncScheduler:
         """获取所有调度任务信息"""
         schedules = {}
         for job in self.scheduler.get_jobs():
+            # 解析 trigger 获取调度类型
+            trigger_str = str(job.trigger)
+            schedule_type = "custom"
+
+            if "hour='2'" in trigger_str and "day_of_week" not in trigger_str and "day=" not in trigger_str:
+                schedule_type = "daily"
+            elif "day_of_week='mon'" in trigger_str or "day_of_week='0'" in trigger_str:
+                schedule_type = "weekly"
+            elif "day='1'" in trigger_str and "day_of_week" not in trigger_str:
+                schedule_type = "monthly"
+
             schedules[job.id] = {
                 "task_id": job.id,
                 "name": job.name,
                 "next_run_time": job.next_run_time.isoformat() if job.next_run_time else None,
-                "trigger": str(job.trigger)
+                "trigger": trigger_str,
+                "schedule_type": schedule_type
             }
         return schedules
 
