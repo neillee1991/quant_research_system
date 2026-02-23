@@ -1,6 +1,6 @@
 """
 配置管理模块
-使用 Pydantic 管理所有配置项，支持环境变量和类型验证
+使用 Pydantic 管理所有配置项，支持环境变量和 .env 文件
 """
 from typing import Literal
 from pydantic import Field, field_validator
@@ -8,9 +8,18 @@ from pydantic_settings import BaseSettings
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parents[3]
+_ENV_FILE = str(BASE_DIR / ".env")
 
 
-class DataCollectorConfig(BaseSettings):
+class _BaseConfig(BaseSettings):
+    """所有子配置的基类，统一 .env 路径"""
+    class Config:
+        env_file = _ENV_FILE
+        env_file_encoding = "utf-8"
+        extra = "ignore"
+
+
+class DataCollectorConfig(_BaseConfig):
     """数据采集配置"""
     tushare_token: str = Field(default="", env="TUSHARE_TOKEN")
     calls_per_minute: int = Field(default=120, ge=1, le=500)
@@ -19,24 +28,20 @@ class DataCollectorConfig(BaseSettings):
     timeout: int = Field(default=30, ge=5, le=300)
 
 
-class DatabaseConfig(BaseSettings):
+class DatabaseConfig(_BaseConfig):
     """数据库配置"""
-    # PostgreSQL 配置
     postgres_host: str = Field(default="localhost", env="POSTGRES_HOST")
     postgres_port: int = Field(default=5432, env="POSTGRES_PORT")
     postgres_db: str = Field(default="quant_research", env="POSTGRES_DB")
     postgres_user: str = Field(default="quant_user", env="POSTGRES_USER")
-    postgres_password: str = Field(default="quant_pass_2024", env="POSTGRES_PASSWORD")
+    postgres_password: str = Field(default="", env="POSTGRES_PASSWORD")
 
     # 连接池配置
     connection_pool_size: int = Field(default=10, ge=1, le=50)
     query_timeout: int = Field(default=300, ge=10, le=3600)
 
-    # 兼容旧版 DuckDB 配置（已废弃）
-    duckdb_path: str = Field(default=str(BASE_DIR / "data" / "quant.duckdb"))
 
-
-class BacktestConfig(BaseSettings):
+class BacktestConfig(_BaseConfig):
     """回测配置"""
     initial_capital: float = Field(default=1_000_000.0, gt=0)
     commission_rate: float = Field(default=0.0003, ge=0, le=0.01)
@@ -45,7 +50,7 @@ class BacktestConfig(BaseSettings):
     max_position_size: float = Field(default=0.2, ge=0, le=1)
 
 
-class MLConfig(BaseSettings):
+class MLConfig(_BaseConfig):
     """机器学习配置"""
     n_trials: int = Field(default=100, ge=10, le=1000)
     cv_folds: int = Field(default=5, ge=2, le=10)
@@ -54,7 +59,7 @@ class MLConfig(BaseSettings):
     n_jobs: int = Field(default=-1)
 
 
-class SyncConfig(BaseSettings):
+class SyncConfig(_BaseConfig):
     """数据同步配置"""
     config_path: str = Field(
         default=str(BASE_DIR / "backend" / "data_manager" / "sync_config.json")
@@ -86,15 +91,6 @@ class Settings(BaseSettings):
     ml: MLConfig = Field(default_factory=MLConfig)
     sync: SyncConfig = Field(default_factory=SyncConfig)
 
-    # Tushare (保持向后兼容)
-    TUSHARE_TOKEN: str = Field(default="", env="TUSHARE_TOKEN")
-
-    # DuckDB (保持向后兼容)
-    DUCKDB_PATH: str = Field(default=str(BASE_DIR / "data" / "quant.duckdb"))
-
-    # API V1 PREFIX (保持向后兼容)
-    API_V1_PREFIX: str = Field(default="/api/v1")
-
     @field_validator("data_dir", "raw_data_dir", "factors_dir", "models_dir", "log_dir")
     @classmethod
     def create_directories(cls, v: Path) -> Path:
@@ -102,40 +98,11 @@ class Settings(BaseSettings):
         v.mkdir(parents=True, exist_ok=True)
         return v
 
-    @property
-    def APP_NAME(self) -> str:
-        """向后兼容：APP_NAME"""
-        return self.app_name
-
-    @property
-    def DEBUG(self) -> bool:
-        """向后兼容：DEBUG"""
-        return self.debug
-
-    @property
-    def DATA_DIR(self) -> Path:
-        """向后兼容：DATA_DIR"""
-        return self.data_dir
-
-    @property
-    def RAW_DATA_DIR(self) -> Path:
-        """向后兼容：RAW_DATA_DIR"""
-        return self.raw_data_dir
-
-    @property
-    def FACTORS_DIR(self) -> Path:
-        """向后兼容：FACTORS_DIR"""
-        return self.factors_dir
-
-    @property
-    def MODELS_DIR(self) -> Path:
-        """向后兼容：MODELS_DIR"""
-        return self.models_dir
-
     class Config:
-        env_file = ".env"
+        env_file = _ENV_FILE
         env_file_encoding = "utf-8"
-        env_nested_delimiter = "__"  # 支持嵌套配置，如 COLLECTOR__CALLS_PER_MINUTE
+        env_nested_delimiter = "__"
+        extra = "ignore"
 
 
 settings = Settings()

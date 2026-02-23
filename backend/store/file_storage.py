@@ -6,7 +6,7 @@ from app.core.logger import logger
 
 def save_parquet(df: pl.DataFrame, subdir: str, filename: str) -> Path:
     """Save a Polars DataFrame as a Parquet file."""
-    target_dir = settings.DATA_DIR / subdir
+    target_dir = settings.data_dir / subdir
     target_dir.mkdir(parents=True, exist_ok=True)
     path = target_dir / filename
     df.write_parquet(path, compression="snappy")
@@ -16,7 +16,7 @@ def save_parquet(df: pl.DataFrame, subdir: str, filename: str) -> Path:
 
 def load_parquet(subdir: str, filename: str) -> pl.DataFrame | None:
     """Load a Parquet file into a Polars DataFrame."""
-    path = settings.DATA_DIR / subdir / filename
+    path = settings.data_dir / subdir / filename
     if not path.exists():
         logger.warning(f"Parquet file not found: {path}")
         return None
@@ -24,7 +24,7 @@ def load_parquet(subdir: str, filename: str) -> pl.DataFrame | None:
 
 
 def list_parquet_files(subdir: str) -> list[Path]:
-    target_dir = settings.DATA_DIR / subdir
+    target_dir = settings.data_dir / subdir
     if not target_dir.exists():
         return []
     return sorted(target_dir.glob("*.parquet"))

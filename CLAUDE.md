@@ -8,6 +8,19 @@ Quant Research System is a full-stack quantitative trading platform with drag-an
 
 ## Development Commands
 
+### Quick Start (Recommended)
+
+```bash
+# Start all services (database, backend, frontend)
+./start.sh
+
+# Check service status
+./check_status.sh
+
+# Stop all services
+./stop.sh
+```
+
 ### Backend (Python 3.11 required)
 
 ```bash
@@ -26,12 +39,14 @@ python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 ### Frontend (React + TypeScript)
-a chinese frontend
+
 ```bash
 cd frontend
 npm install
 npm start  # Runs on http://localhost:3000
 ```
+
+Note: Frontend is in Chinese and uses Ant Design components.
 
 ### Database (PostgreSQL via Docker)
 
@@ -40,7 +55,7 @@ npm start  # Runs on http://localhost:3000
 docker-compose up -d
 
 # Connect to database
-docker exec quant_postgres psql -U quant_user -d quant_research
+docker exec -it quant_postgres psql -U quant_user -d quant_research
 
 # View logs
 docker-compose logs -f postgres
@@ -50,6 +65,11 @@ docker exec quant_postgres pg_dump -U quant_user quant_research > backup.sql
 
 # Restore database
 docker exec -i quant_postgres psql -U quant_user quant_research < backup.sql
+
+# pgAdmin web interface
+# URL: http://localhost:5050
+# Email: admin@quant.com
+# Password: admin123
 ```
 
 ## Architecture & Key Concepts
@@ -189,9 +209,11 @@ db_client.upsert("table_name", polars_df, ["primary", "keys"])
 - **Python version**: Must use 3.11 (PyCaret compatibility requirement)
 - **Database**: PostgreSQL 16 via Docker (connection pooling enabled)
 - **Data processing**: Polars is preferred over Pandas for performance
+- **Frontend**: Chinese language UI using Ant Design, React Flow, and ECharts
 - **Frontend proxy**: React dev server proxies `/api` to `http://localhost:8000`
 - **Tushare token**: Required for data sync, set in `backend/.env`
 - **Rate limiting**: Tushare API calls are rate-limited (default 120/min)
+- **Scheduler**: APScheduler runs daily sync tasks at 18:00 (configured in backend)
 
 ## Troubleshooting
 
@@ -212,12 +234,27 @@ If you see "syntax error at or near 'AND'" or similar, check for:
 - Run sync: `POST /api/v1/data/sync/task/{task_id}`
 - Check logs in `backend/logs/app.log`
 
+### Service Not Starting
+- Use `./check_status.sh` to diagnose issues
+- Check port availability (3000, 8000, 5432, 5050)
+- View logs: `tail -f /tmp/backend.log` or `tail -f /tmp/frontend.log`
+- Ensure Docker is running for PostgreSQL
+
+### Database Connection Issues
+- Verify PostgreSQL is running: `docker ps | grep quant_postgres`
+- Check connection settings in `.env` (project root)
+- Default credentials: user=quant_user, db=quant_research, password from `.env` POSTGRES_PASSWORD
+
 ## File Locations
 
-- Config: `backend/.env` (environment) and `backend/data_manager/sync_config.json` (sync tasks)
-- Logs: `backend/logs/app.log`
+- Config: `.env` (project root, environment) and `backend/data_manager/sync_config.json` (sync tasks)
+- Logs: `backend/logs/app.log` (or `/tmp/backend.log` and `/tmp/frontend.log` when using start.sh)
+- PID files: `.pids/backend.pid` and `.pids/frontend.pid` (when using start.sh)
 - Database client: `backend/store/postgres_client.py`
-- API routes: `backend/app/api/v1/`
-- Services: `backend/app/services/`
+- API routes: `backend/app/api/v1/` (data_merged.py, factor.py, strategy.py, ml.py)
+- Services: `backend/app/services/` (data_service.py, factor_service.py, backtest_service.py)
 - Factor engine: `backend/engine/factors/`
+- Backtest engine: `backend/engine/backtester/`
+- ML module: `backend/ml_module/` (trainer.py, optimizer.py, pipeline.py)
 - Sync engine: `backend/data_manager/sync_components.py` and `refactored_sync_engine.py`
+- Utility scripts: `start.sh`, `stop.sh`, `check_status.sh`, `db_manager.py`, `migrate_data.py`

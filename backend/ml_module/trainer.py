@@ -54,7 +54,7 @@ class AutoMLTrainer:
     def save(self, name: str = "automl_model"):
         if self.best_model is None:
             raise ValueError("No model trained yet")
-        path = str(settings.MODELS_DIR / name)
+        path = str(settings.models_dir / name)
         if self.task == "classification":
             cls_save(self.best_model, path)
         else:

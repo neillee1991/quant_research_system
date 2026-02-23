@@ -67,3 +67,14 @@ DEFAULT_RATE_LIMIT_PERIOD: Final[int] = 60  # 秒
 SIGNAL_BUY: Final[int] = 1
 SIGNAL_SELL: Final[int] = -1
 SIGNAL_HOLD: Final[int] = 0
+
+# 因子质量标记（位掩码，可组合）
+QUALITY_NORMAL: Final[int] = 0          # 正常
+QUALITY_LIMIT_UP: Final[int] = 1        # 一字涨停
+QUALITY_LIMIT_DOWN: Final[int] = 2      # 一字跌停
+QUALITY_POST_SUSPENSION: Final[int] = 4  # 停牌复牌窗口期
+QUALITY_LOW_VOLUME: Final[int] = 8      # 极低成交量
+QUALITY_IPO_PERIOD: Final[int] = 16     # 新股上市初期
+
+# 特殊股票过滤
+IPO_EXCLUDE_TRADING_DAYS: Final[int] = 60  # 新股上市后排除的交易日数

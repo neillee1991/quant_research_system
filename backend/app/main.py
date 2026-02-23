@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.core.logger import logger
 from app.core.exceptions import QuantException, quant_exception_handler, general_exception_handler
-from app.api.v1 import data_merged as data, factor, strategy, ml
+from app.api.v1 import data_merged as data, factor, strategy, ml, production
 from data_manager.scheduler import sync_scheduler
 
 
@@ -34,7 +34,7 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     app = FastAPI(
-        title=settings.APP_NAME,
+        title=settings.app_name,
         version="1.0.0",
         docs_url="/docs",
         redoc_url="/redoc",
@@ -54,10 +54,11 @@ def create_app() -> FastAPI:
     app.add_exception_handler(Exception, general_exception_handler)
 
     # 路由注册（使用合并后的 data 路由）
-    app.include_router(data.router, prefix=settings.API_V1_PREFIX, tags=["data"])
-    app.include_router(factor.router, prefix=settings.API_V1_PREFIX, tags=["factor"])
-    app.include_router(strategy.router, prefix=settings.API_V1_PREFIX, tags=["strategy"])
-    app.include_router(ml.router, prefix=settings.API_V1_PREFIX, tags=["ml"])
+    app.include_router(data.router, prefix=settings.api_v1_prefix, tags=["data"])
+    app.include_router(factor.router, prefix=settings.api_v1_prefix, tags=["factor"])
+    app.include_router(strategy.router, prefix=settings.api_v1_prefix, tags=["strategy"])
+    app.include_router(ml.router, prefix=settings.api_v1_prefix, tags=["ml"])
+    app.include_router(production.router, prefix=settings.api_v1_prefix, tags=["production"])
 
     return app
 

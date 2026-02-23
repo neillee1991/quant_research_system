@@ -1,0 +1,104 @@
+{
+  "dags": [
+    {
+      "dag_id": "daily_update",
+      "description": "每日数据更新流水线：同步行情 → 计算因子",
+      "schedule": "daily",
+      "tasks": [
+        {
+          "task_id": "daily",
+          "task_type": "sync",
+          "depends_on": []
+        },
+        {
+          "task_id": "daily_basic",
+          "task_type": "sync",
+          "depends_on": []
+        },
+        {
+          "task_id": "adj_factor",
+          "task_type": "sync",
+          "depends_on": []
+        },
+        {
+          "task_id": "moneyflow",
+          "task_type": "sync",
+          "depends_on": []
+        },
+        {
+          "task_id": "factor_momentum_20",
+          "task_type": "production",
+          "depends_on": [
+            "daily"
+          ]
+        },
+        {
+          "task_id": "factor_volatility_20",
+          "task_type": "production",
+          "depends_on": [
+            "daily"
+          ]
+        },
+        {
+          "task_id": "factor_pe_rank",
+          "task_type": "production",
+          "depends_on": [
+            "daily_basic"
+          ]
+        },
+        {
+          "task_id": "factor_pb_rank",
+          "task_type": "production",
+          "depends_on": [
+            "daily_basic"
+          ]
+        },
+        {
+          "task_id": "factor_volatility_10",
+          "task_type": "production",
+          "depends_on": [
+            "daily_basic"
+          ]
+        }
+      ]
+    },
+    {
+      "dag_id": "weekly_analysis",
+      "description": "每周因子分析流水线：同步基础数据 → 计算技术因子",
+      "schedule": "weekly",
+      "tasks": [
+        {
+          "task_id": "stock_basic",
+          "task_type": "sync",
+          "depends_on": []
+        },
+        {
+          "task_id": "daily",
+          "task_type": "sync",
+          "depends_on": []
+        },
+        {
+          "task_id": "factor_ma_5",
+          "task_type": "production",
+          "depends_on": [
+            "daily"
+          ]
+        },
+        {
+          "task_id": "factor_ma_20",
+          "task_type": "production",
+          "depends_on": [
+            "daily"
+          ]
+        },
+        {
+          "task_id": "factor_rsi_14",
+          "task_type": "production",
+          "depends_on": [
+            "daily"
+          ]
+        }
+      ]
+    }
+  ]
+}

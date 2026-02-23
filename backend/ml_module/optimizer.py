@@ -50,14 +50,14 @@ class FactorOptimizer:
         return self.best_weights
 
     def save_weights(self, filename: str = "best_weights.json"):
-        path = settings.MODELS_DIR / filename
+        path = settings.models_dir / filename
         with open(path, "w") as f:
             json.dump(self.best_weights, f, indent=2)
         logger.info(f"Saved best weights to {path}")
 
     @staticmethod
     def load_weights(filename: str = "best_weights.json") -> dict[str, float]:
-        path = settings.MODELS_DIR / filename
+        path = settings.models_dir / filename
         if not path.exists():
             return {}
         with open(path) as f:

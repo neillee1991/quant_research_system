@@ -1,5 +1,6 @@
 -- 量化研究系统数据库初始化脚本
 -- PostgreSQL 16+
+-- 只创建系统必需的表，业务表由 sync_config.json 动态创建
 
 -- 创建扩展
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
@@ -24,6 +25,141 @@ COMMENT ON COLUMN sync_log.source IS '数据源';
 COMMENT ON COLUMN sync_log.data_type IS '数据类型';
 COMMENT ON COLUMN sync_log.last_date IS '最后同步日期 YYYYMMDD';
 COMMENT ON COLUMN sync_log.updated_at IS '更新时间';
+
+-- 创建同步日志历史表
+CREATE TABLE IF NOT EXISTS sync_log_history (
+    id SERIAL PRIMARY KEY,
+    source VARCHAR(100) NOT NULL,
+    data_type VARCHAR(100) NOT NULL,
+    last_date VARCHAR(8),
+    sync_date VARCHAR(8),
+    rows_synced INTEGER,
+    status VARCHAR(20),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_sync_log_history_source ON sync_log_history(source, data_type);
+CREATE INDEX idx_sync_log_history_date ON sync_log_history(sync_date DESC);
+CREATE INDEX idx_sync_log_history_created ON sync_log_history(created_at DESC);
+
+COMMENT ON TABLE sync_log_history IS '数据同步历史记录表';
+COMMENT ON COLUMN sync_log_history.source IS '数据源';
+COMMENT ON COLUMN sync_log_history.data_type IS '数据类型';
+COMMENT ON COLUMN sync_log_history.last_date IS '最后同步日期 YYYYMMDD';
+COMMENT ON COLUMN sync_log_history.sync_date IS '本次同步日期 YYYYMMDD';
+COMMENT ON COLUMN sync_log_history.rows_synced IS '同步行数';
+COMMENT ON COLUMN sync_log_history.status IS '同步状态';
+COMMENT ON COLUMN sync_log_history.created_at IS '创建时间';
+
+-- ==================== DAG 系统表 ====================
+
+-- DAG 执行日志
+CREATE TABLE IF NOT EXISTS dag_run_log (
+    id SERIAL PRIMARY KEY,
+    dag_id VARCHAR(100) NOT NULL,
+    run_id VARCHAR(200) NOT NULL UNIQUE,
+    status VARCHAR(20) DEFAULT 'pending',
+    target_date VARCHAR(8),
+    started_at TIMESTAMP,
+    finished_at TIMESTAMP,
+    trigger_type VARCHAR(20) DEFAULT 'manual',
+    run_type VARCHAR(20) DEFAULT 'today',
+    backfill_id VARCHAR(200),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+COMMENT ON COLUMN dag_run_log.run_type IS '运行类型: today=当日, single=指定单日, backfill=周期回溯';
+COMMENT ON COLUMN dag_run_log.backfill_id IS '回溯批次ID，同一次回溯操作共享';
+
+CREATE INDEX idx_dag_run_dag_id ON dag_run_log(dag_id);
+CREATE INDEX idx_dag_run_status ON dag_run_log(status);
+CREATE INDEX idx_dag_run_created ON dag_run_log(created_at DESC);
+CREATE INDEX idx_dag_run_type ON dag_run_log(run_type);
+CREATE INDEX idx_dag_run_backfill ON dag_run_log(backfill_id);
+
+-- DAG 任务执行日志
+CREATE TABLE IF NOT EXISTS dag_task_log (
+    id SERIAL PRIMARY KEY,
+    run_id VARCHAR(200) NOT NULL,
+    task_id VARCHAR(100) NOT NULL,
+    task_type VARCHAR(20) NOT NULL,
+    status VARCHAR(20) DEFAULT 'pending',
+    started_at TIMESTAMP,
+    finished_at TIMESTAMP,
+    rows_affected INTEGER DEFAULT 0,
+    error_message TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_dag_task_run_id ON dag_task_log(run_id);
+CREATE INDEX idx_dag_task_status ON dag_task_log(status);
+
+-- ==================== 因子系统表 ====================
+
+-- 因子元数据
+CREATE TABLE IF NOT EXISTS factor_metadata (
+    factor_id VARCHAR(100) PRIMARY KEY,
+    description TEXT,
+    category VARCHAR(50),
+    compute_mode VARCHAR(20) DEFAULT 'incremental',
+    storage_target VARCHAR(100) DEFAULT 'factor_values',
+    params JSONB,
+    last_computed_date VARCHAR(8),
+    last_computed_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 因子值主表（按月分区）
+CREATE TABLE IF NOT EXISTS factor_values (
+    ts_code VARCHAR(20) NOT NULL,
+    trade_date VARCHAR(8) NOT NULL,
+    factor_id VARCHAR(100) NOT NULL,
+    factor_value DOUBLE PRECISION,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (ts_code, trade_date, factor_id)
+) PARTITION BY RANGE (trade_date);
+
+CREATE INDEX idx_fv_factor_date ON factor_values(factor_id, trade_date);
+CREATE INDEX idx_fv_code_date ON factor_values(ts_code, trade_date);
+
+-- 因子分析结果
+CREATE TABLE IF NOT EXISTS factor_analysis (
+    id SERIAL PRIMARY KEY,
+    factor_id VARCHAR(100) NOT NULL,
+    analysis_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    start_date VARCHAR(8),
+    end_date VARCHAR(8),
+    periods JSONB,
+    ic_mean DOUBLE PRECISION,
+    ic_std DOUBLE PRECISION,
+    rank_ic_mean DOUBLE PRECISION,
+    rank_ic_std DOUBLE PRECISION,
+    ic_ir DOUBLE PRECISION,
+    turnover_mean DOUBLE PRECISION,
+    quantile_returns JSONB,
+    ic_series JSONB
+);
+
+CREATE INDEX idx_fa_factor_id ON factor_analysis(factor_id);
+CREATE INDEX idx_fa_date ON factor_analysis(analysis_date DESC);
+
+-- 因子生产运行记录
+CREATE TABLE IF NOT EXISTS production_task_run (
+    id SERIAL PRIMARY KEY,
+    factor_id VARCHAR(100) NOT NULL,
+    mode VARCHAR(20),
+    status VARCHAR(20) DEFAULT 'running',
+    start_date VARCHAR(8),
+    end_date VARCHAR(8),
+    rows_affected INTEGER DEFAULT 0,
+    duration_seconds DOUBLE PRECISION,
+    error_message TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_ptr_factor_id ON production_task_run(factor_id);
+CREATE INDEX idx_ptr_created ON production_task_run(created_at DESC);
 
 -- 创建股票基础信息表
 CREATE TABLE IF NOT EXISTS stock_basic (

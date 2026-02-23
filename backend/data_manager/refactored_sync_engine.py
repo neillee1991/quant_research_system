@@ -50,7 +50,7 @@ class RefactoredSyncEngine:
 
         # 初始化 API 客户端
         self.api_client = TushareAPIClient(
-            token=settings.TUSHARE_TOKEN,
+            token=settings.collector.tushare_token,
             rate_limiter=self.rate_limiter,
             retry_policy=self.retry_policy
         )
@@ -111,18 +111,27 @@ class RefactoredSyncEngine:
         """获取任务状态"""
         try:
             task = self.config_manager.get_task(task_id)
-            last_sync_date = self.log_manager.get_last_sync_date(task_id)
+            sync_info = self.log_manager.get_last_sync_info(task_id)
 
-            return {
+            status = {
                 "task_id": task_id,
                 "description": task.get("description", ""),
                 "enabled": task.get("enabled", True),
                 "sync_type": task.get("sync_type", ""),
                 "schedule": task.get("schedule", ""),
-                "last_sync_date": last_sync_date,
                 "table_name": task.get("table_name", ""),
                 "date_field": task.get("date_field", "trade_date")
             }
+
+            # 添加同步信息
+            if sync_info:
+                status["last_sync_date"] = sync_info.get("last_date")  # 最新数据日期
+                status["last_sync_time"] = sync_info.get("updated_at")  # 实际同步时间
+            else:
+                status["last_sync_date"] = None
+                status["last_sync_time"] = None
+
+            return status
         except Exception as e:
             logger.error(f"Failed to get task status: {e}")
             return {"error": str(e)}

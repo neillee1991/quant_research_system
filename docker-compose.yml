@@ -1,18 +1,21 @@
-version: '3.8'
-
 services:
   postgres:
     image: postgres:16-alpine
     container_name: quant_postgres
+    # ExFAT 卷上 macOS 会自动生成 ._ 元数据文件，导致 PG 启动失败
+    # 用 root 清理后再以 postgres 用户启动
+    user: root
+    command: >
+      sh -c "find /var/lib/postgresql/data -name '._*' -exec rm -f {} + 2>/dev/null; exec su-exec postgres docker-entrypoint.sh postgres"
     environment:
       POSTGRES_DB: quant_research
       POSTGRES_USER: quant_user
-      POSTGRES_PASSWORD: quant_pass_2024
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-quant_pass_2024}
       POSTGRES_INITDB_ARGS: "-E UTF8 --locale=C"
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - /Volumes/QuantData/postgresql:/var/lib/postgresql/data
       - ./backend/database/init.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U quant_user -d quant_research"]
@@ -38,8 +41,8 @@ services:
   #     - postgres
   #   restart: unless-stopped
 
-volumes:
-  postgres_data:
-    driver: local
+# volumes:
+#   postgres_data:
+#     driver: local
   # pgadmin_data:
   #   driver: local

@@ -1,28 +1,34 @@
 """
 Tushare Schema 生成工具
 
-用于快速生成 sync_config.json 中的 schema 定义
+用于快速生成 sync_config.json 中的 schema 定义。
+从 Tushare API 采样数据推断列类型，输出 JSON 格式的 schema。
+
+使用方式：
+    export TUSHARE_TOKEN=your_token_here
+    python -m data_manager.schema_generator
 """
 
+import os
 import tushare as ts
 import pandas as pd
 from typing import Dict, Any
 
 
-# Pandas dtype 到 DuckDB 类型的映射
+# Pandas dtype 到 PostgreSQL 类型的映射
 DTYPE_MAPPING = {
     'int64': 'BIGINT',
     'int32': 'INTEGER',
-    'float64': 'DOUBLE',
-    'float32': 'FLOAT',
+    'float64': 'DOUBLE PRECISION',
+    'float32': 'REAL',
     'object': 'VARCHAR',
     'bool': 'BOOLEAN',
     'datetime64[ns]': 'TIMESTAMP',
 }
 
 
-def infer_duckdb_type(pandas_dtype: str) -> str:
-    """推断 DuckDB 类型"""
+def infer_pg_type(pandas_dtype: str) -> str:
+    """推断 PostgreSQL 列类型"""
     dtype_str = str(pandas_dtype)
     return DTYPE_MAPPING.get(dtype_str, 'VARCHAR')
 
@@ -62,7 +68,7 @@ def generate_schema_from_api(api_name: str, token: str, sample_params: Dict[str,
     schema = {}
     for col in df.columns:
         dtype = df[col].dtype
-        duckdb_type = infer_duckdb_type(dtype)
+        duckdb_type = infer_pg_type(dtype)
 
         # 检查是否有空值
         has_null = df[col].isnull().any()
@@ -70,7 +76,7 @@ def generate_schema_from_api(api_name: str, token: str, sample_params: Dict[str,
         schema[col] = {
             "type": duckdb_type,
             "nullable": bool(has_null),
-            "comment": f"{col}"  # 可以手动补充中文注释
+            "comment": col
         }
 
     return schema
@@ -84,10 +90,11 @@ def print_schema_json(schema: Dict[str, Dict], indent: int = 2):
 
 # 使用示例
 if __name__ == "__main__":
-    # 需要设置你的 Tushare token
-    TOKEN = "your_tushare_token_here"
+    TOKEN = os.environ.get("TUSHARE_TOKEN", "")
+    if not TOKEN:
+        print("请设置环境变量 TUSHARE_TOKEN 后再运行")
+        exit(1)
 
-    # 示例1: 生成 daily 接口的 schema
     print("=== daily 接口 schema ===")
     schema = generate_schema_from_api(
         api_name="daily",

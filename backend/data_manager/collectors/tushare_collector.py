@@ -11,9 +11,9 @@ class TushareCollector:
     """Tushare data collector with rate-limit handling."""
 
     def __init__(self):
-        if not settings.TUSHARE_TOKEN:
-            raise ValueError("TUSHARE_TOKEN is not set in .env")
-        ts.set_token(settings.TUSHARE_TOKEN)
+        if not settings.collector.tushare_token:
+            raise ValueError("TUSHARE_TOKEN 未设置，请在 .env 文件中配置")
+        ts.set_token(settings.collector.tushare_token)
         self.pro = ts.pro_api()
         self._call_interval = 0.4  # seconds between API calls
 

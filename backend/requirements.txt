@@ -10,9 +10,6 @@ psycopg2-binary>=2.9.9
 SQLAlchemy>=2.0.0
 pyarrow>=16.0.0
 
-# DuckDB (已废弃，保留用于数据迁移)
-# duckdb>=1.4.0
-
 # Data Sources
 tushare>=1.4.19
 akshare>=1.16.72
@@ -24,6 +21,7 @@ numpy>=1.26.0,<2.1.0
 
 # Quantitative
 vectorbt>=0.26.0
+alphalens-reloaded>=0.4.3
 
 # Machine Learning
 pycaret>=3.3.0

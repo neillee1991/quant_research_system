@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
   Table,
   Button,
@@ -16,6 +16,11 @@ import {
   Row,
   Col,
   Collapse,
+  Form,
+  Popconfirm,
+  DatePicker,
+  Radio,
+  Progress,
 } from 'antd';
 import {
   SyncOutlined,
@@ -27,8 +32,13 @@ import {
   DeleteOutlined,
   ClockCircleOutlined,
   CalendarOutlined,
+  ApartmentOutlined,
+  HistoryOutlined,
+  PlusOutlined,
 } from '@ant-design/icons';
-import { dataApi } from '../api';
+import ReactECharts from 'echarts-for-react';
+import dayjs from 'dayjs';
+import { dataApi, productionApi } from '../api';
 import TradingViewChart from '../components/Charts/TradingViewChart';
 
 const { Search, TextArea } = Input;
@@ -51,6 +61,7 @@ interface TaskStatus {
   sync_type: string;
   schedule: string;
   last_sync_date: string | null;
+  last_sync_time: string | null;
   table_name: string;
   table_latest_date?: string | null;
 }
@@ -72,6 +83,478 @@ interface TableInfo {
   column_count: number;
   columns: string[];
 }
+
+// ==================== DAG 管理 Section ====================
+const DAGManageSection: React.FC = () => {
+  const [dags, setDags] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [runLoading, setRunLoading] = useState<string | null>(null);
+  const [historyModal, setHistoryModal] = useState<{ visible: boolean; dagId: string; data: any[]; filter: string }>({ visible: false, dagId: '', data: [], filter: '' });
+  const [backfillDetail, setBackfillDetail] = useState<Record<string, any[]>>({});
+  const [createModal, setCreateModal] = useState(false);
+  const [editModal, setEditModal] = useState<{ visible: boolean; dag: any }>({ visible: false, dag: null });
+  const [runModal, setRunModal] = useState<{ visible: boolean; dagId: string }>({ visible: false, dagId: '' });
+  const [runMode, setRunMode] = useState<'today' | 'date' | 'range'>('today');
+  const [runDate, setRunDate] = useState<dayjs.Dayjs | null>(null);
+  const [runRange, setRunRange] = useState<[dayjs.Dayjs | null, dayjs.Dayjs | null]>([null, null]);
+  const [backfillProgress, setBackfillProgress] = useState<{ visible: boolean; data: any } | null>(null);
+  const [form] = Form.useForm();
+  const [editForm] = Form.useForm();
+
+  const loadDags = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await productionApi.listDags();
+      setDags(res.data?.dags || res.data?.data || []);
+    } catch { message.error('加载 DAG 列表失败'); }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { loadDags(); }, [loadDags]);
+
+  const openRunModal = (dagId: string) => {
+    setRunMode('today');
+    setRunDate(null);
+    setRunRange([null, null]);
+    setRunModal({ visible: true, dagId });
+  };
+
+  const handleRunDag = async () => {
+    const dagId = runModal.dagId;
+    let params: any = {};
+
+    if (runMode === 'date') {
+      if (!runDate) { message.warning('请选择执行日期'); return; }
+      params.target_date = runDate.format('YYYY-MM-DD');
+      params.run_type = 'single';
+    } else if (runMode === 'range') {
+      if (!runRange[0] || !runRange[1]) { message.warning('请选择日期范围'); return; }
+      params.start_date = runRange[0].format('YYYY-MM-DD');
+      params.end_date = runRange[1].format('YYYY-MM-DD');
+      params.run_type = 'backfill';
+    } else {
+      params.run_type = 'today';
+    }
+
+    setRunModal({ visible: false, dagId: '' });
+    setRunLoading(dagId);
+    try {
+      const res = await productionApi.runDag(dagId, Object.keys(params).length ? params : undefined);
+      const data = res.data?.data || res.data;
+
+      // 回溯模式
+      if (data?.mode === 'backfill') {
+        setBackfillProgress({ visible: true, data });
+        loadDags();
+        setRunLoading(null);
+        return;
+      }
+
+      // 单日模式
+      const dagStatus = data?.status || 'unknown';
+      const summary = data?.summary || '';
+      const failedTasks: any[] = data?.failed_tasks || [];
+
+      if (dagStatus === 'success') {
+        message.success(`DAG ${dagId} 执行成功${summary ? ` (${summary})` : ''}`);
+      } else {
+        Modal.warning({
+          title: `DAG ${dagId} 执行完成 - ${dagStatus}`,
+          width: 520,
+          content: (
+            <div>
+              <p>{summary}</p>
+              {failedTasks.length > 0 && (
+                <div style={{ marginTop: 8 }}>
+                  <p style={{ fontWeight: 600, marginBottom: 4 }}>失败任务:</p>
+                  {failedTasks.map((t: any) => (
+                    <div key={t.task_id} style={{ marginBottom: 4, padding: '4px 8px', background: '#1e293b', borderRadius: 4, fontSize: 12 }}>
+                      <Tag color={t.status === 'failed' ? 'red' : 'orange'}>{t.task_id}</Tag>
+                      <span style={{ color: '#f87171' }}>{t.error_message || '无详细信息'}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ),
+        });
+      }
+      loadDags();
+    } catch (e: any) {
+      message.error(e.response?.data?.detail || 'DAG 执行失败');
+    }
+    setRunLoading(null);
+  };
+
+  const showHistory = async (dagId: string, runType?: string) => {
+    try {
+      const res = await productionApi.getDagHistory(dagId, 20, runType || undefined);
+      setHistoryModal({ visible: true, dagId, data: res.data?.runs || res.data?.data || [], filter: runType || '' });
+      setBackfillDetail({});
+    } catch { message.error('加载历史失败'); }
+  };
+
+  const loadBackfillDetail = async (backfillId: string) => {
+    if (backfillDetail[backfillId]) return;
+    try {
+      const res = await productionApi.getBackfillDetail(backfillId);
+      const runs = res.data?.data?.runs || res.data?.runs || [];
+      setBackfillDetail(prev => ({ ...prev, [backfillId]: runs }));
+    } catch { message.error('加载回溯详情失败'); }
+  };
+
+  const handleCreate = async () => {
+    try {
+      const values = await form.validateFields();
+      const tasks = values.tasks_json ? JSON.parse(values.tasks_json) : [];
+      await productionApi.createDag({ dag_id: values.dag_id, description: values.description, schedule: values.schedule, tasks });
+      message.success(`DAG ${values.dag_id} 创建成功`);
+      setCreateModal(false);
+      form.resetFields();
+      loadDags();
+    } catch (e: any) {
+      if (e.response) message.error(e.response?.data?.detail || '创建失败');
+      else if (e instanceof SyntaxError) message.error('任务 JSON 格式错误');
+    }
+  };
+
+  const handleEdit = async () => {
+    try {
+      const values = await editForm.validateFields();
+      const tasks = values.tasks_json ? JSON.parse(values.tasks_json) : undefined;
+      await productionApi.updateDag(editModal.dag.dag_id, { description: values.description, schedule: values.schedule, tasks });
+      message.success('DAG 更新成功');
+      setEditModal({ visible: false, dag: null });
+      loadDags();
+    } catch (e: any) {
+      if (e.response) message.error(e.response?.data?.detail || '更新失败');
+      else if (e instanceof SyntaxError) message.error('任务 JSON 格式错误');
+    }
+  };
+
+  const handleDelete = async (dagId: string) => {
+    try {
+      await productionApi.deleteDag(dagId);
+      message.success(`DAG ${dagId} 已删除`);
+      loadDags();
+    } catch (e: any) {
+      message.error(e.response?.data?.detail || '删除失败');
+    }
+  };
+
+  const openEdit = (record: any) => {
+    editForm.setFieldsValue({
+      description: record.description,
+      schedule: record.schedule || '',
+      tasks_json: JSON.stringify(record.tasks || [], null, 2),
+    });
+    setEditModal({ visible: true, dag: record });
+  };
+
+  const dagColumns = [
+    { title: 'DAG ID', dataIndex: 'dag_id', key: 'dag_id', render: (v: string) => <Tag color="purple">{v}</Tag> },
+    { title: '描述', dataIndex: 'description', key: 'desc' },
+    { title: '调度', dataIndex: 'schedule', key: 'schedule', render: (v: string) => v ? <Tag color="cyan">{v}</Tag> : <Tag>手动</Tag> },
+    { title: '任务数', dataIndex: 'tasks', key: 'tasks', render: (v: any[]) => v?.length || 0 },
+    { title: '最近成功', dataIndex: 'last_success', key: 'last_success', render: (v: string) => v ? <span style={{ color: '#4ade80', fontSize: 12 }}>{v.slice(0, 19)}</span> : <span style={{ color: '#64748b' }}>-</span> },
+    {
+      title: '操作', key: 'action', width: 280, render: (_: any, record: any) => (
+        <Space size={4}>
+          <Button size="small" type="primary" icon={<PlayCircleOutlined />}
+            loading={runLoading === record.dag_id}
+            onClick={() => openRunModal(record.dag_id)}>执行</Button>
+          <Button size="small" icon={<HistoryOutlined />}
+            onClick={() => showHistory(record.dag_id)}>历史</Button>
+          <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(record)} />
+          <Popconfirm title="确认删除此 DAG?" onConfirm={() => handleDelete(record.dag_id)}>
+            <Button size="small" danger icon={<DeleteOutlined />} />
+          </Popconfirm>
+        </Space>
+      )
+    },
+  ];
+
+  const runTypeLabel: Record<string, { text: string; color: string }> = {
+    today: { text: '今日', color: 'blue' },
+    single: { text: '指定日期', color: 'cyan' },
+    backfill: { text: '回溯', color: 'purple' },
+  };
+
+  const historyColumns = [
+    { title: '运行ID', dataIndex: 'run_id', key: 'run_id', width: 100, render: (v: string) => <Tooltip title={v}><span>{v?.slice(0, 8)}...</span></Tooltip> },
+    { title: '类型', dataIndex: 'run_type', key: 'run_type', width: 80, render: (v: string) => {
+      const info = runTypeLabel[v] || { text: v || '-', color: 'default' };
+      return <Tag color={info.color}>{info.text}</Tag>;
+    }},
+    { title: '目标日期', dataIndex: 'target_date', key: 'target_date', width: 110, render: (v: string) => v || '-' },
+    { title: '状态', dataIndex: 'status', key: 'status', width: 80, render: (v: string) => <Tag color={v === 'success' ? 'green' : v === 'running' ? 'blue' : 'red'}>{v}</Tag> },
+    { title: '开始时间', dataIndex: 'started_at', key: 'start', width: 160, render: (v: string) => v?.slice(0, 19) },
+    { title: '结束时间', dataIndex: 'finished_at', key: 'end', width: 160, render: (v: string) => v?.slice(0, 19) || '-' },
+    { title: '任务详情', dataIndex: 'task_results', key: 'tasks', render: (v: any) => {
+      if (!v) return '-';
+      const tasks = typeof v === 'string' ? JSON.parse(v) : v;
+      if (Array.isArray(tasks)) {
+        return <Space wrap>{tasks.map((t: any) => (
+          <Tooltip key={t.task_id} title={t.error_message || (t.status === 'success' ? '成功' : t.status)}>
+            <Tag color={t.status === 'success' ? 'green' : t.status === 'skipped' ? 'orange' : 'red'}>{t.task_id}</Tag>
+          </Tooltip>
+        ))}</Space>;
+      }
+      return <Space wrap>{Object.entries(tasks).map(([k, s]: any) => <Tag key={k} color={s === 'success' ? 'green' : 'red'}>{k}</Tag>)}</Space>;
+    }},
+  ];
+
+  const backfillSubColumns = [
+    { title: '目标日期', dataIndex: 'target_date', key: 'date', width: 120 },
+    { title: '状态', dataIndex: 'status', key: 'status', width: 80, render: (v: string) => <Tag color={v === 'success' ? 'green' : v === 'running' ? 'blue' : 'red'}>{v}</Tag> },
+    { title: '开始', dataIndex: 'started_at', key: 'start', width: 160, render: (v: string) => v?.slice(0, 19) },
+    { title: '结束', dataIndex: 'finished_at', key: 'end', width: 160, render: (v: string) => v?.slice(0, 19) || '-' },
+    { title: '任务', dataIndex: 'task_results', key: 'tasks', render: (v: any) => {
+      if (!v) return '-';
+      const tasks = typeof v === 'string' ? JSON.parse(v) : v;
+      if (Array.isArray(tasks)) {
+        return <Space wrap size={2}>{tasks.map((t: any) => (
+          <Tooltip key={t.task_id} title={t.error_message || t.status}>
+            <Tag color={t.status === 'success' ? 'green' : t.status === 'skipped' ? 'orange' : 'red'} style={{ fontSize: 11 }}>{t.task_id}</Tag>
+          </Tooltip>
+        ))}</Space>;
+      }
+      return '-';
+    }},
+  ];
+
+  return (
+    <div>
+      <Card className="tech-card" style={{ marginBottom: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <span style={{ color: '#7c3aed', fontWeight: 600, fontSize: 15 }}>🔗 DAG 列表</span>
+          <Space>
+            <Button size="small" icon={<PlusOutlined />} onClick={() => setCreateModal(true)}>新建 DAG</Button>
+            <Button icon={<ReloadOutlined />} onClick={loadDags} size="small">刷新</Button>
+          </Space>
+        </div>
+        <Table dataSource={dags} columns={dagColumns} rowKey="dag_id"
+          loading={loading} size="small" pagination={false} className="tech-table"
+          expandable={{
+            expandedRowRender: (record) => {
+              const tasks: any[] = record.tasks || [];
+              if (!tasks.length) return <span style={{ color: '#94a3b8', fontSize: 12 }}>暂无任务</span>;
+
+              // 拓扑分层：计算每个节点的层级
+              const depMap: Record<string, string[]> = {};
+              tasks.forEach(t => { depMap[t.task_id] = t.depends_on || []; });
+              const layerOf: Record<string, number> = {};
+              const calcLayer = (id: string, visited: Set<string> = new Set()): number => {
+                if (layerOf[id] !== undefined) return layerOf[id];
+                if (visited.has(id)) return 0;
+                visited.add(id);
+                const deps = depMap[id] || [];
+                const layer = deps.length === 0 ? 0 : Math.max(...deps.map(d => calcLayer(d, visited))) + 1;
+                layerOf[id] = layer;
+                return layer;
+              };
+              tasks.forEach(t => calcLayer(t.task_id));
+
+              // 同层节点垂直排列
+              const layerGroups: Record<number, string[]> = {};
+              Object.entries(layerOf).forEach(([id, l]) => {
+                if (!layerGroups[l]) layerGroups[l] = [];
+                layerGroups[l].push(id);
+              });
+              const maxLayer = Math.max(...Object.values(layerOf), 0);
+              const xGap = 180;
+              const yGap = 60;
+
+              const nodes = tasks.map(t => {
+                const layer = layerOf[t.task_id] || 0;
+                const siblings = layerGroups[layer] || [t.task_id];
+                const idx = siblings.indexOf(t.task_id);
+                const yOffset = (idx - (siblings.length - 1) / 2) * yGap;
+                return {
+                  name: t.task_id,
+                  x: layer * xGap,
+                  y: yOffset,
+                  symbolSize: 40,
+                  label: { show: true, fontSize: 11, color: '#e2e8f0', formatter: (p: any) => p.name.length > 10 ? p.name.slice(0, 10) + '..' : p.name },
+                  itemStyle: {
+                    color: (t.depends_on?.length ? '#7c3aed' : '#00d4ff'),
+                    borderColor: '#1e293b', borderWidth: 2,
+                  },
+                  tooltip: { formatter: `${t.task_id}<br/>Action: ${t.action || '-'}<br/>依赖: ${t.depends_on?.join(', ') || '无'}` },
+                };
+              });
+
+              const edges = tasks.flatMap(t =>
+                (t.depends_on || []).map((dep: string) => ({
+                  source: dep, target: t.task_id,
+                  lineStyle: { color: '#475569', width: 2, curveness: 0.1 },
+                }))
+              );
+
+              const chartH = Math.max(120, Object.values(layerGroups).reduce((m, g) => Math.max(m, g.length), 0) * yGap + 40);
+
+              const option = {
+                backgroundColor: 'transparent',
+                tooltip: { trigger: 'item' as const },
+                series: [{
+                  type: 'graph',
+                  layout: 'none',
+                  roam: false,
+                  edgeSymbol: ['none', 'arrow'],
+                  edgeSymbolSize: [0, 8],
+                  data: nodes,
+                  links: edges,
+                  lineStyle: { opacity: 0.8 },
+                  emphasis: { focus: 'adjacency' as const, lineStyle: { width: 3 } },
+                }],
+              };
+
+              return (
+                <div style={{ padding: '8px 0' }}>
+                  <span style={{ color: '#94a3b8', fontSize: 12, marginBottom: 4, display: 'block' }}>
+                    📊 任务依赖图 ({tasks.length} 个任务, {maxLayer + 1} 层)
+                  </span>
+                  <ReactECharts option={option} style={{ height: chartH, width: Math.max(300, (maxLayer + 1) * xGap + 80) }} />
+                </div>
+              );
+            }
+          }}
+        />
+      </Card>
+
+      {/* 运行历史 Modal */}
+      <Modal title={`DAG 运行历史 - ${historyModal.dagId}`} open={historyModal.visible}
+        onCancel={() => setHistoryModal({ visible: false, dagId: '', data: [], filter: '' })}
+        footer={null} width={960}>
+        <div style={{ marginBottom: 12 }}>
+          <Radio.Group value={historyModal.filter} onChange={e => showHistory(historyModal.dagId, e.target.value)} size="small">
+            <Radio.Button value="">全部</Radio.Button>
+            <Radio.Button value="today">今日执行</Radio.Button>
+            <Radio.Button value="single">指定日期</Radio.Button>
+            <Radio.Button value="backfill">回溯</Radio.Button>
+          </Radio.Group>
+        </div>
+        <Table dataSource={historyModal.data} columns={historyColumns}
+          rowKey="run_id" size="small" pagination={{ pageSize: 10 }}
+          expandable={{
+            rowExpandable: (record: any) => record.run_type === 'backfill' && !!record.backfill_id,
+            onExpand: (expanded: boolean, record: any) => {
+              if (expanded && record.backfill_id) loadBackfillDetail(record.backfill_id);
+            },
+            expandedRowRender: (record: any) => {
+              const runs = backfillDetail[record.backfill_id];
+              if (!runs) return <span style={{ color: '#94a3b8', fontSize: 12 }}>加载中...</span>;
+              return (
+                <div style={{ padding: '4px 0' }}>
+                  <span style={{ color: '#94a3b8', fontSize: 12, marginBottom: 4, display: 'block' }}>
+                    回溯详情 ({runs.length} 天)
+                  </span>
+                  <Table dataSource={runs} columns={backfillSubColumns}
+                    rowKey="run_id" size="small" pagination={false}
+                    style={{ background: 'rgba(0,0,0,0.15)' }} />
+                </div>
+              );
+            },
+          }}
+        />
+      </Modal>
+
+      {/* 新建 DAG Modal */}
+      <Modal title="新建 DAG" open={createModal} onOk={handleCreate}
+        onCancel={() => { setCreateModal(false); form.resetFields(); }} okText="创建" width={600}>
+        <Form form={form} layout="vertical" size="small">
+          <Form.Item name="dag_id" label="DAG ID" rules={[{ required: true, message: '请输入 DAG ID' }]}>
+            <Input placeholder="如 daily_update" />
+          </Form.Item>
+          <Form.Item name="description" label="描述"><Input placeholder="DAG 描述" /></Form.Item>
+          <Form.Item name="schedule" label="调度 (Cron)"><Input placeholder="如 0 2 * * * (留空为手动)" /></Form.Item>
+          <Form.Item name="tasks_json" label="任务列表 (JSON)" initialValue="[]">
+            <Input.TextArea rows={6} placeholder='[{"task_id": "sync", "action": "sync_all", "depends_on": []}]'
+              style={{ fontFamily: 'Fira Code, Courier New, monospace', fontSize: 12 }} />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* 编辑 DAG Modal */}
+      <Modal title={`编辑 DAG: ${editModal.dag?.dag_id || ''}`} open={editModal.visible}
+        onOk={handleEdit} onCancel={() => setEditModal({ visible: false, dag: null })} okText="保存" width={600}>
+        <Form form={editForm} layout="vertical" size="small">
+          <Form.Item name="description" label="描述"><Input /></Form.Item>
+          <Form.Item name="schedule" label="调度 (Cron)"><Input placeholder="留空为手动" /></Form.Item>
+          <Form.Item name="tasks_json" label="任务列表 (JSON)">
+            <Input.TextArea rows={8}
+              style={{ fontFamily: 'Fira Code, Courier New, monospace', fontSize: 12 }} />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* DAG 执行模态框 */}
+      <Modal title={`执行 DAG: ${runModal.dagId}`} open={runModal.visible}
+        onOk={handleRunDag} onCancel={() => setRunModal({ visible: false, dagId: '' })}
+        okText="开始执行" width={480}>
+        <div style={{ marginBottom: 16 }}>
+          <Radio.Group value={runMode} onChange={e => setRunMode(e.target.value)}>
+            <Radio.Button value="today">今天</Radio.Button>
+            <Radio.Button value="date">指定日期</Radio.Button>
+            <Radio.Button value="range">日期范围回溯</Radio.Button>
+          </Radio.Group>
+        </div>
+        {runMode === 'date' && (
+          <DatePicker style={{ width: '100%' }} value={runDate}
+            onChange={v => setRunDate(v)} placeholder="选择执行日期" />
+        )}
+        {runMode === 'range' && (
+          <DatePicker.RangePicker style={{ width: '100%' }}
+            value={runRange as any}
+            onChange={v => setRunRange(v ? [v[0], v[1]] : [null, null])}
+            placeholder={['开始日期', '结束日期']} />
+        )}
+        {runMode === 'range' && runRange[0] && runRange[1] && (
+          <div style={{ marginTop: 8, color: '#94a3b8', fontSize: 12 }}>
+            将按交易日逐日执行，共约 {Math.ceil(runRange[1].diff(runRange[0], 'day') * 5 / 7)} 个交易日
+          </div>
+        )}
+      </Modal>
+
+      {/* 回溯结果模态框 */}
+      <Modal title="回溯执行结果" open={!!backfillProgress?.visible}
+        onCancel={() => setBackfillProgress(null)} footer={null} width={560}>
+        {backfillProgress?.data && (() => {
+          const d = backfillProgress.data;
+          const total = d.total_days || 0;
+          const success = d.success_days || 0;
+          const failed = d.failed_days || 0;
+          const pct = total > 0 ? Math.round((success / total) * 100) : 0;
+          return (
+            <div>
+              <div style={{ marginBottom: 12 }}>
+                <Tag color="blue">{d.start_date}</Tag> → <Tag color="blue">{d.end_date}</Tag>
+                <span style={{ marginLeft: 8, color: '#94a3b8' }}>共 {total} 天</span>
+              </div>
+              <Progress percent={pct} status={failed > 0 ? 'exception' : 'success'}
+                format={() => `${success}/${total} 成功`} />
+              <div style={{ marginTop: 12, display: 'flex', gap: 16 }}>
+                <Tag color="green">成功: {success}</Tag>
+                <Tag color="red">失败: {failed}</Tag>
+              </div>
+              {d.details && d.details.length > 0 && (
+                <div style={{ marginTop: 12, maxHeight: 300, overflow: 'auto' }}>
+                  <Table size="small" dataSource={d.details} rowKey="date" pagination={false}
+                    columns={[
+                      { title: '日期', dataIndex: 'date', key: 'date', width: 120 },
+                      { title: '状态', dataIndex: 'status', key: 'status', width: 80,
+                        render: (v: string) => <Tag color={v === 'success' ? 'green' : 'red'}>{v}</Tag> },
+                      { title: '详情', dataIndex: 'summary', key: 'summary', ellipsis: true },
+                    ]} />
+                </div>
+              )}
+            </div>
+          );
+        })()}
+      </Modal>
+    </div>
+  );
+};
 
 const DataCenter: React.FC = () => {
   // 原有状态
@@ -693,11 +1176,11 @@ const DataCenter: React.FC = () => {
                           >
                             {task.enabled ? '启用' : '禁用'}
                           </Tag>
-                          {status?.last_sync_date && (
-                            <Tooltip title="上次同步时间">
+                          {status?.last_sync_time && (
+                            <Tooltip title="上次同步时间（系统拉取数据的实际时间）">
                               <Space size={4} style={{ color: '#94a3b8', fontSize: '12px' }}>
                                 <ClockCircleOutlined />
-                                <span>{status.last_sync_date}</span>
+                                <span>{status.last_sync_time}</span>
                               </Space>
                             </Tooltip>
                           )}
@@ -1050,9 +1533,11 @@ const DataCenter: React.FC = () => {
             </Space>
           </Card>
         </TabPane>
-      </Tabs>
 
-      {/* Sync Parameter Modal */}
+        <TabPane tab={<span><ApartmentOutlined /> DAG 管理</span>} key="5">
+          <DAGManageSection />
+        </TabPane>
+      </Tabs>
       <Modal
         title={`同步任务: ${syncModalTask?.task_id || ''}`}
         open={syncModalVisible}

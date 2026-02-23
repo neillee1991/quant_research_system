@@ -90,6 +90,25 @@ class SyncLogManager:
             logger.warning(f"Failed to get last sync date for {task_id}: {e}")
         return None
 
+    def get_last_sync_info(self, task_id: str) -> Optional[dict]:
+        """获取最后同步信息（包含同步时间和数据日期）"""
+        try:
+            sql = """
+                SELECT last_date, updated_at
+                FROM sync_log
+                WHERE source = %s AND data_type = %s
+                LIMIT 1
+            """
+            result = self.repository.query(sql, params=("tushare_config", task_id))
+            if not result.is_empty():
+                return {
+                    "last_date": result["last_date"][0],
+                    "updated_at": result["updated_at"][0].strftime("%Y-%m-%d %H:%M:%S") if result["updated_at"][0] else None
+                }
+        except Exception as e:
+            logger.warning(f"Failed to get last sync info for {task_id}: {e}")
+        return None
+
     def update_sync_log(self, task_id: str, sync_date: str, rows_synced: int = 0) -> None:
         """更新同步日志（同时记录历史）"""
         try:
@@ -323,15 +342,19 @@ class SyncTaskExecutor(ISyncTaskExecutor):
 
         # 确定日期范围
         if target_date is None:
+            # 当没有指定 target_date 时，只同步最新一天
             last_date = self.log_manager.get_last_sync_date(task_id)
-            start_date = (
-                DateUtils.add_days(last_date, 1)
-                if last_date
-                else DEFAULT_START_DATE
-            )
+            if last_date:
+                # 如果有上次同步日期，从下一天开始同步到今天
+                start_date = DateUtils.add_days(last_date, 1)
+            else:
+                # 如果没有上次同步日期，只同步今天（不同步历史数据）
+                start_date = DateUtils.today()
+
             # 如果指定了 end_date，使用它；否则使用今天
             target_date = end_date if end_date else DateUtils.today()
         else:
+            # 如果指定了 target_date，使用它作为开始日期
             start_date = target_date
             # 如果指定了 end_date，使用它；否则使用 target_date
             target_date = end_date if end_date else target_date

@@ -240,6 +240,51 @@ class PostgreSQLClient:
         """插入或更新日线数据（兼容旧接口）"""
         self.upsert("daily_data", df, ["trade_date", "ts_code"])
 
+    def bulk_copy(self, table_name: str, df: pl.DataFrame, columns: List[str] = None) -> int:
+        """
+        使用 PostgreSQL COPY 协议批量写入数据（比 execute_values 快 2-5x）
+
+        Args:
+            table_name: 目标表名
+            df: Polars DataFrame
+            columns: 列名列表，默认使用 DataFrame 的列名
+
+        Returns:
+            写入的行数
+        """
+        import io
+
+        if df.is_empty():
+            return 0
+
+        cols = columns or df.columns
+        rows = len(df)
+
+        try:
+            # 转为 CSV 格式的字符串缓冲区
+            buffer = io.StringIO()
+            for row in df.select(cols).iter_rows():
+                line = '\t'.join(
+                    '' if v is None else str(v)
+                    for v in row
+                )
+                buffer.write(line + '\n')
+            buffer.seek(0)
+
+            col_list = ', '.join(cols)
+            with self.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.copy_expert(
+                        f"COPY {table_name} ({col_list}) FROM STDIN WITH (FORMAT text, NULL '')",
+                        buffer
+                    )
+
+            logger.info(f"Bulk copied {rows} rows into {table_name}")
+            return rows
+        except Exception as e:
+            logger.error(f"Bulk copy failed for {table_name}: {e}")
+            raise
+
     def get_last_sync_date(self, source: str, data_type: str) -> Optional[str]:
         """获取最后同步日期"""
         sql = """

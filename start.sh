@@ -94,6 +94,14 @@ start_database() {
     echo -e "${BLUE}[2/5] 启动 PostgreSQL 数据库...${NC}"
 
     cd "$SCRIPT_DIR"
+
+    # 清理 macOS 在 ExFAT 卷上生成的 ._ 文件，避免 PostgreSQL 启动失败
+    PG_DATA_DIR="/Volumes/QuantData/postgresql"
+    if [ -d "$PG_DATA_DIR" ]; then
+        echo -e "${YELLOW}清理 macOS 元数据文件...${NC}"
+        find "$PG_DATA_DIR" -name "._*" -delete 2>/dev/null || true
+    fi
+
     docker-compose up -d
 
     echo -e "${YELLOW}等待数据库初始化...${NC}"
@@ -119,26 +127,70 @@ start_database() {
 check_python() {
     echo -e "${BLUE}[3/5] 检查 Python 环境...${NC}"
 
-    if ! command -v python3 &> /dev/null; then
+    # 优先使用 python3.11，回退到 python3
+    if command -v python3.11 &> /dev/null; then
+        PYTHON_CMD="python3.11"
+    elif command -v python3 &> /dev/null; then
+        PYTHON_CMD="python3"
+    else
         echo -e "${RED}✗ Python3 未安装${NC}"
         exit 1
     fi
 
-    echo -e "${GREEN}✓ Python3 已安装: $(python3 --version)${NC}"
+    PYTHON_VERSION=$($PYTHON_CMD --version 2>&1 | awk '{print $2}')
+    PYTHON_MAJOR=$(echo "$PYTHON_VERSION" | cut -d. -f1)
+    PYTHON_MINOR=$(echo "$PYTHON_VERSION" | cut -d. -f2)
+
+    if [ "$PYTHON_MAJOR" -lt 3 ] || [ "$PYTHON_MINOR" -lt 11 ]; then
+        echo -e "${RED}✗ 需要 Python 3.11+，当前: $PYTHON_VERSION${NC}"
+        echo -e "${YELLOW}  请安装 Python 3.11: brew install python@3.11${NC}"
+        exit 1
+    fi
+
+    echo -e "${GREEN}✓ Python 已安装: $PYTHON_CMD ($PYTHON_VERSION)${NC}"
 }
 
-# 启动后端
-start_backend() {
-    echo -e "${BLUE}[4/5] 启动后端服务...${NC}"
+# 初始化数据库表
+init_database() {
+    echo -e "${BLUE}[4/6] 初始化数据库表...${NC}"
 
     cd "$BACKEND_DIR"
 
     # 检查虚拟环境
-    if [ ! -d "venv" ]; then
+    if [ ! -d "venv" ] && [ ! -d ".venv" ]; then
         echo -e "${YELLOW}⚠️  虚拟环境不存在，正在创建...${NC}"
-        python3 -m venv venv
-        source venv/bin/activate
+        $PYTHON_CMD -m venv .venv
+        source .venv/bin/activate
         pip install -r requirements.txt
+    else
+        if [ -d ".venv" ]; then
+            source .venv/bin/activate
+        else
+            source venv/bin/activate
+        fi
+    fi
+
+    # 运行数据库初始化脚本
+    echo -e "${YELLOW}检查并创建数据库表...${NC}"
+    $PYTHON_CMD init_database.py
+
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}✓ 数据库初始化完成${NC}"
+    else
+        echo -e "${RED}✗ 数据库初始化失败${NC}"
+        exit 1
+    fi
+}
+
+# 启动后端
+start_backend() {
+    echo -e "${BLUE}[5/6] 启动后端服务...${NC}"
+
+    cd "$BACKEND_DIR"
+
+    # 激活虚拟环境
+    if [ -d ".venv" ]; then
+        source .venv/bin/activate
     else
         source venv/bin/activate
     fi
@@ -164,7 +216,7 @@ start_backend() {
 
 # 启动前端
 start_frontend() {
-    echo -e "${BLUE}[5/5] 启动前端服务...${NC}"
+    echo -e "${BLUE}[6/6] 启动前端服务...${NC}"
 
     cd "$FRONTEND_DIR"
 
@@ -242,6 +294,7 @@ main() {
     check_docker
     start_database
     check_python
+    init_database
     start_backend
     start_frontend
     show_status

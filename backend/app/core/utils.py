@@ -146,6 +146,104 @@ class DateUtils:
         """获取今天日期"""
         return datetime.today().strftime(format_str)
 
+    @staticmethod
+    def normalize_date(date_str: Optional[str], target_format: str = DATE_FORMAT_YYYYMMDD) -> Optional[str]:
+        """将日期字符串统一转换为目标格式，自动识别 YYYY-MM-DD 和 YYYYMMDD"""
+        if not date_str:
+            return None
+        date_str = date_str.strip()
+        for fmt in ("%Y-%m-%d", "%Y%m%d"):
+            try:
+                return datetime.strptime(date_str, fmt).strftime(target_format)
+            except ValueError:
+                continue
+        raise ValueError(f"Unrecognized date format: {date_str}")
+
+
+class TradingCalendar:
+    """交易日历服务
+
+    基于 trade_cal 表提供交易日查询、偏移等能力。
+    初始化时一次性加载到内存，后续查询无 DB 开销。
+    """
+
+    _instance: Optional["TradingCalendar"] = None
+
+    def __init__(self, db_client=None):
+        self._trading_days: list[str] = []
+        self._trading_day_set: set[str] = set()
+        if db_client is not None:
+            self._load(db_client)
+
+    # ---------- 单例 ----------
+    @classmethod
+    def get_instance(cls, db_client=None) -> "TradingCalendar":
+        if cls._instance is None or not cls._instance._trading_days:
+            cls._instance = cls(db_client)
+        return cls._instance
+
+    # ---------- 加载 ----------
+    def _load(self, db_client) -> None:
+        """从 trade_cal 表加载 SSE 交易日"""
+        try:
+            df = db_client.query(
+                "SELECT cal_date FROM trade_cal "
+                "WHERE exchange = 'SSE' AND is_open = '1' "
+                "ORDER BY cal_date"
+            )
+            if df.is_empty():
+                logger.warning("TradingCalendar: trade_cal 表为空，回退到自然日模式")
+                return
+            self._trading_days = df["cal_date"].to_list()
+            self._trading_day_set = set(self._trading_days)
+            logger.info(f"TradingCalendar loaded {len(self._trading_days)} trading days "
+                        f"({self._trading_days[0]} ~ {self._trading_days[-1]})")
+        except Exception as e:
+            logger.warning(f"TradingCalendar: 加载失败 ({e})，回退到自然日模式")
+
+    # ---------- 查询 ----------
+    @property
+    def is_loaded(self) -> bool:
+        return len(self._trading_days) > 0
+
+    def is_trading_day(self, date_str: str) -> bool:
+        return date_str in self._trading_day_set
+
+    def get_trading_days(self, start: str, end: str) -> list[str]:
+        """返回 [start, end] 范围内的交易日列表"""
+        import bisect
+        lo = bisect.bisect_left(self._trading_days, start)
+        hi = bisect.bisect_right(self._trading_days, end)
+        return self._trading_days[lo:hi]
+
+    def offset_trading_days(self, date_str: str, n: int) -> str:
+        """从 date_str 向前(n<0)或向后(n>0)偏移 |n| 个交易日。
+
+        如果 date_str 不是交易日，先定位到最近的交易日再偏移。
+        如果日历未加载，回退到自然日 * 1.5 的粗略估算。
+        """
+        if not self.is_loaded:
+            # 回退：自然日粗略估算
+            factor = 1.5 if n < 0 else 1.5
+            return DateUtils.add_days(date_str, int(n * factor))
+
+        import bisect
+        idx = bisect.bisect_left(self._trading_days, date_str)
+        # 如果 date_str 不在日历中，idx 指向下一个交易日
+        # 向前偏移时，应从前一个交易日开始
+        if idx >= len(self._trading_days) or self._trading_days[idx] != date_str:
+            if n < 0:
+                idx = idx - 1
+            # n >= 0 时 idx 已经指向下一个交易日，合理
+
+        target = idx + n
+        target = max(0, min(target, len(self._trading_days) - 1))
+        return self._trading_days[target]
+
+    def count_trading_days(self, start: str, end: str) -> int:
+        """计算 [start, end] 之间的交易日数量"""
+        return len(self.get_trading_days(start, end))
+
 
 class QueryBuilder:
     """SQL 查询构建器"""
