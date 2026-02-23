@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 
 from app.core.config import settings
 from app.core.logger import logger
@@ -41,6 +42,10 @@ def create_app() -> FastAPI:
         lifespan=lifespan
     )
 
+    # GZip 压缩中间件（优先级最高，最先添加）
+    app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+    # CORS 中间件
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],

@@ -93,8 +93,8 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
     setEditSaving(true);
     try {
       const values = await editForm.validateFields();
-      const params = { ...(factor.params || {}), preprocess: ppEdit };
-      await productionApi.updateFactor(factorId, { ...values, params });
+      // 只更新基本信息字段，不要覆盖 params
+      await productionApi.updateFactor(factorId, values);
       message.success('基本信息已保存');
       onSaved();
     } catch (e: any) {
@@ -108,6 +108,7 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
     if (!factor) return;
     setPpSaving(true);
     try {
+      // 只更新 params.preprocess，保留其他 params 字段
       const newParams = { ...(factor.params || {}), preprocess: ppEdit };
       await productionApi.updateFactor(factorId, { params: newParams });
       message.success('预处理配置已保存');
@@ -551,7 +552,7 @@ const FactorManageTab: React.FC = () => {
             onClick={() => handleRun(record.factor_id, 'incremental')}>增量</Button>
           <Button size="small" icon={<ReloadOutlined />}
             loading={runLoading === record.factor_id}
-            onClick={() => { setFullRunModal({ visible: true, factorId: record.factor_id }); setFullRunDates([null, null]); }}>全量</Button>
+            onClick={() => { setFullRunModal({ visible: true, factorId: record.factor_id }); setFullRunDates([null, null]); }}>回溯</Button>
           <Popconfirm title="确认删除?" onConfirm={() => handleDelete(record.factor_id)}>
             <Button size="small" danger icon={<DeleteOutlined />} />
           </Popconfirm>

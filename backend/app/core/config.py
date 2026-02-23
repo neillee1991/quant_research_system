@@ -36,9 +36,25 @@ class DatabaseConfig(_BaseConfig):
     postgres_user: str = Field(default="quant_user", env="POSTGRES_USER")
     postgres_password: str = Field(default="", env="POSTGRES_PASSWORD")
 
-    # 连接池配置
-    connection_pool_size: int = Field(default=10, ge=1, le=50)
+    # 连接池配置（优化后）
+    connection_pool_min: int = Field(default=10, ge=1, le=50, env="DB_POOL_MIN")
+    connection_pool_size: int = Field(default=50, ge=1, le=100, env="DB_POOL_MAX")
     query_timeout: int = Field(default=300, ge=10, le=3600)
+
+
+class RedisConfig(_BaseConfig):
+    """Redis缓存配置"""
+    redis_host: str = Field(default="localhost", env="REDIS_HOST")
+    redis_port: int = Field(default=6379, env="REDIS_PORT")
+    redis_db: int = Field(default=0, env="REDIS_DB")
+    redis_password: str = Field(default="", env="REDIS_PASSWORD")
+    redis_max_connections: int = Field(default=50, ge=1, le=100)
+
+    # 缓存TTL配置（秒）
+    cache_ttl_stock_list: int = Field(default=3600, ge=60)  # 股票列表缓存1小时
+    cache_ttl_daily_data: int = Field(default=1800, ge=60)  # 日线数据缓存30分钟
+    cache_ttl_factor_metadata: int = Field(default=3600, ge=60)  # 因子元数据缓存1小时
+    cache_ttl_factor_analysis: int = Field(default=7200, ge=60)  # 因子分析缓存2小时
 
 
 class BacktestConfig(_BaseConfig):
@@ -87,6 +103,7 @@ class Settings(BaseSettings):
     # 子配置
     collector: DataCollectorConfig = Field(default_factory=DataCollectorConfig)
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
+    redis: RedisConfig = Field(default_factory=RedisConfig)
     backtest: BacktestConfig = Field(default_factory=BacktestConfig)
     ml: MLConfig = Field(default_factory=MLConfig)
     sync: SyncConfig = Field(default_factory=SyncConfig)

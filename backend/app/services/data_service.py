@@ -11,6 +11,8 @@ from app.core.exceptions import DataNotFoundError, DataValidationError
 from app.core.utils import QueryBuilder, DateUtils
 from app.core.logger import logger
 from app.core.constants import DEFAULT_QUERY_LIMIT, MAX_QUERY_LIMIT
+from app.core.config import settings
+from store.redis_client import redis_client
 
 
 class DataService:
@@ -24,7 +26,17 @@ class DataService:
         market: Optional[str] = None,
         industry: Optional[str] = None
     ) -> pl.DataFrame:
-        """获取股票列表"""
+        """获取股票列表（带缓存）"""
+        # 构建缓存键
+        cache_key = f"stock_list:{market or 'all'}:{industry or 'all'}"
+
+        # 尝试从缓存获取
+        cached_df = redis_client.get_dataframe(cache_key)
+        if cached_df is not None:
+            logger.debug(f"Cache hit for stock list: {cache_key}")
+            return cached_df
+
+        # 缓存未命中，从数据库查询
         filters = {}
         if market:
             filters["market"] = market
@@ -35,6 +47,11 @@ class DataService:
             df = self.repository.query("stock_basic", filters=filters)
             if df.is_empty():
                 raise DataNotFoundError("stock_basic", f"market={market}, industry={industry}")
+
+            # 缓存结果
+            redis_client.cache_dataframe(cache_key, df, ttl=settings.redis.cache_ttl_stock_list)
+            logger.debug(f"Cached stock list: {cache_key}")
+
             return df
         except Exception as e:
             logger.error(f"Failed to get stock list: {e}")
@@ -47,7 +64,17 @@ class DataService:
         end_date: Optional[str] = None,
         limit: Optional[int] = None
     ) -> pl.DataFrame:
-        """获取日线数据"""
+        """获取日线数据（带缓存）"""
+        # 构建缓存键
+        cache_key = f"daily_data:{ts_code or 'all'}:{start_date or 'none'}:{end_date or 'none'}:{limit or 'none'}"
+
+        # 尝试从缓存获取
+        cached_df = redis_client.get_dataframe(cache_key)
+        if cached_df is not None:
+            logger.debug(f"Cache hit for daily data: {cache_key}")
+            return cached_df
+
+        # 缓存未命中，从数据库查询
         filters = {}
 
         if ts_code:
@@ -77,6 +104,10 @@ class DataService:
                     "daily_data",
                     f"ts_code={ts_code}, start={start_date}, end={end_date}"
                 )
+
+            # 缓存结果
+            redis_client.cache_dataframe(cache_key, df, ttl=settings.redis.cache_ttl_daily_data)
+            logger.debug(f"Cached daily data: {cache_key}")
 
             return df
         except Exception as e:
@@ -132,8 +163,8 @@ class DataService:
         self._validate_date(end_date)
 
         try:
-            # 构建查询
-            query = f"""
+            # 使用参数化查询防止SQL注入
+            query = """
                 SELECT
                     d.ts_code,
                     d.trade_date,
@@ -149,14 +180,13 @@ class DataService:
                 FROM daily_data d
                 LEFT JOIN daily_basic b
                     ON d.ts_code = b.ts_code AND d.trade_date = b.trade_date
-                WHERE d.ts_code = '{ts_code}'
-                    AND d.trade_date >= '{start_date}'
-                    AND d.trade_date <= '{end_date}'
+                WHERE d.ts_code = %s
+                    AND d.trade_date >= %s
+                    AND d.trade_date <= %s
                 ORDER BY d.trade_date
             """
 
-            conn = self.repository.connect()
-            df = conn.execute(query).pl()
+            df = self.repository.query(query, (ts_code, start_date, end_date))
 
             if df.is_empty():
                 raise DataNotFoundError(

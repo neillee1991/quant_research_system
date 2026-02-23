@@ -3,7 +3,7 @@
     {
       "dag_id": "daily_update",
       "description": "每日数据更新流水线：同步行情 → 计算因子",
-      "schedule": "daily",
+      "schedule": "33 1 * * *",
       "tasks": [
         {
           "task_id": "daily",
@@ -58,6 +58,20 @@
           "task_type": "production",
           "depends_on": [
             "daily_basic"
+          ]
+        },
+        {
+          "task_id": "factor_ma_20",
+          "task_type": "production",
+          "depends_on": [
+            "daily"
+          ]
+        },
+        {
+          "task_id": "factor_custom_01",
+          "task_type": "production",
+          "depends_on": [
+            "factor_ma_20"
           ]
         }
       ]

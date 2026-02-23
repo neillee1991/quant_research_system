@@ -11,7 +11,7 @@ from app.core.utils import TradingCalendar
 from data_manager.processor import DataProcessor
 from store.partition_manager import PartitionManager
 from engine.production.registry import (
-    FactorDefinition, StorageConfig, get_factor, get_registry, list_factors
+    FactorDefinition, StorageConfig, get_factor, get_registry, list_factors, discover_factors
 )
 
 
@@ -97,6 +97,7 @@ class ProductionEngine:
             mode: 强制指定计算模式 ("incremental" / "full")，覆盖因子定义
             preprocess: 预处理选项，None 时从因子 params.preprocess 读取，仍无则使用默认值
         """
+        discover_factors()  # 确保代码因子已注册
         definition = get_factor(factor_id)
         if not definition:
             logger.error(f"Factor not found: {factor_id}")

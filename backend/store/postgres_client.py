@@ -25,6 +25,7 @@ class PostgreSQLClient:
             'database': settings.database.postgres_db,
             'user': settings.database.postgres_user,
             'password': settings.database.postgres_password,
+            'options': '-c timezone=Asia/Shanghai',
         }
 
         # 创建连接池
@@ -40,11 +41,11 @@ class PostgreSQLClient:
         """初始化连接池"""
         try:
             self._pool = ThreadedConnectionPool(
-                minconn=1,
+                minconn=settings.database.connection_pool_min,
                 maxconn=settings.database.connection_pool_size,
                 **self.db_config
             )
-            logger.info(f"Connection pool created with size {settings.database.connection_pool_size}")
+            logger.info(f"Connection pool created: min={settings.database.connection_pool_min}, max={settings.database.connection_pool_size}")
         except Exception as e:
             logger.error(f"Failed to create connection pool: {e}")
             raise
@@ -79,40 +80,83 @@ class PostgreSQLClient:
         """获取连接（兼容 DuckDB 接口）"""
         return self._pool.getconn()
 
-    def query(self, sql: str, params: Optional[tuple] = None) -> pl.DataFrame:
+    def query(self, sql: str, params: Optional[tuple] = None, stream: bool = False, batch_size: int = 10000) -> pl.DataFrame:
         """
         执行查询并返回 Polars DataFrame
 
         Args:
             sql: SQL 查询语句
             params: 查询参数（使用 %s 占位符）
+            stream: 是否使用流式查询（服务端游标），适用于大数据集
+            batch_size: 流式查询时每批次的大小
 
         Returns:
-            Polars DataFrame
+            Polars DataFrame 或生成器（当 stream=True 时）
         """
         try:
             with self.get_connection() as conn:
-                with conn.cursor() as cur:
-                    if params:
-                        cur.execute(sql, params)
-                    else:
-                        cur.execute(sql)
+                if stream:
+                    # 使用服务端游标进行流式查询
+                    return self._query_stream(conn, sql, params, batch_size)
+                else:
+                    # 标准查询
+                    with conn.cursor() as cur:
+                        if params:
+                            cur.execute(sql, params)
+                        else:
+                            cur.execute(sql)
 
-                    # 获取列名
-                    columns = [desc[0] for desc in cur.description] if cur.description else []
+                        # 获取列名
+                        columns = [desc[0] for desc in cur.description] if cur.description else []
 
-                    # 获取数据
-                    rows = cur.fetchall()
+                        # 获取数据
+                        rows = cur.fetchall()
 
-                    if not rows:
-                        return pl.DataFrame(schema={col: pl.Utf8 for col in columns})
+                        if not rows:
+                            return pl.DataFrame(schema={col: pl.Utf8 for col in columns})
 
-                    # 转换为 Polars DataFrame
-                    data = {col: [row[i] for row in rows] for i, col in enumerate(columns)}
-                    return pl.DataFrame(data)
+                        # 转换为 Polars DataFrame
+                        data = {col: [row[i] for row in rows] for i, col in enumerate(columns)}
+                        return pl.DataFrame(data)
         except Exception as e:
             logger.error(f"Query failed: {sql[:100]}... Error: {e}")
             raise
+
+    def _query_stream(self, conn, sql: str, params: Optional[tuple], batch_size: int):
+        """
+        使用服务端游标进行流式查询（生成器）
+
+        Args:
+            conn: 数据库连接
+            sql: SQL 查询语句
+            params: 查询参数
+            batch_size: 每批次大小
+
+        Yields:
+            Polars DataFrame (每批次)
+        """
+        # 使用命名游标创建服务端游标
+        cursor_name = f"stream_cursor_{id(conn)}"
+        with conn.cursor(name=cursor_name) as cur:
+            cur.itersize = batch_size  # 设置每次迭代获取的行数
+
+            if params:
+                cur.execute(sql, params)
+            else:
+                cur.execute(sql)
+
+            # 获取列名
+            columns = [desc[0] for desc in cur.description] if cur.description else []
+
+            # 分批获取数据
+            while True:
+                rows = cur.fetchmany(batch_size)
+                if not rows:
+                    break
+
+                # 转换为 Polars DataFrame
+                data = {col: [row[i] for row in rows] for i, col in enumerate(columns)}
+                yield pl.DataFrame(data)
 
     def execute(self, sql: str, params: Optional[tuple] = None) -> None:
         """

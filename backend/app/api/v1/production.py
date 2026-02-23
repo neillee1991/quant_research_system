@@ -224,19 +224,45 @@ def _parse_params(raw) -> dict:
 
 @router.get("/production/factors")
 async def list_registered_factors():
-    """列出所有因子（合并装饰器注册 + 数据库手动注册）"""
+    """列出所有因子（合并装饰器注册 + 数据库手动注册）- 带缓存"""
+    from store.redis_client import redis_client
+    from app.core.config import settings
+
+    # 尝试从缓存获取
+    cache_key = "production:factors:list"
+    cached_result = redis_client.get(cache_key)
+    if cached_result is not None:
+        logger.debug("Cache hit for factor list")
+        return cached_result
+
     discover_factors()
 
     # 装饰器注册的因子
     code_factors = {f["factor_id"]: f for f in list_factors()}
 
-    # 数据库中的元数据（含 last_computed_date / last_computed_at）
+    # 优化：使用单个查询获取元数据和最新日期（消除N+1查询）
     db_meta = {}
+    latest_dates: Dict[str, str] = {}
     try:
-        df = db_client.query("SELECT * FROM factor_metadata ORDER BY factor_id")
+        # 合并查询：一次性获取元数据和最新日期
+        df = db_client.query("""
+            SELECT
+                fm.*,
+                fv.latest_date
+            FROM factor_metadata fm
+            LEFT JOIN (
+                SELECT factor_id, MAX(trade_date) AS latest_date
+                FROM factor_values
+                GROUP BY factor_id
+            ) fv ON fm.factor_id = fv.factor_id
+            ORDER BY fm.factor_id
+        """)
         if not df.is_empty():
             for row in df.to_dicts():
-                db_meta[row["factor_id"]] = row
+                factor_id = row["factor_id"]
+                db_meta[factor_id] = row
+                if row.get("latest_date"):
+                    latest_dates[factor_id] = row["latest_date"]
     except Exception:
         pass
 
@@ -257,18 +283,6 @@ async def list_registered_factors():
             except Exception:
                 pass
 
-    # 查询每个因子在 factor_values 中的最新日期
-    latest_dates: Dict[str, str] = {}
-    try:
-        df = db_client.query(
-            "SELECT factor_id, MAX(trade_date) AS latest_date FROM factor_values GROUP BY factor_id"
-        )
-        if not df.is_empty():
-            for row in df.to_dicts():
-                latest_dates[row["factor_id"]] = row["latest_date"]
-    except Exception:
-        pass
-
     # 合并：DB 元数据优先（用户手动修改），代码定义作为 fallback
     all_ids = set(code_factors.keys()) | set(db_meta.keys())
     merged = []
@@ -288,7 +302,14 @@ async def list_registered_factors():
             "last_computed_at": str(meta["last_computed_at"]) if meta.get("last_computed_at") else None,
             "latest_data_date": latest_dates.get(fid),
         })
-    return {"status": "success", "data": merged}
+
+    result = {"status": "success", "data": merged}
+
+    # 缓存结果（1小时）
+    redis_client.set(cache_key, result, ttl=settings.redis.cache_ttl_factor_metadata)
+    logger.debug("Cached factor list")
+
+    return result
 
 
 @router.post("/production/factors")
@@ -316,6 +337,12 @@ async def create_factor(req: FactorCreateRequest):
             with open(fpath, "w", encoding="utf-8") as f:
                 f.write(req.code)
             logger.info(f"Created factor code file: {filename}")
+
+        # 清除因子列表缓存
+        from store.redis_client import redis_client
+        cache_key = "production:factors:list"
+        redis_client.delete(cache_key)
+        logger.debug(f"Cleared factor list cache after creating {req.factor_id}")
 
         return {"status": "success", "data": {"factor_id": req.factor_id, "filename": filename}}
     except HTTPException:
@@ -357,6 +384,13 @@ async def update_factor(factor_id: str, req: FactorUpdateRequest):
             VALUES (%s, '', 'custom', 'incremental', 'factor_values', '{{}}')
             ON CONFLICT (factor_id) DO UPDATE SET {', '.join(updates)}
         """, (factor_id, *values))
+
+        # 清除因子列表缓存
+        from store.redis_client import redis_client
+        cache_key = "production:factors:list"
+        redis_client.delete(cache_key)
+        logger.debug(f"Cleared factor list cache after updating {factor_id}")
+
         return {"status": "success", "data": {"factor_id": factor_id}}
     except Exception as e:
         logger.error(f"Update factor failed: {e}")
@@ -380,6 +414,12 @@ async def delete_factor(factor_id: str, delete_data: bool = False):
 
         # 从内存注册表中移除
         unregister_factor(factor_id)
+
+        # 清除因子列表缓存
+        from store.redis_client import redis_client
+        cache_key = "production:factors:list"
+        redis_client.delete(cache_key)
+        logger.debug(f"Cleared factor list cache after deleting {factor_id}")
 
         return {"status": "success", "data": {"factor_id": factor_id, "data_deleted": delete_data}}
     except HTTPException:
@@ -605,12 +645,14 @@ async def test_factor_code(req: FactorTestRequest):
     # 确定要调用的函数
     compute_func = None
     func_params = req.params
+    depends_on = req.depends_on  # 默认使用请求参数
 
     if captured_definitions:
         defn = captured_definitions[0]
         compute_func = defn["func"]
         func_params = {**defn["params"], **req.params}
-        log("resolve", f"使用 @factor 注册的函数: {defn['factor_id']}")
+        depends_on = defn["depends_on"]  # 使用装饰器中的 depends_on
+        log("resolve", f"使用 @factor 注册的函数: {defn['factor_id']} (depends_on={depends_on})")
     else:
         for name, obj in namespace.items():
             if callable(obj) and name.startswith("compute"):
@@ -622,7 +664,7 @@ async def test_factor_code(req: FactorTestRequest):
         return make_error("resolve", "未找到因子计算函数。请使用 @factor 装饰器注册，或定义 compute_xxx 函数。")
 
     # 3. 加载真实数据
-    log("data", f"加载数据 {req.start_date}~{req.end_date} (depends_on={req.depends_on})...")
+    log("data", f"加载数据 {req.start_date}~{req.end_date} (depends_on={depends_on})...")
     t0 = time.time()
     try:
         from engine.production.registry import FactorDefinition, StorageConfig
@@ -630,7 +672,7 @@ async def test_factor_code(req: FactorTestRequest):
             factor_id="__test__",
             description="test",
             func=compute_func,
-            depends_on=req.depends_on,
+            depends_on=depends_on,
             category="test",
             params=func_params,
             compute_mode="full",
@@ -805,6 +847,9 @@ class DAGUpdateRequest(BaseModel):
 
 def _validate_dag_tasks(tasks: List[Dict[str, Any]]):
     """校验 DAG 任务列表中的 task_id 是否在 sync/production 注册表中"""
+    # 先发现所有已注册的因子
+    discover_factors()
+
     sync_tasks = {t["task_id"] for t in _sync_engine.get_all_tasks()}
     prod_factors = {f["factor_id"] for f in list_factors()}
     valid_ids = sync_tasks | prod_factors

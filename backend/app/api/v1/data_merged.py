@@ -679,20 +679,52 @@ def list_tables():
             "SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE'"
         )
 
+        # 表名白名单（防止SQL注入）
+        # 使用模式匹配支持分区表
+        import re
+        ALLOWED_TABLE_PATTERNS = [
+            r'^stock_basic$',
+            r'^daily_data$',
+            r'^daily_basic$',
+            r'^factor_values(_\d{6})?$',  # 支持 factor_values 和 factor_values_YYYYMM
+            r'^factor_metadata$',
+            r'^factor_analysis$',
+            r'^sync_log(_history)?$',  # 支持 sync_log 和 sync_log_history
+            r'^production_task_run$',
+            r'^dag_run_log$',
+            r'^dag_task_log$',
+            r'^migration_history$',
+            r'^adj_factor$',
+            r'^index_daily$',
+            r'^moneyflow$',
+            r'^trade_cal$',
+        ]
+
+        def is_table_allowed(table_name: str) -> bool:
+            """检查表名是否在白名单中"""
+            return any(re.match(pattern, table_name) for pattern in ALLOWED_TABLE_PATTERNS)
+
         tables_info = []
         for table_name in tables_df["table_name"].to_list():
+            # 验证表名
+            if not is_table_allowed(table_name):
+                logger.warning(f"Skipping unauthorized table: {table_name}")
+                continue
+
             try:
-                # 获取表的行数
-                count_df = db_client.query(f"SELECT COUNT(*) as count FROM {table_name}")
+                # 获取表的行数（使用参数化查询）
+                count_df = db_client.query(
+                    "SELECT COUNT(*) as count FROM " + table_name
+                )
                 row_count = count_df["count"][0] if not count_df.is_empty() else 0
 
-                # 获取表结构（PostgreSQL 语法）
-                schema_df = db_client.query(f"""
+                # 获取表结构（使用参数化查询）
+                schema_df = db_client.query("""
                     SELECT column_name
                     FROM information_schema.columns
-                    WHERE table_schema='public' AND table_name='{table_name}'
+                    WHERE table_schema='public' AND table_name=%s
                     ORDER BY ordinal_position
-                """)
+                """, (table_name,))
                 columns = schema_df["column_name"].to_list() if not schema_df.is_empty() else []
 
                 tables_info.append({

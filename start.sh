@@ -1,47 +1,48 @@
 #!/bin/bash
-
-# 量化研究系统一键启动脚本
+# ===================================================================
+# 量化研究系统 - 一键启动脚本
 # 自动启动数据库、后端和前端服务
+# ===================================================================
 
-set -e  # 遇到错误立即退出
+set -e
 
-# 颜色定义
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
-
-# 获取脚本所在目录
+# 加载配置
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BACKEND_DIR="$SCRIPT_DIR/backend"
-FRONTEND_DIR="$SCRIPT_DIR/frontend"
+source "$SCRIPT_DIR/config/scripts.config.sh"
 
-# 日志文件
-LOG_DIR="$SCRIPT_DIR/logs"
-mkdir -p "$LOG_DIR"
-BACKEND_LOG="$LOG_DIR/backend.log"
-FRONTEND_LOG="$LOG_DIR/frontend.log"
+# ==================== 工具函数 ====================
 
-# PID 文件
-PID_DIR="$SCRIPT_DIR/.pids"
-mkdir -p "$PID_DIR"
-BACKEND_PID="$PID_DIR/backend.pid"
-FRONTEND_PID="$PID_DIR/frontend.pid"
+print_header() {
+    echo -e "${BLUE}========================================${NC}"
+    echo -e "${BLUE}   量化研究系统 - 一键启动${NC}"
+    echo -e "${BLUE}========================================${NC}"
+    echo ""
+}
 
-echo -e "${BLUE}========================================${NC}"
-echo -e "${BLUE}   量化研究系统 - 一键启动脚本${NC}"
-echo -e "${BLUE}========================================${NC}"
-echo ""
+print_step() {
+    echo -e "${BLUE}[$1] $2${NC}"
+}
 
-# 检查是否已经在运行
+print_success() {
+    echo -e "${GREEN}✓ $1${NC}"
+}
+
+print_warning() {
+    echo -e "${YELLOW}⚠️  $1${NC}"
+}
+
+print_error() {
+    echo -e "${RED}✗ $1${NC}"
+}
+
+# 检查服务是否运行
 check_running() {
     if [ -f "$BACKEND_PID" ] && kill -0 $(cat "$BACKEND_PID") 2>/dev/null; then
-        echo -e "${YELLOW}⚠️  后端服务已在运行 (PID: $(cat "$BACKEND_PID"))${NC}"
+        print_warning "后端服务已在运行 (PID: $(cat "$BACKEND_PID"))"
         return 0
     fi
     if [ -f "$FRONTEND_PID" ] && kill -0 $(cat "$FRONTEND_PID") 2>/dev/null; then
-        echo -e "${YELLOW}⚠️  前端服务已在运行 (PID: $(cat "$FRONTEND_PID"))${NC}"
+        print_warning "前端服务已在运行 (PID: $(cat "$FRONTEND_PID"))"
         return 0
     fi
     return 1
@@ -49,13 +50,13 @@ check_running() {
 
 # 停止已有服务
 stop_services() {
-    echo -e "${YELLOW}正在停止已有服务...${NC}"
+    print_warning "正在停止已有服务..."
 
     if [ -f "$BACKEND_PID" ]; then
         BACKEND_PID_NUM=$(cat "$BACKEND_PID")
         if kill -0 "$BACKEND_PID_NUM" 2>/dev/null; then
             kill "$BACKEND_PID_NUM"
-            echo -e "${GREEN}✓ 后端服务已停止${NC}"
+            print_success "后端服务已停止"
         fi
         rm -f "$BACKEND_PID"
     fi
@@ -64,7 +65,7 @@ stop_services() {
         FRONTEND_PID_NUM=$(cat "$FRONTEND_PID")
         if kill -0 "$FRONTEND_PID_NUM" 2>/dev/null; then
             kill "$FRONTEND_PID_NUM"
-            echo -e "${GREEN}✓ 前端服务已停止${NC}"
+            print_success "前端服务已停止"
         fi
         rm -f "$FRONTEND_PID"
     fi
@@ -74,66 +75,79 @@ stop_services() {
 
 # 检查 Docker
 check_docker() {
-    echo -e "${BLUE}[1/5] 检查 Docker 环境...${NC}"
+    print_step "1/6" "检查 Docker 环境..."
 
     if ! command -v docker &> /dev/null; then
-        echo -e "${RED}✗ Docker 未安装${NC}"
+        print_error "Docker 未安装"
         exit 1
     fi
 
     if ! docker info > /dev/null 2>&1; then
-        echo -e "${RED}✗ Docker 未运行，请先启动 Docker${NC}"
+        print_error "Docker 未运行，请先启动 Docker"
         exit 1
     fi
 
-    echo -e "${GREEN}✓ Docker 已运行${NC}"
+    print_success "Docker 已运行"
 }
 
 # 启动数据库
 start_database() {
-    echo -e "${BLUE}[2/5] 启动 PostgreSQL 数据库...${NC}"
+    print_step "2/6" "启动数据库服务..."
 
     cd "$SCRIPT_DIR"
 
-    # 清理 macOS 在 ExFAT 卷上生成的 ._ 文件，避免 PostgreSQL 启动失败
-    PG_DATA_DIR="/Volumes/QuantData/postgresql"
-    if [ -d "$PG_DATA_DIR" ]; then
-        echo -e "${YELLOW}清理 macOS 元数据文件...${NC}"
+    # 清理 macOS 元数据文件
+    if [ "$CLEAN_MACOS_METADATA" = true ] && [ -d "$PG_DATA_DIR" ]; then
+        print_warning "清理 macOS 元数据文件..."
         find "$PG_DATA_DIR" -name "._*" -delete 2>/dev/null || true
     fi
 
-    docker-compose up -d
+    # 启动服务
+    if [ "$ENABLE_REDIS" = true ]; then
+        docker-compose up -d postgres redis
+    else
+        docker-compose up -d postgres
+    fi
 
     echo -e "${YELLOW}等待数据库初始化...${NC}"
-    sleep 5
+    sleep $DB_INIT_WAIT
 
-    # 检查数据库健康状态
-    max_attempts=30
+    # 健康检查
     attempt=0
-    while [ $attempt -lt $max_attempts ]; do
-        if docker exec quant_postgres pg_isready -U quant_user -d quant_research > /dev/null 2>&1; then
-            echo -e "${GREEN}✓ 数据库已就绪${NC}"
-            return 0
+    while [ $attempt -lt $DB_MAX_ATTEMPTS ]; do
+        if docker exec $POSTGRES_CONTAINER pg_isready -U $POSTGRES_USER -d $POSTGRES_DB > /dev/null 2>&1; then
+            print_success "PostgreSQL 已就绪"
+            break
         fi
         attempt=$((attempt + 1))
-        sleep 2
+        sleep $DB_CHECK_INTERVAL
     done
 
-    echo -e "${RED}✗ 数据库启动超时${NC}"
-    exit 1
+    if [ $attempt -eq $DB_MAX_ATTEMPTS ]; then
+        print_error "数据库启动超时"
+        exit 1
+    fi
+
+    # 检查 Redis
+    if [ "$ENABLE_REDIS" = true ]; then
+        if docker exec $REDIS_CONTAINER redis-cli ping > /dev/null 2>&1; then
+            print_success "Redis 已就绪"
+        else
+            print_warning "Redis 启动失败（系统将继续运行）"
+        fi
+    fi
 }
 
 # 检查 Python 环境
 check_python() {
-    echo -e "${BLUE}[3/5] 检查 Python 环境...${NC}"
+    print_step "3/6" "检查 Python 环境..."
 
-    # 优先使用 python3.11，回退到 python3
     if command -v python3.11 &> /dev/null; then
         PYTHON_CMD="python3.11"
     elif command -v python3 &> /dev/null; then
         PYTHON_CMD="python3"
     else
-        echo -e "${RED}✗ Python3 未安装${NC}"
+        print_error "Python3 未安装"
         exit 1
     fi
 
@@ -141,143 +155,153 @@ check_python() {
     PYTHON_MAJOR=$(echo "$PYTHON_VERSION" | cut -d. -f1)
     PYTHON_MINOR=$(echo "$PYTHON_VERSION" | cut -d. -f2)
 
-    if [ "$PYTHON_MAJOR" -lt 3 ] || [ "$PYTHON_MINOR" -lt 11 ]; then
-        echo -e "${RED}✗ 需要 Python 3.11+，当前: $PYTHON_VERSION${NC}"
-        echo -e "${YELLOW}  请安装 Python 3.11: brew install python@3.11${NC}"
+    if [ "$PYTHON_MAJOR" -lt $PYTHON_MIN_MAJOR ] || [ "$PYTHON_MINOR" -lt $PYTHON_MIN_MINOR ]; then
+        print_error "需要 Python ${PYTHON_MIN_MAJOR}.${PYTHON_MIN_MINOR}+，当前: $PYTHON_VERSION"
         exit 1
     fi
 
-    echo -e "${GREEN}✓ Python 已安装: $PYTHON_CMD ($PYTHON_VERSION)${NC}"
+    print_success "Python $PYTHON_VERSION"
 }
 
-# 初始化数据库表
-init_database() {
-    echo -e "${BLUE}[4/6] 初始化数据库表...${NC}"
+# 初始化后端
+init_backend() {
+    print_step "4/6" "初始化后端环境..."
 
     cd "$BACKEND_DIR"
 
     # 检查虚拟环境
-    if [ ! -d "venv" ] && [ ! -d ".venv" ]; then
-        echo -e "${YELLOW}⚠️  虚拟环境不存在，正在创建...${NC}"
-        $PYTHON_CMD -m venv .venv
-        source .venv/bin/activate
-        pip install -r requirements.txt
-    else
-        if [ -d ".venv" ]; then
-            source .venv/bin/activate
-        else
-            source venv/bin/activate
+    if [ ! -d "$VENV_DIR" ]; then
+        print_warning "创建虚拟环境..."
+        $PYTHON_CMD -m venv $VENV_DIR
+    fi
+
+    source $VENV_DIR/bin/activate
+
+    # 安装依赖
+    if [ "$AUTO_INSTALL_DEPS" = true ]; then
+        if ! python -c "import fastapi, redis" 2>/dev/null; then
+            print_warning "安装 Python 依赖..."
+            pip install -q -r requirements.txt
         fi
     fi
 
-    # 运行数据库初始化脚本
-    echo -e "${YELLOW}检查并创建数据库表...${NC}"
-    $PYTHON_CMD init_database.py
-
-    if [ $? -eq 0 ]; then
-        echo -e "${GREEN}✓ 数据库初始化完成${NC}"
-    else
-        echo -e "${RED}✗ 数据库初始化失败${NC}"
+    # 检查数据库连接
+    if ! python -c "from store.postgres_client import db_client; db_client.query('SELECT 1')" 2>/dev/null; then
+        print_error "数据库连接失败"
         exit 1
+    fi
+
+    print_success "后端环境就绪"
+
+    # 检查索引
+    if [ "$CHECK_INDEXES" = true ]; then
+        INDEX_COUNT=$(python -c "
+from store.postgres_client import db_client
+df = db_client.query(\"SELECT COUNT(*) as cnt FROM pg_indexes WHERE schemaname = 'public' AND indexname LIKE 'idx_%'\")
+print(df['cnt'][0])
+" 2>/dev/null)
+
+        if [ "$INDEX_COUNT" -ge $MIN_INDEX_COUNT ]; then
+            print_success "性能索引: $INDEX_COUNT 个"
+        else
+            print_warning "索引数量: $INDEX_COUNT 个（建议 >= $MIN_INDEX_COUNT）"
+        fi
+    fi
+
+    # 检查 Redis
+    if [ "$CHECK_REDIS" = true ] && [ "$ENABLE_REDIS" = true ]; then
+        REDIS_AVAILABLE=$(python -c "
+from store.redis_client import redis_client
+print('yes' if redis_client.is_available() else 'no')
+" 2>/dev/null)
+
+        if [ "$REDIS_AVAILABLE" = "yes" ]; then
+            print_success "Redis 缓存可用"
+        else
+            print_warning "Redis 缓存不可用"
+        fi
     fi
 }
 
 # 启动后端
 start_backend() {
-    echo -e "${BLUE}[5/6] 启动后端服务...${NC}"
+    print_step "5/6" "启动后端服务..."
 
     cd "$BACKEND_DIR"
+    source $VENV_DIR/bin/activate
 
-    # 激活虚拟环境
-    if [ -d ".venv" ]; then
-        source .venv/bin/activate
-    else
-        source venv/bin/activate
-    fi
+    mkdir -p "$LOG_DIR" "$PID_DIR"
 
-    # 启动后端服务
-    echo -e "${YELLOW}启动 FastAPI 服务器...${NC}"
-    nohup uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload > "$BACKEND_LOG" 2>&1 &
+    nohup uvicorn app.main:app --host $BACKEND_HOST --port $BACKEND_PORT $BACKEND_RELOAD > "$BACKEND_LOG" 2>&1 &
     echo $! > "$BACKEND_PID"
 
-    # 等待后端启动
-    echo -e "${YELLOW}等待后端服务启动...${NC}"
-    for i in {1..30}; do
-        if curl -s http://localhost:8000/docs > /dev/null 2>&1; then
-            echo -e "${GREEN}✓ 后端服务启动成功 (PID: $(cat "$BACKEND_PID"))${NC}"
-            return 0
-        fi
-        sleep 1
-    done
+    sleep 3
 
-    echo -e "${RED}✗ 后端服务启动超时，请查看日志: $BACKEND_LOG${NC}"
-    exit 1
+    if kill -0 $(cat "$BACKEND_PID") 2>/dev/null; then
+        print_success "后端服务已启动 (PID: $(cat "$BACKEND_PID"))"
+    else
+        print_error "后端服务启动失败"
+        cat "$BACKEND_LOG"
+        exit 1
+    fi
 }
 
 # 启动前端
 start_frontend() {
-    echo -e "${BLUE}[6/6] 启动前端服务...${NC}"
+    print_step "6/6" "启动前端服务..."
 
     cd "$FRONTEND_DIR"
 
-    # 检查 Node.js
-    if ! command -v node &> /dev/null; then
-        echo -e "${RED}✗ Node.js 未安装${NC}"
-        exit 1
-    fi
-
-    # 检查 node_modules
     if [ ! -d "node_modules" ]; then
-        echo -e "${YELLOW}⚠️  依赖未安装，正在安装...${NC}"
+        print_warning "安装前端依赖..."
         npm install
     fi
 
-    # 启动前端服务
-    echo -e "${YELLOW}启动 React 开发服务器...${NC}"
+    mkdir -p "$LOG_DIR" "$PID_DIR"
+
     nohup npm start > "$FRONTEND_LOG" 2>&1 &
     echo $! > "$FRONTEND_PID"
 
-    # 等待前端启动
-    echo -e "${YELLOW}等待前端服务启动...${NC}"
-    for i in {1..60}; do
-        if curl -s http://localhost:3000 > /dev/null 2>&1; then
-            echo -e "${GREEN}✓ 前端服务启动成功 (PID: $(cat "$FRONTEND_PID"))${NC}"
-            return 0
-        fi
-        sleep 1
-    done
+    sleep 5
 
-    echo -e "${RED}✗ 前端服务启动超时，请查看日志: $FRONTEND_LOG${NC}"
-    exit 1
+    if kill -0 $(cat "$FRONTEND_PID") 2>/dev/null; then
+        print_success "前端服务已启动 (PID: $(cat "$FRONTEND_PID"))"
+    else
+        print_error "前端服务启动失败"
+        cat "$FRONTEND_LOG"
+        exit 1
+    fi
 }
 
-# 显示服务状态
+# 显示状态
 show_status() {
     echo ""
-    echo -e "${BLUE}========================================${NC}"
-    echo -e "${GREEN}✓ 所有服务启动成功！${NC}"
-    echo -e "${BLUE}========================================${NC}"
+    echo -e "${GREEN}========================================${NC}"
+    echo -e "${GREEN}   🎉 所有服务启动成功！${NC}"
+    echo -e "${GREEN}========================================${NC}"
     echo ""
-    echo -e "${YELLOW}服务信息:${NC}"
-    echo -e "  📊 PostgreSQL:  ${GREEN}localhost:5432${NC}"
-    echo -e "  🔧 pgAdmin:     ${GREEN}http://localhost:5050${NC}"
-    echo -e "  🚀 后端 API:    ${GREEN}http://localhost:8000${NC}"
-    echo -e "  📖 API 文档:    ${GREEN}http://localhost:8000/docs${NC}"
-    echo -e "  🎨 前端界面:    ${GREEN}http://localhost:3000${NC}"
+    echo -e "${BLUE}访问地址:${NC}"
+    echo -e "  前端界面: ${GREEN}http://localhost:$FRONTEND_PORT${NC}"
+    echo -e "  API 文档: ${GREEN}http://localhost:$BACKEND_PORT/docs${NC}"
+    if [ "$ENABLE_PGADMIN" = true ]; then
+        echo -e "  pgAdmin:  ${GREEN}http://localhost:5050${NC}"
+    fi
     echo ""
-    echo -e "${YELLOW}日志文件:${NC}"
-    echo -e "  后端日志: ${BLUE}$BACKEND_LOG${NC}"
-    echo -e "  前端日志: ${BLUE}$FRONTEND_LOG${NC}"
+    echo -e "${BLUE}日志文件:${NC}"
+    echo -e "  后端: $BACKEND_LOG"
+    echo -e "  前端: $FRONTEND_LOG"
     echo ""
-    echo -e "${YELLOW}管理命令:${NC}"
-    echo -e "  查看后端日志: ${BLUE}tail -f $BACKEND_LOG${NC}"
-    echo -e "  查看前端日志: ${BLUE}tail -f $FRONTEND_LOG${NC}"
-    echo -e "  停止所有服务: ${BLUE}./stop.sh${NC}"
+    echo -e "${BLUE}管理命令:${NC}"
+    echo -e "  查看状态: ${YELLOW}./check_status.sh${NC}"
+    echo -e "  停止服务: ${YELLOW}./stop.sh${NC}"
     echo ""
 }
 
-# 主流程
+# ==================== 主流程 ====================
+
 main() {
+    print_header
+
     # 检查是否已运行
     if check_running; then
         read -p "是否重启服务? (y/n): " -n 1 -r
@@ -294,22 +318,10 @@ main() {
     check_docker
     start_database
     check_python
-    init_database
+    init_backend
     start_backend
     start_frontend
     show_status
-
-    # 提示
-    echo -e "${GREEN}按 Ctrl+C 退出，服务将继续在后台运行${NC}"
-    echo ""
-
-    # 可选：实时显示日志
-    read -p "是否查看实时日志? (y/n): " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        echo -e "${YELLOW}显示后端日志 (Ctrl+C 退出):${NC}"
-        tail -f "$BACKEND_LOG"
-    fi
 }
 
 # 捕获 Ctrl+C

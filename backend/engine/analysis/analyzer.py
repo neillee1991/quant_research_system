@@ -90,6 +90,7 @@ class FactorAnalyzer:
 
     def _load_factor_data(self, factor_id: str, start_date: Optional[str],
                           end_date: Optional[str]) -> Optional[pl.DataFrame]:
+        """加载因子数据（支持分批加载大数据集）"""
         conditions = ["factor_id = %s"]
         params = [factor_id]
         if start_date:
@@ -100,9 +101,24 @@ class FactorAnalyzer:
             params.append(end_date)
 
         where = " AND ".join(conditions)
-        sql = f"SELECT ts_code, trade_date, factor_value FROM factor_values WHERE {where}"
+        sql = f"SELECT ts_code, trade_date, factor_value FROM factor_values WHERE {where} ORDER BY trade_date, ts_code"
+
         try:
-            df = self.db.query(sql, tuple(params))
+            # 先检查数据量
+            count_sql = f"SELECT COUNT(*) as cnt FROM factor_values WHERE {where}"
+            count_df = self.db.query(count_sql, tuple(params))
+            total_rows = count_df['cnt'][0] if not count_df.is_empty() else 0
+
+            # 如果数据量大于100万行，使用流式查询
+            if total_rows > 1_000_000:
+                logger.info(f"Large dataset detected ({total_rows} rows), using streaming query")
+                batches = []
+                for batch_df in self.db.query(sql, tuple(params), stream=True, batch_size=100000):
+                    batches.append(batch_df)
+                df = pl.concat(batches) if batches else pl.DataFrame()
+            else:
+                df = self.db.query(sql, tuple(params))
+
             return df if not df.is_empty() else None
         except Exception as e:
             logger.error(f"Failed to load factor data: {e}")
@@ -110,7 +126,7 @@ class FactorAnalyzer:
 
     def _load_price_data(self, factor_df: pl.DataFrame, start_date: Optional[str],
                          end_date: Optional[str], max_period: int) -> Optional[pl.DataFrame]:
-        """加载价格数据，需要额外加载 max_period 天用于计算远期收益"""
+        """加载价格数据（支持分批加载），需要额外加载 max_period 天用于计算远期收益"""
         min_date = factor_df["trade_date"].min()
         max_date = factor_df["trade_date"].max()
 
@@ -126,7 +142,24 @@ class FactorAnalyzer:
             ORDER BY ts_code, trade_date
         """
         try:
-            df = self.db.query(sql, (min_date, load_end))
+            # 检查数据量
+            count_sql = """
+                SELECT COUNT(*) as cnt FROM daily_data
+                WHERE trade_date >= %s AND trade_date <= %s
+            """
+            count_df = self.db.query(count_sql, (min_date, load_end))
+            total_rows = count_df['cnt'][0] if not count_df.is_empty() else 0
+
+            # 如果数据量大于100万行，使用流式查询
+            if total_rows > 1_000_000:
+                logger.info(f"Large price dataset detected ({total_rows} rows), using streaming query")
+                batches = []
+                for batch_df in self.db.query(sql, (min_date, load_end), stream=True, batch_size=100000):
+                    batches.append(batch_df)
+                df = pl.concat(batches) if batches else pl.DataFrame()
+            else:
+                df = self.db.query(sql, (min_date, load_end))
+
             return df if not df.is_empty() else None
         except Exception as e:
             logger.error(f"Failed to load price data: {e}")

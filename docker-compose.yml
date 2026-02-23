@@ -12,6 +12,8 @@ services:
       POSTGRES_USER: quant_user
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-quant_pass_2024}
       POSTGRES_INITDB_ARGS: "-E UTF8 --locale=C"
+      TZ: Asia/Shanghai
+      PGTZ: Asia/Shanghai
     ports:
       - "5432:5432"
     volumes:
@@ -23,6 +25,25 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    networks:
+      - quant_network
+
+  redis:
+    image: redis:7-alpine
+    container_name: quant_redis
+    command: redis-server --appendonly yes --maxmemory 2gb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - quant_network
 
   # pgAdmin 可选 - 如果网络问题无法拉取镜像，可以注释掉
   # 使用命令行工具或其他 PostgreSQL 客户端代替
@@ -40,9 +61,16 @@ services:
   #   depends_on:
   #     - postgres
   #   restart: unless-stopped
+  #   networks:
+  #     - quant_network
 
-# volumes:
-#   postgres_data:
-#     driver: local
+networks:
+  quant_network:
+    driver: bridge
+
+volumes:
+  redis_data:
+    driver: local
   # pgadmin_data:
   #   driver: local
+

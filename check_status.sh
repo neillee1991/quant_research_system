@@ -1,83 +1,116 @@
 #!/bin/bash
-# 服务状态检查脚本
+# ===================================================================
+# 量化研究系统 - 状态检查脚本
+# ===================================================================
 
-echo "========================================="
-echo "量化研究系统 - 服务状态检查"
-echo "========================================="
+# 加载配置
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/config/scripts.config.sh"
+
+echo -e "${BLUE}=========================================${NC}"
+echo -e "${BLUE}量化研究系统 - 服务状态检查${NC}"
+echo -e "${BLUE}=========================================${NC}"
 echo ""
 
 # 检查后端
-echo "1. 后端服务状态"
+echo -e "${BLUE}1. 后端服务状态${NC}"
 echo "-----------------------------------------"
-if lsof -ti:8000 > /dev/null 2>&1; then
-    echo "✅ 后端正在运行 (端口 8000)"
-    echo "   进程: $(lsof -ti:8000 | head -1)"
+if lsof -ti:$BACKEND_PORT > /dev/null 2>&1; then
+    echo -e "${GREEN}✅ 后端正在运行 (端口 $BACKEND_PORT)${NC}"
+    echo "   进程: $(lsof -ti:$BACKEND_PORT | head -1)"
 
     # 测试 API
-    if curl -s http://localhost:8000/api/v1/data/stocks > /dev/null 2>&1; then
-        echo "✅ API 响应正常"
+    if curl -s http://localhost:$BACKEND_PORT/api/v1/data/stocks > /dev/null 2>&1; then
+        echo -e "${GREEN}✅ API 响应正常${NC}"
     else
-        echo "❌ API 无响应"
+        echo -e "${RED}❌ API 无响应${NC}"
     fi
 else
-    echo "❌ 后端未运行"
-    echo "   启动命令: cd backend && source .venv/bin/activate && uvicorn app.main:app --reload"
+    echo -e "${RED}❌ 后端未运行${NC}"
 fi
 echo ""
 
 # 检查前端
-echo "2. 前端服务状态"
+echo -e "${BLUE}2. 前端服务状态${NC}"
 echo "-----------------------------------------"
-if lsof -ti:3000 > /dev/null 2>&1; then
-    echo "✅ 前端正在运行 (端口 3000)"
-    echo "   进程: $(lsof -ti:3000 | head -1)"
+if lsof -ti:$FRONTEND_PORT > /dev/null 2>&1; then
+    echo -e "${GREEN}✅ 前端正在运行 (端口 $FRONTEND_PORT)${NC}"
+    echo "   进程: $(lsof -ti:$FRONTEND_PORT | head -1)"
 
     # 测试前端
-    if curl -s http://localhost:3000 > /dev/null 2>&1; then
-        echo "✅ 前端页面可访问"
+    if curl -s http://localhost:$FRONTEND_PORT > /dev/null 2>&1; then
+        echo -e "${GREEN}✅ 前端页面可访问${NC}"
     else
-        echo "❌ 前端页面无响应"
+        echo -e "${RED}❌ 前端页面无响应${NC}"
     fi
 else
-    echo "❌ 前端未运行"
-    echo "   启动命令: cd frontend && npm start"
+    echo -e "${RED}❌ 前端未运行${NC}"
 fi
 echo ""
 
-# 检查数据库
-echo "3. 数据库状态"
+# 检查 PostgreSQL
+echo -e "${BLUE}3. PostgreSQL 状态${NC}"
 echo "-----------------------------------------"
-DB_PATH="/Users/bytedance/Claude/quant_research_system/data/quant.duckdb"
-if [ -f "$DB_PATH" ]; then
-    DB_SIZE=$(du -h "$DB_PATH" | cut -f1)
-    echo "✅ 数据库文件存在"
-    echo "   路径: $DB_PATH"
-    echo "   大小: $DB_SIZE"
+if docker ps | grep -q $POSTGRES_CONTAINER; then
+    echo -e "${GREEN}✅ PostgreSQL 容器运行中${NC}"
+
+    if docker exec $POSTGRES_CONTAINER pg_isready -U $POSTGRES_USER -d $POSTGRES_DB > /dev/null 2>&1; then
+        echo -e "${GREEN}✅ 数据库连接正常${NC}"
+
+        # 获取数据库大小
+        DB_SIZE=$(docker exec $POSTGRES_CONTAINER psql -U $POSTGRES_USER -d $POSTGRES_DB -t -c "SELECT pg_size_pretty(pg_database_size('$POSTGRES_DB'));" 2>/dev/null | xargs)
+        echo "   数据库大小: $DB_SIZE"
+    else
+        echo -e "${RED}❌ 数据库连接失败${NC}"
+    fi
 else
-    echo "❌ 数据库文件不存在"
+    echo -e "${RED}❌ PostgreSQL 容器未运行${NC}"
+fi
+echo ""
+
+# 检查 Redis
+echo -e "${BLUE}4. Redis 状态${NC}"
+echo "-----------------------------------------"
+if docker ps | grep -q $REDIS_CONTAINER; then
+    echo -e "${GREEN}✅ Redis 容器运行中${NC}"
+
+    if docker exec $REDIS_CONTAINER redis-cli ping > /dev/null 2>&1; then
+        echo -e "${GREEN}✅ Redis 连接正常${NC}"
+
+        # 获取 Redis 信息
+        REDIS_MEMORY=$(docker exec $REDIS_CONTAINER redis-cli info memory 2>/dev/null | grep "used_memory_human" | cut -d: -f2 | tr -d '\r')
+        REDIS_KEYS=$(docker exec $REDIS_CONTAINER redis-cli dbsize 2>/dev/null | tr -d '\r')
+        echo "   内存使用: $REDIS_MEMORY"
+        echo "   缓存键数: $REDIS_KEYS"
+    else
+        echo -e "${RED}❌ Redis 连接失败${NC}"
+    fi
+else
+    echo -e "${YELLOW}⚠️  Redis 容器未运行${NC}"
 fi
 echo ""
 
 # 检查日志
-echo "4. 最近的错误日志"
+echo -e "${BLUE}5. 最近的日志${NC}"
 echo "-----------------------------------------"
-if [ -f /tmp/backend.log ]; then
-    echo "后端日志 (最后 5 行):"
-    tail -5 /tmp/backend.log | grep -E "(ERROR|WARNING|Proxy error)" || echo "  无错误"
-fi
-if [ -f /tmp/frontend.log ]; then
-    echo "前端日志 (最后 5 行):"
-    tail -5 /tmp/frontend.log | grep -E "(ERROR|WARNING|Proxy error)" || echo "  无错误"
+if [ -f "$BACKEND_LOG" ]; then
+    echo "后端日志 (最后 3 行):"
+    tail -3 "$BACKEND_LOG" | sed 's/^/  /'
+else
+    echo -e "${YELLOW}⚠️  后端日志文件不存在${NC}"
 fi
 echo ""
 
 # 访问地址
-echo "5. 访问地址"
+echo -e "${BLUE}6. 访问地址${NC}"
 echo "-----------------------------------------"
-echo "📖 API 文档: http://localhost:8000/docs"
-echo "🌐 前端应用: http://localhost:3000"
+echo -e "📖 API 文档: ${GREEN}http://localhost:$BACKEND_PORT/docs${NC}"
+echo -e "🌐 前端应用: ${GREEN}http://localhost:$FRONTEND_PORT${NC}"
+if [ "$ENABLE_PGADMIN" = true ]; then
+    echo -e "🗄️  pgAdmin:  ${GREEN}http://localhost:5050${NC}"
+fi
 echo ""
 
-echo "========================================="
-echo "检查完成"
-echo "========================================="
+echo -e "${BLUE}=========================================${NC}"
+echo -e "${BLUE}检查完成${NC}"
+echo -e "${BLUE}=========================================${NC}"

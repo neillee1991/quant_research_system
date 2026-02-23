@@ -33,21 +33,45 @@ const StrategyCenter: React.FC = () => {
 
   useEffect(() => {
     if (!jobId || !polling) return;
-    const timer = setInterval(async () => {
-      const r = await mlApi.getStatus(jobId);
-      setStatus(r.data);
-      if (r.data.status === 'done' || r.data.status === 'failed') {
-        setPolling(false);
-        clearInterval(timer);
-        if (r.data.status === 'done') {
-          message.success('模型训练完成');
-          mlApi.getWeights().then((wr) => setWeights(wr.data.weights || {}));
+
+    let isCancelled = false;
+
+    const pollStatus = async () => {
+      if (isCancelled) return;
+
+      try {
+        const r = await mlApi.getStatus(jobId);
+        if (isCancelled) return;
+
+        setStatus(r.data);
+
+        if (r.data.status === 'done' || r.data.status === 'failed') {
+          setPolling(false);
+          if (r.data.status === 'done') {
+            message.success('模型训练完成');
+            mlApi.getWeights().then((wr) => setWeights(wr.data.weights || {}));
+          } else {
+            message.error('模型训练失败');
+          }
         } else {
-          message.error('模型训练失败');
+          // 任务未完成，继续轮询（间隔5秒）
+          setTimeout(pollStatus, 5000);
+        }
+      } catch (error) {
+        if (!isCancelled) {
+          console.error('Failed to poll status:', error);
+          // 出错后延长轮询间隔
+          setTimeout(pollStatus, 10000);
         }
       }
-    }, 3000);
-    return () => clearInterval(timer);
+    };
+
+    // 启动轮询
+    pollStatus();
+
+    return () => {
+      isCancelled = true;
+    };
   }, [jobId, polling]);
 
   const handleStartTraining = async () => {
