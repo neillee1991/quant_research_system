@@ -1,76 +1,55 @@
 services:
-  postgres:
-    image: postgres:16-alpine
-    container_name: quant_postgres
-    # ExFAT 卷上 macOS 会自动生成 ._ 元数据文件，导致 PG 启动失败
-    # 用 root 清理后再以 postgres 用户启动
-    user: root
-    command: >
-      sh -c "find /var/lib/postgresql/data -name '._*' -exec rm -f {} + 2>/dev/null; exec su-exec postgres docker-entrypoint.sh postgres"
+  dolphindb:
+    image: dolphindb/dolphindb:v3.00.5
+    container_name: quant_dolphindb
+    ports:
+      - "8848:8848"
+      - "8849:8849"
+    volumes:
+      - /Users/lisheng/Code/application/dolphin/etc:/dolphindb/etc
+      - /Users/lisheng/Code/application/dolphin/data:/dolphindb/data
     environment:
-      POSTGRES_DB: quant_research
-      POSTGRES_USER: quant_user
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-quant_pass_2024}
-      POSTGRES_INITDB_ARGS: "-E UTF8 --locale=C"
       TZ: Asia/Shanghai
-      PGTZ: Asia/Shanghai
-    ports:
-      - "5432:5432"
-    volumes:
-      - /Volumes/QuantData/postgresql:/var/lib/postgresql/data
-      - ./backend/database/init.sql:/docker-entrypoint-initdb.d/init.sql
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U quant_user -d quant_research"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8848/ || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
     networks:
       - quant_network
 
-  redis:
-    image: redis:7-alpine
-    container_name: quant_redis
-    command: redis-server --appendonly yes --maxmemory 2gb --maxmemory-policy allkeys-lru
+  prefect-server:
+    image: prefecthq/prefect:3-latest
+    container_name: quant_prefect
+    command: prefect server start --host 0.0.0.0
     ports:
-      - "6379:6379"
+      - "4200:4200"
+    environment:
+      PREFECT_SERVER_API_HOST: "0.0.0.0"
+      PREFECT_API_DATABASE_CONNECTION_URL: "sqlite+aiosqlite:////data/prefect.db"
+      TZ: Asia/Shanghai
     volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
+      - /Users/lisheng/Code/application/prefect:/data
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import httpx; httpx.get(\"http://localhost:4200/api/health\")' || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
     networks:
       - quant_network
-
-  # pgAdmin 可选 - 如果网络问题无法拉取镜像，可以注释掉
-  # 使用命令行工具或其他 PostgreSQL 客户端代替
-  # pgadmin:
-  #   image: dpage/pgadmin4:latest
-  #   container_name: quant_pgadmin
-  #   environment:
-  #     PGADMIN_DEFAULT_EMAIL: admin@quant.com
-  #     PGADMIN_DEFAULT_PASSWORD: admin123
-  #     PGADMIN_CONFIG_SERVER_MODE: 'False'
-  #   ports:
-  #     - "5050:80"
-  #   volumes:
-  #     - pgadmin_data:/var/lib/pgadmin
-  #   depends_on:
-  #     - postgres
-  #   restart: unless-stopped
-  #   networks:
-  #     - quant_network
 
 networks:
   quant_network:
     driver: bridge
-
-volumes:
-  redis_data:
-    driver: local
-  # pgadmin_data:
-  #   driver: local
 

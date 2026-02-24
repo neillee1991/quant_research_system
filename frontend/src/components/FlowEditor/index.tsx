@@ -10,7 +10,7 @@ import ReactFlow, {
   useEdgesState,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
-import { Button, Space, message } from 'antd';
+import { Button, Toast } from '@douyinfe/semi-ui';
 import { useFlowStore } from '../../store';
 import DataInputNode from './nodes/DataInputNode';
 import OperatorNode from './nodes/OperatorNode';
@@ -47,16 +47,16 @@ const FlowEditor: React.FC = () => {
       };
       const res = await strategyApi.backtest(graph);
       setResult(res.data);
-      message.success('Backtest completed');
+      Toast.success({ content: '回测完成' });
     } catch (e: any) {
-      message.error(e?.response?.data?.detail || 'Backtest failed');
+      Toast.error({ content: e?.response?.data?.detail || '回测失败' });
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div style={{ width: '100%', height: '70vh', border: '1px solid #303030', borderRadius: 8 }}>
+    <div style={{ width: '100%', height: '70vh', border: '1px solid var(--border-color)', borderRadius: 8 }}>
       <Toolbar onAddNode={(node) => setLocalNodes((ns) => [...ns, node])} />
       <ReactFlow
         nodes={localNodes}
@@ -72,8 +72,8 @@ const FlowEditor: React.FC = () => {
         <MiniMap />
       </ReactFlow>
       <div style={{ padding: 8, textAlign: 'right' }}>
-        <Button type="primary" onClick={handleRunBacktest}>
-          Run Backtest
+        <Button theme="solid" onClick={handleRunBacktest}>
+          运行回测
         </Button>
       </div>
     </div>

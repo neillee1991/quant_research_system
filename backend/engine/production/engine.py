@@ -2,6 +2,7 @@
 因子生产引擎
 负责数据加载、因子计算调度、结果存储
 """
+import pandas as pd
 import polars as pl
 from typing import Optional, Dict, Any, List
 from datetime import datetime
@@ -9,7 +10,6 @@ from datetime import datetime
 from app.core.logger import logger
 from app.core.utils import TradingCalendar
 from data_manager.processor import DataProcessor
-from store.partition_manager import PartitionManager
 from engine.production.registry import (
     FactorDefinition, StorageConfig, get_factor, get_registry, list_factors, discover_factors
 )
@@ -35,38 +35,7 @@ class ProductionEngine:
 
     def __init__(self, db_client):
         self.db = db_client
-        self.partition_mgr = PartitionManager(db_client)
         self.trading_cal = TradingCalendar.get_instance(db_client)
-        self._ensure_tables()
-
-    def _ensure_tables(self):
-        """确保运行记录表存在，并迁移 factor_values 表结构"""
-        try:
-            self.db.execute("""
-                CREATE TABLE IF NOT EXISTS production_task_run (
-                    id SERIAL PRIMARY KEY,
-                    factor_id VARCHAR(100) NOT NULL,
-                    mode VARCHAR(20),
-                    status VARCHAR(20) DEFAULT 'running',
-                    start_date VARCHAR(8),
-                    end_date VARCHAR(8),
-                    rows_affected INTEGER DEFAULT 0,
-                    duration_seconds DOUBLE PRECISION,
-                    error_message TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-        except Exception as e:
-            logger.debug(f"Ensure tables: {e}")
-
-        # 为 factor_values 表添加 quality_flag 列（如果不存在）
-        try:
-            self.db.execute("""
-                ALTER TABLE factor_values
-                ADD COLUMN IF NOT EXISTS quality_flag INTEGER DEFAULT 0
-            """)
-        except Exception as e:
-            logger.debug(f"Add quality_flag column: {e}")
 
     # 默认预处理选项
     DEFAULT_PREPROCESS = {
@@ -355,7 +324,7 @@ class ProductionEngine:
         """
         try:
             stock_info = self.db.query(
-                "SELECT ts_code, name, list_date FROM stock_basic"
+                f'SELECT ts_code, name, list_date FROM loadTable("{self.db._meta_db_path}", "stock_basic")'
             )
             if stock_info.is_empty():
                 return df
@@ -477,9 +446,7 @@ class ProductionEngine:
 
     def _save_to_unified_table(self, factor_id: str, df: pl.DataFrame) -> int:
         """保存到统一因子表"""
-        # 确保分区存在
-        if "trade_date" in df.columns:
-            self.partition_mgr.ensure_partitions(df["trade_date"])
+        # DolphinDB 自动管理分区，无需手动确保
 
         # 构造写入数据：ts_code, trade_date, factor_id, factor_value, quality_flag
         select_cols = [
@@ -528,25 +495,34 @@ class ProductionEngine:
             if db_pp:
                 merged_params["preprocess"] = db_pp
 
-            self.db.execute("""
-                INSERT INTO factor_metadata
-                    (factor_id, description, category, compute_mode, storage_target,
-                     params, last_computed_date, last_computed_at, updated_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                ON CONFLICT (factor_id) DO UPDATE SET
-                    description = EXCLUDED.description,
-                    category = EXCLUDED.category,
-                    compute_mode = EXCLUDED.compute_mode,
-                    storage_target = EXCLUDED.storage_target,
-                    params = EXCLUDED.params,
-                    last_computed_date = EXCLUDED.last_computed_date,
-                    last_computed_at = EXCLUDED.last_computed_at,
-                    updated_at = EXCLUDED.updated_at
-            """, (
-                factor_id, definition.description, definition.category,
-                definition.compute_mode, definition.storage.target,
-                json.dumps(merged_params), last_date
-            ))
+            now = datetime.now()
+            pdf = pd.DataFrame({
+                "factor_id": [factor_id],
+                "description": [definition.description or ""],
+                "category": [definition.category or "custom"],
+                "compute_mode": [definition.compute_mode or "incremental"],
+                "storage_target": [definition.storage.target or "factor_values"],
+                "params": [json.dumps(merged_params)],
+                "last_computed_date": [last_date],
+                "last_computed_at": [now],
+                "created_at": [now],
+                "updated_at": [now],
+            })
+            meta_db = self.db._meta_db_path
+            with self.db._lock:
+                self.db._ensure_connected()
+                # delete + insert 实现 upsert
+                self.db._session.run(
+                    f'fm = loadTable("{meta_db}", "factor_metadata");'
+                    f'delete from fm where factor_id = "{factor_id}"'
+                )
+                tmp = f"_meta_upd_{factor_id}"
+                self.db._session.upload({tmp: pdf})
+                self.db._session.run(
+                    f'fm = loadTable("{meta_db}", "factor_metadata");'
+                    f'tableInsert(fm, {tmp});'
+                    f"undef('{tmp}')"
+                )
         except Exception as e:
             logger.warning(f"Failed to update factor metadata: {e}")
 
@@ -593,20 +569,38 @@ class ProductionEngine:
     # ==================== 运行记录 ====================
 
     def _insert_run_record(self, factor_id: str, mode: str,
-                           start_date: Optional[str], end_date: Optional[str]) -> Optional[int]:
-        """插入运行记录，返回 run id"""
+                           start_date: Optional[str], end_date: Optional[str]) -> Optional[str]:
+        """插入运行记录，返回 run_id (时间戳字符串)"""
         try:
-            df = self.db.query(
-                """INSERT INTO production_task_run (factor_id, mode, status, start_date, end_date)
-                   VALUES (%s, %s, 'running', %s, %s) RETURNING id""",
-                (factor_id, mode, start_date, end_date)
-            )
-            return df["id"][0] if not df.is_empty() else None
+            now = datetime.now()
+            run_id = now.strftime("%Y%m%d%H%M%S%f")
+            pdf = pd.DataFrame({
+                "factor_id": [factor_id],
+                "mode": [mode or ""],
+                "status": ["running"],
+                "start_date": [start_date or ""],
+                "end_date": [end_date or ""],
+                "rows_affected": [0],
+                "duration_seconds": [0.0],
+                "error_message": [run_id],  # 借用 error_message 存 run_id 用于后续定位
+                "created_at": [now],
+            })
+            meta_db = self.db._meta_db_path
+            with self.db._lock:
+                self.db._ensure_connected()
+                tmp = f"_run_{run_id}"
+                self.db._session.upload({tmp: pdf})
+                self.db._session.run(
+                    f'ptr = loadTable("{meta_db}", "production_task_run");'
+                    f'tableInsert(ptr, {tmp});'
+                    f"undef('{tmp}')"
+                )
+            return run_id
         except Exception as e:
             logger.debug(f"Failed to insert run record: {e}")
             return None
 
-    def _finish_run_record(self, run_id: Optional[int], status: str,
+    def _finish_run_record(self, run_id: Optional[str], status: str,
                            rows: int, started_at: datetime,
                            error_msg: str = None):
         """更新运行记录的最终状态"""
@@ -614,12 +608,13 @@ class ProductionEngine:
             return
         elapsed = (datetime.now() - started_at).total_seconds()
         try:
+            meta_db = self.db._meta_db_path
+            err = (error_msg or "").replace('"', '\\"') if error_msg else ""
             self.db.execute(
-                """UPDATE production_task_run
-                   SET status = %s, rows_affected = %s,
-                       duration_seconds = %s, error_message = %s
-                   WHERE id = %s""",
-                (status, rows, elapsed, error_msg, run_id)
+                f'ptr = loadTable("{meta_db}", "production_task_run");'
+                f'update ptr set status = "{status}", rows_affected = {rows}, '
+                f'duration_seconds = {elapsed}, error_message = "{err}" '
+                f'where error_message = "{run_id}"'
             )
         except Exception as e:
             logger.debug(f"Failed to update run record: {e}")

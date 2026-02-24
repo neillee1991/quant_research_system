@@ -1,5 +1,5 @@
 import React from 'react';
-import { Button, Space, Tooltip } from 'antd';
+import { Button, Tooltip } from '@douyinfe/semi-ui';
 import { Node } from 'reactflow';
 
 interface Props {
@@ -39,17 +39,17 @@ const Toolbar: React.FC<Props> = ({ onAddNode }) => {
     });
 
   return (
-    <div style={{ padding: '8px 12px', borderBottom: '1px solid #303030', background: '#141414' }}>
-      <Space wrap>
-        <Tooltip title="Add data source node"><Button size="small" onClick={addDataInput}>+ Data Input</Button></Tooltip>
-        <Tooltip title="SMA operator"><Button size="small" onClick={() => addOperator('sma')}>+ SMA</Button></Tooltip>
-        <Tooltip title="EMA operator"><Button size="small" onClick={() => addOperator('ema')}>+ EMA</Button></Tooltip>
-        <Tooltip title="RSI operator"><Button size="small" onClick={() => addOperator('rsi')}>+ RSI</Button></Tooltip>
-        <Tooltip title="MACD operator"><Button size="small" onClick={() => addOperator('macd')}>+ MACD</Button></Tooltip>
-        <Tooltip title="Bollinger Bands"><Button size="small" onClick={() => addOperator('bollinger')}>+ Bollinger</Button></Tooltip>
-        <Tooltip title="Signal node"><Button size="small" onClick={addSignal}>+ Signal</Button></Tooltip>
-        <Tooltip title="Backtest output"><Button size="small" onClick={addOutput}>+ Output</Button></Tooltip>
-      </Space>
+    <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--border-color)', background: 'var(--bg-secondary)' }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+        <Tooltip content="Add data source node"><Button size="small" onClick={addDataInput}>+ Data Input</Button></Tooltip>
+        <Tooltip content="SMA operator"><Button size="small" onClick={() => addOperator('sma')}>+ SMA</Button></Tooltip>
+        <Tooltip content="EMA operator"><Button size="small" onClick={() => addOperator('ema')}>+ EMA</Button></Tooltip>
+        <Tooltip content="RSI operator"><Button size="small" onClick={() => addOperator('rsi')}>+ RSI</Button></Tooltip>
+        <Tooltip content="MACD operator"><Button size="small" onClick={() => addOperator('macd')}>+ MACD</Button></Tooltip>
+        <Tooltip content="Bollinger Bands"><Button size="small" onClick={() => addOperator('bollinger')}>+ Bollinger</Button></Tooltip>
+        <Tooltip content="Signal node"><Button size="small" onClick={addSignal}>+ Signal</Button></Tooltip>
+        <Tooltip content="Backtest output"><Button size="small" onClick={addOutput}>+ Output</Button></Tooltip>
+      </div>
     </div>
   );
 };

@@ -1,0 +1,351 @@
+// ============================================================
+// 量化研究系统 DolphinDB 数据库初始化脚本
+// 对应 PostgreSQL init.sql，迁移至 DolphinDB TSDB 引擎
+// ============================================================
+
+// 登录（用户名密码由 init_dolphindb.py 通过 session.login 完成，此处做兜底）
+try { login("admin", "123456") } catch(ex) { /* 已通过 session 登录 */ }
+
+// ==================== 行情数据库 dfs://quant_research ====================
+// COMPO 分区: VALUE(trade_date 按月) × HASH(ts_code, 50)
+// 引擎: TSDB
+
+if (!existsDatabase("dfs://quant_research")) {
+    // 月份分区范围: 2010.01 ~ 2030.12
+    monthRange = 2010.01M..2030.12M
+    dbDate = database("", VALUE, monthRange)
+    dbCode = database("", HASH, [SYMBOL, 50])
+    db = database("dfs://quant_research", COMPO, [dbDate, dbCode], engine="TSDB")
+    print("已创建数据库 dfs://quant_research")
+} else {
+    db = database("dfs://quant_research")
+    print("数据库 dfs://quant_research 已存在，跳过创建")
+}
+
+// ---------- 1. daily_data 日线行情 ----------
+if (!existsTable("dfs://quant_research", "daily_data")) {
+    schema_daily = table(
+        array(DATE, 0) as trade_date,
+        array(SYMBOL, 0) as ts_code,
+        array(DOUBLE, 0) as open,
+        array(DOUBLE, 0) as high,
+        array(DOUBLE, 0) as low,
+        array(DOUBLE, 0) as close,
+        array(DOUBLE, 0) as vol,
+        array(DOUBLE, 0) as amount,
+        array(DOUBLE, 0) as pct_chg
+    )
+    createPartitionedTable(
+        dbHandle=db, table=schema_daily, tableName="daily_data",
+        partitionColumns=["trade_date", "ts_code"],
+        sortColumns=["ts_code", "trade_date"],
+        keepDuplicates=LAST
+    )
+    print("已创建表 daily_data (日线行情)")
+} else {
+    print("表 daily_data 已存在，跳过")
+}
+
+// ---------- 2. daily_basic 每日指标 ----------
+if (!existsTable("dfs://quant_research", "daily_basic")) {
+    schema_basic = table(
+        array(SYMBOL, 0) as ts_code,
+        array(DATE, 0) as trade_date,
+        array(DOUBLE, 0) as close,
+        array(DOUBLE, 0) as turnover_rate,
+        array(DOUBLE, 0) as volume_ratio,
+        array(DOUBLE, 0) as pe,
+        array(DOUBLE, 0) as pb
+    )
+    createPartitionedTable(
+        dbHandle=db, table=schema_basic, tableName="daily_basic",
+        partitionColumns=["trade_date", "ts_code"],
+        sortColumns=["ts_code", "trade_date"],
+        keepDuplicates=LAST
+    )
+    print("已创建表 daily_basic (每日指标)")
+} else {
+    print("表 daily_basic 已存在，跳过")
+}
+
+// ---------- 3. adj_factor 复权因子 ----------
+if (!existsTable("dfs://quant_research", "adj_factor")) {
+    schema_adj = table(
+        array(SYMBOL, 0) as ts_code,
+        array(DATE, 0) as trade_date,
+        array(DOUBLE, 0) as adj_factor
+    )
+    createPartitionedTable(
+        dbHandle=db, table=schema_adj, tableName="adj_factor",
+        partitionColumns=["trade_date", "ts_code"],
+        sortColumns=["ts_code", "trade_date"],
+        keepDuplicates=LAST
+    )
+    print("已创建表 adj_factor (复权因子)")
+} else {
+    print("表 adj_factor 已存在，跳过")
+}
+
+// ---------- 4. index_daily 指数日线 ----------
+if (!existsTable("dfs://quant_research", "index_daily")) {
+    schema_idx = table(
+        array(SYMBOL, 0) as ts_code,
+        array(DATE, 0) as trade_date,
+        array(DOUBLE, 0) as open,
+        array(DOUBLE, 0) as high,
+        array(DOUBLE, 0) as low,
+        array(DOUBLE, 0) as close,
+        array(DOUBLE, 0) as pre_close,
+        array(DOUBLE, 0) as change,
+        array(DOUBLE, 0) as pct_chg,
+        array(DOUBLE, 0) as vol,
+        array(DOUBLE, 0) as amount
+    )
+    createPartitionedTable(
+        dbHandle=db, table=schema_idx, tableName="index_daily",
+        partitionColumns=["trade_date", "ts_code"],
+        sortColumns=["ts_code", "trade_date"],
+        keepDuplicates=LAST
+    )
+    print("已创建表 index_daily (指数日线)")
+} else {
+    print("表 index_daily 已存在，跳过")
+}
+
+// ---------- 5. moneyflow 资金流向 ----------
+if (!existsTable("dfs://quant_research", "moneyflow")) {
+    schema_mf = table(
+        array(SYMBOL, 0) as ts_code,
+        array(DATE, 0) as trade_date,
+        array(DOUBLE, 0) as buy_sm_vol,
+        array(DOUBLE, 0) as buy_sm_amount,
+        array(DOUBLE, 0) as sell_sm_vol,
+        array(DOUBLE, 0) as sell_sm_amount,
+        array(DOUBLE, 0) as buy_md_vol,
+        array(DOUBLE, 0) as buy_md_amount,
+        array(DOUBLE, 0) as sell_md_vol,
+        array(DOUBLE, 0) as sell_md_amount,
+        array(DOUBLE, 0) as buy_lg_vol,
+        array(DOUBLE, 0) as buy_lg_amount,
+        array(DOUBLE, 0) as sell_lg_vol,
+        array(DOUBLE, 0) as sell_lg_amount,
+        array(DOUBLE, 0) as buy_elg_vol,
+        array(DOUBLE, 0) as buy_elg_amount,
+        array(DOUBLE, 0) as sell_elg_vol,
+        array(DOUBLE, 0) as sell_elg_amount,
+        array(DOUBLE, 0) as net_mf_vol,
+        array(DOUBLE, 0) as net_mf_amount
+    )
+    createPartitionedTable(
+        dbHandle=db, table=schema_mf, tableName="moneyflow",
+        partitionColumns=["trade_date", "ts_code"],
+        sortColumns=["ts_code", "trade_date"],
+        keepDuplicates=LAST
+    )
+    print("已创建表 moneyflow (资金流向)")
+} else {
+    print("表 moneyflow 已存在，跳过")
+}
+
+// ---------- 6. factor_values 因子值 ----------
+// 注意: TSDB 引擎要求 sortColumns 最后一列必须是整数或时间类型
+// factor_id 为 SYMBOL，不能放在最后；trade_date (DATE) 放最后
+if (!existsTable("dfs://quant_research", "factor_values")) {
+    schema_fv = table(
+        array(SYMBOL, 0) as ts_code,
+        array(DATE, 0) as trade_date,
+        array(SYMBOL, 0) as factor_id,
+        array(DOUBLE, 0) as factor_value,
+        array(TIMESTAMP, 0) as updated_at
+    )
+    createPartitionedTable(
+        dbHandle=db, table=schema_fv, tableName="factor_values",
+        partitionColumns=["trade_date", "ts_code"],
+        sortColumns=["factor_id", "ts_code", "trade_date"],
+        keepDuplicates=LAST
+    )
+    print("已创建表 factor_values (因子值)")
+} else {
+    print("表 factor_values 已存在，跳过")
+}
+
+// ==================== 元数据库 dfs://quant_meta ====================
+// 元数据表数据量小，全部使用维度表（非分区表），无需 id 列
+// 使用 HASH 分区仅为满足 DolphinDB 分布式数据库创建要求
+
+if (!existsDatabase("dfs://quant_meta")) {
+    dbMeta = database("dfs://quant_meta", VALUE, 1..1)
+    print("已创建数据库 dfs://quant_meta")
+} else {
+    dbMeta = database("dfs://quant_meta")
+    print("数据库 dfs://quant_meta 已存在，跳过创建")
+}
+
+// ---------- 7. trade_cal 交易日历（维度表）----------
+// 字段均为 STRING/SYMBOL，无时间分区列，适合维度表
+if (!existsTable("dfs://quant_meta", "trade_cal")) {
+    schema_tc = table(
+        array(SYMBOL, 0) as exchange,
+        array(STRING, 0) as cal_date,
+        array(STRING, 0) as is_open,
+        array(STRING, 0) as pretrade_date
+    )
+    createTable(dbHandle=dbMeta, table=schema_tc, tableName="trade_cal")
+    print("已创建表 trade_cal (交易日历，维度表)")
+} else {
+    print("表 trade_cal 已存在，跳过")
+}
+
+// ---------- 8. production_task_run 因子计算运行记录（维度表）----------
+if (!existsTable("dfs://quant_meta", "production_task_run")) {
+    schema_ptr = table(
+        array(SYMBOL, 0) as factor_id,
+        array(SYMBOL, 0) as mode,
+        array(SYMBOL, 0) as status,
+        array(STRING, 0) as start_date,
+        array(STRING, 0) as end_date,
+        array(INT, 0) as rows_affected,
+        array(DOUBLE, 0) as duration_seconds,
+        array(STRING, 0) as error_message,
+        array(TIMESTAMP, 0) as created_at
+    )
+    createTable(dbHandle=dbMeta, table=schema_ptr, tableName="production_task_run")
+    print("已创建表 production_task_run (因子计算运行记录，维度表)")
+} else {
+    print("表 production_task_run 已存在，跳过")
+}
+
+// ---------- 9. sync_log 同步状态（维度表）----------
+if (!existsTable("dfs://quant_meta", "sync_log")) {
+    schema_sl = table(
+        array(SYMBOL, 0) as source,
+        array(SYMBOL, 0) as data_type,
+        array(STRING, 0) as last_date,
+        array(TIMESTAMP, 0) as updated_at
+    )
+    createTable(dbHandle=dbMeta, table=schema_sl, tableName="sync_log")
+    print("已创建表 sync_log (同步状态，维度表)")
+} else {
+    print("表 sync_log 已存在，跳过")
+}
+
+// ---------- 10. sync_log_history 同步历史（维度表）----------
+if (!existsTable("dfs://quant_meta", "sync_log_history")) {
+    schema_slh = table(
+        array(SYMBOL, 0) as source,
+        array(SYMBOL, 0) as data_type,
+        array(STRING, 0) as last_date,
+        array(STRING, 0) as sync_date,
+        array(INT, 0) as rows_synced,
+        array(SYMBOL, 0) as status,
+        array(TIMESTAMP, 0) as created_at
+    )
+    createTable(dbHandle=dbMeta, table=schema_slh, tableName="sync_log_history")
+    print("已创建表 sync_log_history (同步历史，维度表)")
+} else {
+    print("表 sync_log_history 已存在，跳过")
+}
+
+// ---------- 11. stock_basic 股票基本信息（维度表）----------
+if (!existsTable("dfs://quant_meta", "stock_basic")) {
+    schema_sb = table(
+        array(SYMBOL, 0) as ts_code,
+        array(STRING, 0) as symbol,
+        array(STRING, 0) as name,
+        array(STRING, 0) as area,
+        array(STRING, 0) as industry,
+        array(STRING, 0) as market,
+        array(STRING, 0) as list_date
+    )
+    createTable(dbHandle=dbMeta, table=schema_sb, tableName="stock_basic")
+    print("已创建表 stock_basic (股票基本信息，维度表)")
+} else {
+    print("表 stock_basic 已存在，跳过")
+}
+
+// ---------- 12. factor_metadata 因子元数据（维度表）----------
+if (!existsTable("dfs://quant_meta", "factor_metadata")) {
+    schema_fm = table(
+        array(SYMBOL, 0) as factor_id,
+        array(STRING, 0) as description,
+        array(STRING, 0) as category,
+        array(STRING, 0) as compute_mode,
+        array(STRING, 0) as storage_target,
+        array(STRING, 0) as params,
+        array(STRING, 0) as last_computed_date,
+        array(TIMESTAMP, 0) as last_computed_at,
+        array(TIMESTAMP, 0) as created_at,
+        array(TIMESTAMP, 0) as updated_at
+    )
+    createTable(dbHandle=dbMeta, table=schema_fm, tableName="factor_metadata")
+    print("已创建表 factor_metadata (因子元数据，维度表)")
+} else {
+    print("表 factor_metadata 已存在，跳过")
+}
+
+// ---------- 13. factor_analysis 因子分析结果（维度表）----------
+if (!existsTable("dfs://quant_meta", "factor_analysis")) {
+    schema_fa = table(
+        array(SYMBOL, 0) as factor_id,
+        array(TIMESTAMP, 0) as analysis_date,
+        array(STRING, 0) as start_date,
+        array(STRING, 0) as end_date,
+        array(STRING, 0) as periods,
+        array(DOUBLE, 0) as ic_mean,
+        array(DOUBLE, 0) as ic_std,
+        array(DOUBLE, 0) as rank_ic_mean,
+        array(DOUBLE, 0) as rank_ic_std,
+        array(DOUBLE, 0) as ic_ir,
+        array(DOUBLE, 0) as turnover_mean,
+        array(TIMESTAMP, 0) as created_at
+    )
+    createTable(dbHandle=dbMeta, table=schema_fa, tableName="factor_analysis")
+    print("已创建表 factor_analysis (因子分析结果，维度表)")
+} else {
+    print("表 factor_analysis 已存在，跳过")
+}
+
+// ---------- 14. dag_run_log DAG执行日志（维度表）----------
+if (!existsTable("dfs://quant_meta", "dag_run_log")) {
+    schema_drl = table(
+        array(SYMBOL, 0) as dag_id,
+        array(STRING, 0) as run_id,
+        array(SYMBOL, 0) as status,
+        array(STRING, 0) as target_date,
+        array(TIMESTAMP, 0) as started_at,
+        array(TIMESTAMP, 0) as finished_at,
+        array(SYMBOL, 0) as trigger_type,
+        array(SYMBOL, 0) as run_type,
+        array(STRING, 0) as backfill_id,
+        array(TIMESTAMP, 0) as created_at
+    )
+    createTable(dbHandle=dbMeta, table=schema_drl, tableName="dag_run_log")
+    print("已创建表 dag_run_log (DAG执行日志，维度表)")
+} else {
+    print("表 dag_run_log 已存在，跳过")
+}
+
+// ---------- 15. dag_task_log DAG任务日志（维度表）----------
+if (!existsTable("dfs://quant_meta", "dag_task_log")) {
+    schema_dtl = table(
+        array(STRING, 0) as run_id,
+        array(SYMBOL, 0) as task_id,
+        array(SYMBOL, 0) as task_type,
+        array(SYMBOL, 0) as status,
+        array(TIMESTAMP, 0) as started_at,
+        array(TIMESTAMP, 0) as finished_at,
+        array(INT, 0) as rows_affected,
+        array(STRING, 0) as error_message,
+        array(TIMESTAMP, 0) as created_at
+    )
+    createTable(dbHandle=dbMeta, table=schema_dtl, tableName="dag_task_log")
+    print("已创建表 dag_task_log (DAG任务日志，维度表)")
+} else {
+    print("表 dag_task_log 已存在，跳过")
+}
+
+print("========================================")
+print("DolphinDB 数据库初始化完成!")
+print("  dfs://quant_research : 6 张行情/因子表 (TSDB)")
+print("  dfs://quant_meta     : 9 张元数据维度表")
+print("========================================")

@@ -135,20 +135,8 @@ class SyncLogManager:
                 "status": ["success"],
                 "created_at": [datetime.now()]
             })
-            # 使用 execute 直接插入，不使用 upsert
-            sql = """
-                INSERT INTO sync_log_history (source, data_type, last_date, sync_date, rows_synced, status, created_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
-            """
-            self.repository.execute(sql, (
-                "tushare_config",
-                task_id,
-                sync_date,
-                sync_date,
-                rows_synced,
-                "success",
-                datetime.now()
-            ))
+            # 使用 bulk_copy 直接追加到历史表
+            self.repository.bulk_copy("sync_log_history", history_data)
 
             logger.debug(f"Updated sync log for {task_id}: {sync_date}, rows: {rows_synced}")
         except Exception as e:
@@ -183,31 +171,42 @@ class TableManager:
         table_name: str,
         schema: Dict[str, Dict[str, Any]]
     ) -> None:
-        """添加缺失的列"""
+        """添加缺失的列（DolphinDB）"""
         if not schema:
             return
 
         try:
-            # 查询现有列
-            sql = """
-                SELECT column_name
-                FROM information_schema.columns
-                WHERE table_schema = 'public' AND table_name = %s
-            """
-            result = self.repository.query(sql, (table_name,))
-            existing_cols = set(result["column_name"].to_list()) if not result.is_empty() else set()
+            # 使用 DolphinDB schema() 获取现有列
+            db_path = self.repository._resolve_db_path(table_name)
+            col_df = self.repository.execute(
+                f'schema(loadTable("{db_path}", "{table_name}")).colDefs'
+            )
+            existing_cols = set()
+            if col_df is not None and hasattr(col_df, 'name'):
+                existing_cols = set(col_df['name'].tolist())
+            elif col_df is not None and hasattr(col_df, 'to_list'):
+                existing_cols = set(col_df['name'].to_list())
+
+            # DolphinDB 类型映射
+            type_map = {
+                "VARCHAR": "STRING", "TEXT": "STRING", "CHAR": "STRING",
+                "INTEGER": "INT", "INT": "INT", "BIGINT": "LONG",
+                "DOUBLE PRECISION": "DOUBLE", "DOUBLE": "DOUBLE",
+                "FLOAT": "FLOAT", "REAL": "FLOAT",
+                "BOOLEAN": "BOOL", "DATE": "DATE",
+                "TIMESTAMP": "TIMESTAMP", "DATETIME": "TIMESTAMP",
+            }
 
             for col_name, col_def in schema.items():
                 if col_name not in existing_cols:
-                    col_type = col_def.get("type", "VARCHAR")
-                    # 转换 DuckDB 类型到 PostgreSQL 类型
-                    if col_type == "DOUBLE":
-                        col_type = "DOUBLE PRECISION"
-                    nullable = "" if col_def.get("nullable", True) else "NOT NULL"
+                    pg_type = col_def.get("type", "VARCHAR").upper()
+                    ddb_type = type_map.get(pg_type, "STRING")
                     try:
-                        alter_sql = f"ALTER TABLE {table_name} ADD COLUMN {col_name} {col_type} {nullable}"
-                        self.repository.execute(alter_sql)
-                        logger.info(f"Added column {col_name} to {table_name}")
+                        self.repository.execute(
+                            f'addColumn(loadTable("{db_path}", "{table_name}"), '
+                            f'"{col_name}", {ddb_type})'
+                        )
+                        logger.info(f"Added column {col_name} ({ddb_type}) to {table_name}")
                     except Exception as e:
                         logger.warning(f"Failed to add column {col_name}: {e}")
         except Exception as e:
@@ -218,16 +217,26 @@ class TableManager:
         table_name: str,
         primary_keys: List[str]
     ) -> None:
-        """创建基础表结构"""
-        pk_clause = f"PRIMARY KEY ({', '.join(primary_keys)})"
-        sql = f"""
-            CREATE TABLE IF NOT EXISTS {table_name} (
-                ts_code VARCHAR,
-                trade_date VARCHAR,
-                {pk_clause}
-            )
+        """创建基础表结构（DolphinDB）
+        注意：DolphinDB 的分区表应在 init_dolphindb.dos 中预先创建。
+        此方法仅作为 fallback，创建维度表。
         """
-        self.repository.execute(sql)
+        try:
+            db_path = self.repository._resolve_db_path(table_name)
+            # 检查表是否已存在
+            exists = self.repository.table_exists(table_name)
+            if exists:
+                return
+
+            # 创建一个基础维度表
+            self.repository.execute(f"""
+                t = table(1:0, `ts_code`trade_date, [SYMBOL, STRING]);
+                db = database("{db_path}");
+                db.createTable(t, `{table_name})
+            """)
+            logger.info(f"Created basic dimension table {table_name}")
+        except Exception as e:
+            logger.warning(f"Failed to create basic table {table_name}: {e}")
 
 
 class TushareAPIClient:

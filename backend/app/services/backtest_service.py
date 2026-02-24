@@ -32,12 +32,15 @@ class BacktestService:
         backtest_config = self._build_backtest_config(config)
 
         try:
-            # 执行回测
-            result = self.backtest_engine.run(
-                price_data,
-                signals,
-                backtest_config
-            )
+            # 合并价格数据和信号
+            join_cols = ["trade_date"]
+            if "ts_code" in price_data.columns and "ts_code" in signals.columns:
+                join_cols.append("ts_code")
+            merged_df = price_data.join(signals, on=join_cols, how="inner")
+
+            # 执行回测（VectorEngine 接受合并后的 DataFrame）
+            self.backtest_engine = VectorEngine(config=backtest_config)
+            result = self.backtest_engine.run(merged_df, "signal")
 
             # 转换结果
             return self._format_backtest_result(result)
@@ -139,12 +142,12 @@ class BacktestService:
                 "initial_capital",
                 settings.backtest.initial_capital
             ),
-            commission=config.get(
-                "commission",
+            commission_rate=config.get(
+                "commission_rate",
                 settings.backtest.commission_rate
             ),
-            slippage=config.get(
-                "slippage",
+            slippage_rate=config.get(
+                "slippage_rate",
                 settings.backtest.slippage_rate
             )
         )
@@ -155,15 +158,9 @@ class BacktestService:
     ) -> Dict[str, Any]:
         """格式化回测结果"""
         return {
-            "total_return": result.total_return,
-            "annual_return": result.annual_return,
-            "sharpe_ratio": result.sharpe_ratio,
-            "max_drawdown": result.max_drawdown,
-            "win_rate": result.win_rate,
-            "profit_factor": result.profit_factor,
-            "total_trades": result.total_trades,
-            "equity_curve": result.equity_curve.to_dict() if hasattr(result, "equity_curve") else {},
-            "trades": result.trades.to_dict() if hasattr(result, "trades") else {}
+            **result.metrics,
+            "equity_curve": result.equity_curve.to_dicts() if not result.equity_curve.is_empty() else [],
+            "trades": result.trades.to_dicts() if not result.trades.is_empty() else [],
         }
 
     def _generate_signals_from_strategy(

@@ -14,15 +14,17 @@ BACKEND_RELOAD="--reload"  # 开发模式自动重载，生产环境设为空
 # 前端服务
 FRONTEND_PORT="3000"
 
+# Prefect 服务
+PREFECT_PORT="4200"
+
 # ==================== Docker 服务 ====================
 
-# PostgreSQL
-POSTGRES_CONTAINER="quant_postgres"
-POSTGRES_USER="quant_user"
-POSTGRES_DB="quant_research"
+# DolphinDB
+DOLPHINDB_CONTAINER="quant_dolphindb"
+DOLPHINDB_PORT="8848"
 
-# Redis
-REDIS_CONTAINER="quant_redis"
+# Prefect
+PREFECT_CONTAINER="quant_prefect"
 
 # ==================== 路径配置 ====================
 
@@ -35,11 +37,13 @@ FRONTEND_DIR="$SCRIPT_DIR/frontend"
 LOG_DIR="$SCRIPT_DIR/logs"
 BACKEND_LOG="$LOG_DIR/backend.log"
 FRONTEND_LOG="$LOG_DIR/frontend.log"
+PREFECT_WORKER_LOG="$LOG_DIR/prefect_worker.log"
 
 # PID 文件目录
 PID_DIR="$SCRIPT_DIR/.pids"
 BACKEND_PID="$PID_DIR/backend.pid"
 FRONTEND_PID="$PID_DIR/frontend.pid"
+PREFECT_WORKER_PID="$PID_DIR/prefect_worker.pid"
 
 # ==================== Python 配置 ====================
 
@@ -50,19 +54,15 @@ PYTHON_MIN_MINOR=11
 # 虚拟环境目录
 VENV_DIR=".venv"
 
-# ==================== 数据库配置 ====================
+# ==================== DolphinDB 配置 ====================
 
-# 数据库初始化等待时间（秒）
-DB_INIT_WAIT=5
+# DolphinDB 数据目录（外部卷）
+DOLPHINDB_DATA_DIR="/Volumes/QuantData/dolphindb"
 
-# 数据库健康检查最大尝试次数
+# DolphinDB 健康检查
+DB_INIT_WAIT=10
 DB_MAX_ATTEMPTS=30
-
-# 数据库健康检查间隔（秒）
-DB_CHECK_INTERVAL=2
-
-# 性能索引最小数量（低于此值会提示）
-MIN_INDEX_COUNT=20
+DB_CHECK_INTERVAL=3
 
 # ==================== 颜色配置 ====================
 
@@ -74,23 +74,8 @@ NC='\033[0m'  # No Color
 
 # ==================== 功能开关 ====================
 
-# 是否启动 Redis（true/false）
-ENABLE_REDIS=true
-
-# 是否启动 pgAdmin（true/false）
-ENABLE_PGADMIN=false
-
-# 是否检查性能索引（true/false）
-CHECK_INDEXES=true
-
-# 是否检查 Redis 缓存（true/false）
-CHECK_REDIS=true
-
 # 是否自动安装依赖（true/false）
 AUTO_INSTALL_DEPS=true
 
-# ==================== 清理配置 ====================
-
-# macOS ExFAT 卷元数据文件清理
-PG_DATA_DIR="/Volumes/QuantData/postgresql"
-CLEAN_MACOS_METADATA=true
+# 是否启动 Prefect Worker（true/false）
+ENABLE_PREFECT_WORKER=true

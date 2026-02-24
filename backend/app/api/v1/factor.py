@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 import polars as pl
-from store.postgres_client import db_client
+from store.dolphindb_client import db_client
 from engine.factors.technical import TechnicalFactors, CrossSectionalFactors
 from engine.factors.financial import FactorAnalyzer
 from app.core.logger import logger

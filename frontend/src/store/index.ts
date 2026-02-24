@@ -32,3 +32,27 @@ export const useBacktestStore = create<BacktestState>((set) => ({
   setResult: (result) => set({ result }),
   setLoading: (loading) => set({ loading }),
 }));
+
+type ThemeMode = 'dark' | 'light';
+
+interface ThemeState {
+  mode: ThemeMode;
+  toggle: () => void;
+  setMode: (mode: ThemeMode) => void;
+}
+
+export const useThemeStore = create<ThemeState>((set) => ({
+  mode: (localStorage.getItem('theme-mode') as ThemeMode) || 'dark',
+  toggle: () =>
+    set((s) => {
+      const next = s.mode === 'dark' ? 'light' : 'dark';
+      localStorage.setItem('theme-mode', next);
+      document.body.setAttribute('theme-mode', next);
+      return { mode: next };
+    }),
+  setMode: (mode) => {
+    localStorage.setItem('theme-mode', mode);
+    document.body.setAttribute('theme-mode', mode);
+    set({ mode });
+  },
+}));

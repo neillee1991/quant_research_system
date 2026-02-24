@@ -6,7 +6,7 @@ from typing import Dict, List, Optional
 from app.core.utils import RateLimiter, RetryPolicy
 from app.core.config import settings
 from app.core.logger import logger
-from store.postgres_client import db_client
+from store.dolphindb_client import db_client
 from data_manager.sync_components import (
     SyncConfigManager,
     SyncLogManager,

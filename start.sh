@@ -1,7 +1,7 @@
 #!/bin/bash
 # ===================================================================
 # 量化研究系统 - 一键启动脚本
-# 自动启动数据库、后端和前端服务
+# 自动启动 DolphinDB、Prefect、后端和前端服务
 # ===================================================================
 
 set -e
@@ -52,30 +52,23 @@ check_running() {
 stop_services() {
     print_warning "正在停止已有服务..."
 
-    if [ -f "$BACKEND_PID" ]; then
-        BACKEND_PID_NUM=$(cat "$BACKEND_PID")
-        if kill -0 "$BACKEND_PID_NUM" 2>/dev/null; then
-            kill "$BACKEND_PID_NUM"
-            print_success "后端服务已停止"
+    for pid_file in "$BACKEND_PID" "$FRONTEND_PID" "$PREFECT_WORKER_PID"; do
+        if [ -f "$pid_file" ]; then
+            PID_NUM=$(cat "$pid_file")
+            if kill -0 "$PID_NUM" 2>/dev/null; then
+                kill "$PID_NUM"
+                print_success "已停止进程 $PID_NUM"
+            fi
+            rm -f "$pid_file"
         fi
-        rm -f "$BACKEND_PID"
-    fi
-
-    if [ -f "$FRONTEND_PID" ]; then
-        FRONTEND_PID_NUM=$(cat "$FRONTEND_PID")
-        if kill -0 "$FRONTEND_PID_NUM" 2>/dev/null; then
-            kill "$FRONTEND_PID_NUM"
-            print_success "前端服务已停止"
-        fi
-        rm -f "$FRONTEND_PID"
-    fi
+    done
 
     sleep 2
 }
 
 # 检查 Docker
 check_docker() {
-    print_step "1/6" "检查 Docker 环境..."
+    print_step "1/7" "检查 Docker 环境..."
 
     if ! command -v docker &> /dev/null; then
         print_error "Docker 未安装"
@@ -90,33 +83,29 @@ check_docker() {
     print_success "Docker 已运行"
 }
 
-# 启动数据库
-start_database() {
-    print_step "2/6" "启动数据库服务..."
+# 启动基础服务
+start_infrastructure() {
+    print_step "2/7" "启动基础服务 (DolphinDB + Prefect)..."
 
     cd "$SCRIPT_DIR"
+    DOLPHINDB_DATA_DIR="/Users/lisheng/Code/application/dolphin"
 
-    # 清理 macOS 元数据文件
-    if [ "$CLEAN_MACOS_METADATA" = true ] && [ -d "$PG_DATA_DIR" ]; then
-        print_warning "清理 macOS 元数据文件..."
-        find "$PG_DATA_DIR" -name "._*" -delete 2>/dev/null || true
+    # 确保 DolphinDB 数据目录存在
+    if [ ! -d "$DOLPHINDB_DATA_DIR" ]; then
+        print_warning "创建 DolphinDB 数据目录: $DOLPHINDB_DATA_DIR"
+        mkdir -p "$DOLPHINDB_DATA_DIR"
     fi
 
-    # 启动服务
-    if [ "$ENABLE_REDIS" = true ]; then
-        docker-compose up -d postgres redis
-    else
-        docker-compose up -d postgres
-    fi
+    docker-compose up -d dolphindb prefect-server
 
-    echo -e "${YELLOW}等待数据库初始化...${NC}"
+    # 等待 DolphinDB 就绪
+    echo -e "${YELLOW}等待 DolphinDB 初始化...${NC}"
     sleep $DB_INIT_WAIT
 
-    # 健康检查
     attempt=0
     while [ $attempt -lt $DB_MAX_ATTEMPTS ]; do
-        if docker exec $POSTGRES_CONTAINER pg_isready -U $POSTGRES_USER -d $POSTGRES_DB > /dev/null 2>&1; then
-            print_success "PostgreSQL 已就绪"
+        if curl -sf http://localhost:$DOLPHINDB_PORT/ > /dev/null 2>&1; then
+            print_success "DolphinDB 已就绪"
             break
         fi
         attempt=$((attempt + 1))
@@ -124,23 +113,29 @@ start_database() {
     done
 
     if [ $attempt -eq $DB_MAX_ATTEMPTS ]; then
-        print_error "数据库启动超时"
+        print_error "DolphinDB 启动超时"
         exit 1
     fi
 
-    # 检查 Redis
-    if [ "$ENABLE_REDIS" = true ]; then
-        if docker exec $REDIS_CONTAINER redis-cli ping > /dev/null 2>&1; then
-            print_success "Redis 已就绪"
-        else
-            print_warning "Redis 启动失败（系统将继续运行）"
+    # 等待 Prefect Server 就绪
+    attempt=0
+    while [ $attempt -lt 20 ]; do
+        if curl -sf http://localhost:$PREFECT_PORT/api/health > /dev/null 2>&1; then
+            print_success "Prefect Server 已就绪"
+            break
         fi
+        attempt=$((attempt + 1))
+        sleep 2
+    done
+
+    if [ $attempt -eq 20 ]; then
+        print_warning "Prefect Server 启动较慢，继续..."
     fi
 }
 
 # 检查 Python 环境
 check_python() {
-    print_step "3/6" "检查 Python 环境..."
+    print_step "3/7" "检查 Python 环境..."
 
     if command -v python3.11 &> /dev/null; then
         PYTHON_CMD="python3.11"
@@ -165,7 +160,7 @@ check_python() {
 
 # 初始化后端
 init_backend() {
-    print_step "4/6" "初始化后端环境..."
+    print_step "4/7" "初始化后端环境..."
 
     cd "$BACKEND_DIR"
 
@@ -175,121 +170,97 @@ init_backend() {
         $PYTHON_CMD -m venv $VENV_DIR
     fi
 
-    source $VENV_DIR/bin/activate
+    # 激活虚拟环境
+    source "$VENV_DIR/bin/activate"
 
     # 安装依赖
     if [ "$AUTO_INSTALL_DEPS" = true ]; then
-        if ! python -c "import fastapi, redis" 2>/dev/null; then
-            print_warning "安装 Python 依赖..."
-            pip install -q -r requirements.txt
-        fi
+        pip install -r requirements.txt -q 2>/dev/null
+        print_success "依赖已安装"
     fi
 
-    # 检查数据库连接
-    if ! python -c "from store.postgres_client import db_client; db_client.query('SELECT 1')" 2>/dev/null; then
-        print_error "数据库连接失败"
-        exit 1
-    fi
+    # 设置 Prefect API URL
+    export PREFECT_API_URL="http://localhost:$PREFECT_PORT/api"
 
     print_success "后端环境就绪"
-
-    # 检查索引
-    if [ "$CHECK_INDEXES" = true ]; then
-        INDEX_COUNT=$(python -c "
-from store.postgres_client import db_client
-df = db_client.query(\"SELECT COUNT(*) as cnt FROM pg_indexes WHERE schemaname = 'public' AND indexname LIKE 'idx_%'\")
-print(df['cnt'][0])
-" 2>/dev/null)
-
-        if [ "$INDEX_COUNT" -ge $MIN_INDEX_COUNT ]; then
-            print_success "性能索引: $INDEX_COUNT 个"
-        else
-            print_warning "索引数量: $INDEX_COUNT 个（建议 >= $MIN_INDEX_COUNT）"
-        fi
-    fi
-
-    # 检查 Redis
-    if [ "$CHECK_REDIS" = true ] && [ "$ENABLE_REDIS" = true ]; then
-        REDIS_AVAILABLE=$(python -c "
-from store.redis_client import redis_client
-print('yes' if redis_client.is_available() else 'no')
-" 2>/dev/null)
-
-        if [ "$REDIS_AVAILABLE" = "yes" ]; then
-            print_success "Redis 缓存可用"
-        else
-            print_warning "Redis 缓存不可用"
-        fi
-    fi
 }
 
 # 启动后端
 start_backend() {
-    print_step "5/6" "启动后端服务..."
+    print_step "5/7" "启动后端服务..."
 
     cd "$BACKEND_DIR"
-    source $VENV_DIR/bin/activate
+    source "$VENV_DIR/bin/activate"
 
+    # 创建日志和PID目录
     mkdir -p "$LOG_DIR" "$PID_DIR"
 
-    nohup uvicorn app.main:app --host $BACKEND_HOST --port $BACKEND_PORT $BACKEND_RELOAD > "$BACKEND_LOG" 2>&1 &
+    # 启动 uvicorn
+    nohup $PYTHON_CMD -m uvicorn app.main:app \
+        --host $BACKEND_HOST \
+        --port $BACKEND_PORT \
+        $BACKEND_RELOAD \
+        > "$BACKEND_LOG" 2>&1 &
+
     echo $! > "$BACKEND_PID"
+    print_success "后端服务已启动 (PID: $(cat "$BACKEND_PID"))"
+}
 
-    sleep 3
+# 启动 Prefect Worker
+start_prefect_worker() {
+    print_step "6/7" "启动 Prefect Worker..."
 
-    if kill -0 $(cat "$BACKEND_PID") 2>/dev/null; then
-        print_success "后端服务已启动 (PID: $(cat "$BACKEND_PID"))"
-    else
-        print_error "后端服务启动失败"
-        cat "$BACKEND_LOG"
-        exit 1
+    if [ "$ENABLE_PREFECT_WORKER" != true ]; then
+        print_warning "Prefect Worker 已禁用"
+        return
     fi
+
+    cd "$BACKEND_DIR"
+    source "$VENV_DIR/bin/activate"
+
+    export PREFECT_API_URL="http://localhost:$PREFECT_PORT/api"
+
+    # 注册并启动 flows
+    nohup $PYTHON_CMD flows/serve.py > "$PREFECT_WORKER_LOG" 2>&1 &
+    echo $! > "$PREFECT_WORKER_PID"
+    print_success "Prefect Worker 已启动 (PID: $(cat "$PREFECT_WORKER_PID"))"
 }
 
 # 启动前端
 start_frontend() {
-    print_step "6/6" "启动前端服务..."
+    print_step "7/7" "启动前端服务..."
 
     cd "$FRONTEND_DIR"
 
+    # 检查 node_modules
     if [ ! -d "node_modules" ]; then
         print_warning "安装前端依赖..."
-        npm install
+        npm install --silent 2>/dev/null
     fi
 
-    mkdir -p "$LOG_DIR" "$PID_DIR"
-
+    # 启动前端
     nohup npm start > "$FRONTEND_LOG" 2>&1 &
     echo $! > "$FRONTEND_PID"
-
-    sleep 5
-
-    if kill -0 $(cat "$FRONTEND_PID") 2>/dev/null; then
-        print_success "前端服务已启动 (PID: $(cat "$FRONTEND_PID"))"
-    else
-        print_error "前端服务启动失败"
-        cat "$FRONTEND_LOG"
-        exit 1
-    fi
+    print_success "前端服务已启动 (PID: $(cat "$FRONTEND_PID"))"
 }
 
 # 显示状态
 show_status() {
     echo ""
     echo -e "${GREEN}========================================${NC}"
-    echo -e "${GREEN}   🎉 所有服务启动成功！${NC}"
+    echo -e "${GREEN}   所有服务启动成功！${NC}"
     echo -e "${GREEN}========================================${NC}"
     echo ""
     echo -e "${BLUE}访问地址:${NC}"
-    echo -e "  前端界面: ${GREEN}http://localhost:$FRONTEND_PORT${NC}"
-    echo -e "  API 文档: ${GREEN}http://localhost:$BACKEND_PORT/docs${NC}"
-    if [ "$ENABLE_PGADMIN" = true ]; then
-        echo -e "  pgAdmin:  ${GREEN}http://localhost:5050${NC}"
-    fi
+    echo -e "  前端界面:    ${GREEN}http://localhost:$FRONTEND_PORT${NC}"
+    echo -e "  API 文档:    ${GREEN}http://localhost:$BACKEND_PORT/docs${NC}"
+    echo -e "  Prefect UI:  ${GREEN}http://localhost:$PREFECT_PORT${NC}"
+    echo -e "  DolphinDB:   ${GREEN}http://localhost:8849${NC} (Web管理)"
     echo ""
     echo -e "${BLUE}日志文件:${NC}"
-    echo -e "  后端: $BACKEND_LOG"
-    echo -e "  前端: $FRONTEND_LOG"
+    echo -e "  后端:          $BACKEND_LOG"
+    echo -e "  前端:          $FRONTEND_LOG"
+    echo -e "  Prefect Worker: $PREFECT_WORKER_LOG"
     echo ""
     echo -e "${BLUE}管理命令:${NC}"
     echo -e "  查看状态: ${YELLOW}./check_status.sh${NC}"
@@ -316,10 +287,11 @@ main() {
 
     # 执行启动流程
     check_docker
-    start_database
+    start_infrastructure
     check_python
     init_backend
     start_backend
+    start_prefect_worker
     start_frontend
     show_status
 }

@@ -5,7 +5,6 @@
       "api_name": "daily_basic",
       "description": "每日指标（市盈率、市净率等）",
       "sync_type": "incremental",
-      "schedule": "daily",
       "params": {
         "trade_date": "{date}",
         "fields": "ts_code,trade_date,close,turnover_rate,volume_ratio,pe,pb"
@@ -61,7 +60,6 @@
       "api_name": "stock_basic",
       "description": "股票列表（基础信息）",
       "sync_type": "full",
-      "schedule": "weekly",
       "params": {
         "exchange": "",
         "list_status": "",
@@ -121,7 +119,6 @@
       "api_name": "adj_factor",
       "description": "复权因子",
       "sync_type": "incremental",
-      "schedule": "daily",
       "params": {
         "trade_date": "{date}",
         "fields": "ts_code,trade_date,adj_factor"
@@ -157,7 +154,6 @@
       "api_name": "index_daily",
       "description": "指数日线行情",
       "sync_type": "incremental",
-      "schedule": "daily",
       "params": {
         "trade_date": "{date}",
         "fields": "ts_code,trade_date,open,high,low,close,pre_close,change,pct_chg,vol,amount"
@@ -232,7 +228,6 @@
       "api_name": "daily",
       "description": "日线行情（OHLC完整数据）",
       "sync_type": "incremental",
-      "schedule": "daily",
       "params": {
         "trade_date": "{date}",
         "fields": "ts_code,trade_date,open,high,low,close,pre_close,change,pct_chg,vol,amount"
@@ -308,7 +303,6 @@
       "api_name": "moneyflow",
       "description": "个股资金流向",
       "sync_type": "incremental",
-      "schedule": "daily",
       "params": {
         "trade_date": "{date}",
         "fields": "ts_code,trade_date,buy_sm_vol,buy_sm_amount,sell_sm_vol,sell_sm_amount,buy_md_vol,buy_md_amount,sell_md_vol,sell_md_amount,buy_lg_vol,buy_lg_amount,sell_lg_vol,sell_lg_amount,buy_elg_vol,buy_elg_amount,sell_elg_vol,sell_elg_amount,net_mf_vol,net_mf_amount"
@@ -429,7 +423,6 @@
       "api_name": "trade_cal",
       "description": "获取各大交易所交易日历数据，默认提取上交所数据",
       "sync_type": "full",
-      "schedule": "weekly",
       "params": {
         "exchange": "",
         "start_date": "",

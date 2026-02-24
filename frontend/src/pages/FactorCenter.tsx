@@ -1,13 +1,23 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Tabs, Table, Button, Card, Tag, Space, Select, message, InputNumber, Spin, Empty, Modal, Input, Form, Popconfirm, Checkbox, Tooltip, Drawer, Descriptions, Statistic, Row, Col, DatePicker, Alert } from 'antd';
-import { ExperimentOutlined, PlayCircleOutlined, ReloadOutlined, BarChartOutlined, PlusOutlined, DeleteOutlined, EditOutlined, ThunderboltOutlined, CodeOutlined, DatabaseOutlined, InfoCircleOutlined, SearchOutlined, SaveOutlined, SettingOutlined, BugOutlined } from '@ant-design/icons';
+import {
+  Tabs, TabPane, Table, Button, Card, Tag, Select, InputNumber, Spin, Empty,
+  Modal, Input, Popconfirm, Checkbox, Tooltip, SideSheet, DatePicker, Banner,
+  Toast, Collapse,
+} from '@douyinfe/semi-ui';
+import { TextArea } from '@douyinfe/semi-ui';
+import {
+  IconTestScoreStroked, IconPlay, IconRefresh, IconBarChartHStroked, IconPlus,
+  IconDelete, IconEdit, IconBolt, IconCode, IconServer, IconInfoCircle,
+  IconSearch, IconSave, IconSetting, IconAlertTriangle,
+} from '@douyinfe/semi-icons';
 import dayjs from 'dayjs';
 import ReactECharts from 'echarts-for-react';
 import Editor from '@monaco-editor/react';
 import { productionApi, DEFAULT_PREPROCESS } from '../api';
 import type { PreprocessOptions } from '../api';
+import { useThemeStore } from '../store';
 
-// ==================== 因子详情/编辑 统一 Drawer ====================
+// ==================== 因子详情/编辑 统一 SideSheet ====================
 interface FactorDrawerProps {
   factor: any;
   open: boolean;
@@ -16,10 +26,13 @@ interface FactorDrawerProps {
   onSaved: () => void;
 }
 const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, onClose, onSaved }) => {
+  const { mode } = useThemeStore();
   const factorId = factor?.factor_id;
   const [activeTab, setActiveTab] = useState('edit');
-  // 编辑
-  const [editForm] = Form.useForm();
+  // 编辑 - use individual useState instead of Form.useForm()
+  const [editDesc, setEditDesc] = useState('');
+  const [editCategory, setEditCategory] = useState('');
+  const [editComputeMode, setEditComputeMode] = useState('');
   const [editSaving, setEditSaving] = useState(false);
   // 预处理
   const [ppEdit, setPpEdit] = useState<PreprocessOptions>({ ...DEFAULT_PREPROCESS });
@@ -47,18 +60,16 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
     setFactorData([]);
     setDataFilter({});
     // 编辑表单
-    editForm.setFieldsValue({
-      description: factor.description,
-      category: factor.category,
-      compute_mode: factor.compute_mode,
-    });
+    setEditDesc(factor.description || '');
+    setEditCategory(factor.category || '');
+    setEditComputeMode(factor.compute_mode || '');
     // 预处理
     const pp = factor.params?.preprocess || {};
     setPpEdit({ ...DEFAULT_PREPROCESS, ...pp });
     // 统计
     setStatsLoading(true);
     productionApi.getFactorStats(factorId).then(r => setStats(r.data?.data)).catch(() => {}).finally(() => setStatsLoading(false));
-  }, [factor, open, initialTab, factorId, editForm]);
+  }, [factor, open, initialTab, factorId]);
 
   // 切到代码 tab 时加载
   const loadCode = useCallback(async () => {
@@ -92,13 +103,12 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
     if (!factor) return;
     setEditSaving(true);
     try {
-      const values = await editForm.validateFields();
-      // 只更新基本信息字段，不要覆盖 params
+      const values = { description: editDesc, category: editCategory, compute_mode: editComputeMode };
       await productionApi.updateFactor(factorId, values);
-      message.success('基本信息已保存');
+      Toast.success('基本信息已保存');
       onSaved();
     } catch (e: any) {
-      if (e.response) message.error(e.response?.data?.detail || '保存失败');
+      if (e.response) Toast.error(e.response?.data?.detail || '保存失败');
     }
     setEditSaving(false);
   };
@@ -108,13 +118,12 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
     if (!factor) return;
     setPpSaving(true);
     try {
-      // 只更新 params.preprocess，保留其他 params 字段
       const newParams = { ...(factor.params || {}), preprocess: ppEdit };
       await productionApi.updateFactor(factorId, { params: newParams });
-      message.success('预处理配置已保存');
+      Toast.success('预处理配置已保存');
       onSaved();
     } catch (e: any) {
-      message.error(e.response?.data?.detail || '保存失败');
+      Toast.error(e.response?.data?.detail || '保存失败');
     }
     setPpSaving(false);
   };
@@ -125,9 +134,9 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
     setCodeSaving(true);
     try {
       await productionApi.updateFactorCode(factorId, code.filename, editedCode);
-      message.success('代码已保存');
+      Toast.success('代码已保存');
       setCodeChanged(false);
-    } catch (e: any) { message.error(e.response?.data?.detail || '保存失败'); }
+    } catch (e: any) { Toast.error(e.response?.data?.detail || '保存失败'); }
     setCodeSaving(false);
   };
 
@@ -138,94 +147,113 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
   ];
 
   return (
-    <Drawer title={<span style={{ color: '#00d4ff' }}>📊 {factorId}</span>} open={open} onClose={onClose}
-      width={780} styles={{ body: { background: '#0f172a', padding: '12px 16px' }, header: { background: '#1e293b', borderBottom: '1px solid #334155' } }}>
-      <Tabs activeKey={activeTab} onChange={setActiveTab} size="small" className="tech-tabs" items={[
-        /* ---- 编辑信息 ---- */
-        { key: 'edit', label: <span><EditOutlined /> 编辑</span>, children: (
+    <SideSheet
+      title={<span style={{ color: 'var(--color-primary)' }}>{factorId}</span>}
+      visible={open} onCancel={onClose} width={780}
+    >
+      <Tabs activeKey={activeTab} onChange={setActiveTab} size="small">
+        {/* ---- 编辑信息 ---- */}
+        <TabPane itemKey="edit" tab={<span><IconEdit size="small" /> 编辑</span>}>
           <div>
-            <Form form={editForm} layout="vertical" size="small">
-              <Row gutter={16}>
-                <Col span={12}><Form.Item name="description" label="描述"><Input /></Form.Item></Col>
-                <Col span={6}>
-                  <Form.Item name="category" label="分类">
-                    <Select options={['momentum','value','technical','quality','custom'].map(v => ({ label: v, value: v }))} />
-                  </Form.Item>
-                </Col>
-                <Col span={6}>
-                  <Form.Item name="compute_mode" label="计算模式">
-                    <Select options={[{ label: '增量', value: 'incremental' }, { label: '全量', value: 'full' }]} />
-                  </Form.Item>
-                </Col>
-              </Row>
-            </Form>
+            <div style={{ display: 'flex', gap: 16 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>描述</div>
+                <Input size="small" value={editDesc} onChange={setEditDesc} />
+              </div>
+              <div style={{ flex: '0 0 140px' }}>
+                <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>分类</div>
+                <Select size="small" style={{ width: '100%' }} value={editCategory} onChange={v => setEditCategory(v as string)}
+                  optionList={['momentum','value','technical','quality','custom'].map(v => ({ label: v, value: v }))} />
+              </div>
+              <div style={{ flex: '0 0 140px' }}>
+                <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>计算模式</div>
+                <Select size="small" style={{ width: '100%' }} value={editComputeMode} onChange={v => setEditComputeMode(v as string)}
+                  optionList={[{ label: '增量', value: 'incremental' }, { label: '全量', value: 'full' }]} />
+              </div>
+            </div>
             {/* 统计概览 */}
             <Spin spinning={statsLoading}>
               {stats ? (
-                <div style={{ marginTop: 4 }}>
-                  <Row gutter={[12, 12]}>
-                    <Col span={6}><Card size="small" className="tech-card"><Statistic title="总行数" value={stats.total_rows} valueStyle={{ color: '#00d4ff', fontSize: 16 }} /></Card></Col>
-                    <Col span={6}><Card size="small" className="tech-card"><Statistic title="股票数" value={stats.stock_count} valueStyle={{ color: '#10b981', fontSize: 16 }} /></Card></Col>
-                    <Col span={6}><Card size="small" className="tech-card"><Statistic title="起始日期" value={stats.min_date || '-'} valueStyle={{ fontSize: 13, color: '#94a3b8' }} /></Card></Col>
-                    <Col span={6}><Card size="small" className="tech-card"><Statistic title="截止日期" value={stats.max_date || '-'} valueStyle={{ fontSize: 13, color: '#94a3b8' }} /></Card></Col>
-                  </Row>
-                  <Card size="small" className="tech-card" style={{ marginTop: 8 }} title={<span style={{ color: '#94a3b8', fontSize: 12 }}>分布统计</span>}>
-                    <Descriptions size="small" column={2} labelStyle={{ color: '#64748b' }} contentStyle={{ color: '#e2e8f0' }}>
-                      <Descriptions.Item label="均值">{stats.mean_val?.toFixed(6) ?? '-'}</Descriptions.Item>
-                      <Descriptions.Item label="标准差">{stats.std_val?.toFixed(6) ?? '-'}</Descriptions.Item>
-                      <Descriptions.Item label="最小值">{stats.min_val?.toFixed(6) ?? '-'}</Descriptions.Item>
-                      <Descriptions.Item label="最大值">{stats.max_val?.toFixed(6) ?? '-'}</Descriptions.Item>
-                    </Descriptions>
+                <div style={{ marginTop: 8 }}>
+                  <div style={{ display: 'flex', gap: 12 }}>
+                    <Card style={{ flex: 1, background: 'var(--bg-card)' }} bodyStyle={{ padding: 12 }}>
+                      <div style={{ color: 'var(--text-secondary)', fontSize: 11 }}>总行数</div>
+                      <div style={{ color: 'var(--color-primary)', fontSize: 16, fontWeight: 600 }}>{stats.total_rows}</div>
+                    </Card>
+                    <Card style={{ flex: 1, background: 'var(--bg-card)' }} bodyStyle={{ padding: 12 }}>
+                      <div style={{ color: 'var(--text-secondary)', fontSize: 11 }}>股票数</div>
+                      <div style={{ color: 'var(--color-gain)', fontSize: 16, fontWeight: 600 }}>{stats.stock_count}</div>
+                    </Card>
+                    <Card style={{ flex: 1, background: 'var(--bg-card)' }} bodyStyle={{ padding: 12 }}>
+                      <div style={{ color: 'var(--text-secondary)', fontSize: 11 }}>起始日期</div>
+                      <div style={{ color: 'var(--text-secondary)', fontSize: 13 }}>{stats.min_date || '-'}</div>
+                    </Card>
+                    <Card style={{ flex: 1, background: 'var(--bg-card)' }} bodyStyle={{ padding: 12 }}>
+                      <div style={{ color: 'var(--text-secondary)', fontSize: 11 }}>截止日期</div>
+                      <div style={{ color: 'var(--text-secondary)', fontSize: 13 }}>{stats.max_date || '-'}</div>
+                    </Card>
+                  </div>
+                  <Card style={{ marginTop: 8, background: 'var(--bg-card)' }} bodyStyle={{ padding: 12 }}
+                    title={<span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>分布统计</span>}>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
+                      <div><span style={{ color: 'var(--text-muted)', marginRight: 6 }}>均值</span><span style={{ color: 'var(--text-primary)' }}>{stats.mean_val?.toFixed(6) ?? '-'}</span></div>
+                      <div><span style={{ color: 'var(--text-muted)', marginRight: 6 }}>标准差</span><span style={{ color: 'var(--text-primary)' }}>{stats.std_val?.toFixed(6) ?? '-'}</span></div>
+                      <div><span style={{ color: 'var(--text-muted)', marginRight: 6 }}>最小值</span><span style={{ color: 'var(--text-primary)' }}>{stats.min_val?.toFixed(6) ?? '-'}</span></div>
+                      <div><span style={{ color: 'var(--text-muted)', marginRight: 6 }}>最大值</span><span style={{ color: 'var(--text-primary)' }}>{stats.max_val?.toFixed(6) ?? '-'}</span></div>
+                    </div>
                   </Card>
                 </div>
               ) : null}
             </Spin>
             <div style={{ marginTop: 12, textAlign: 'right' }}>
-              <Button type="primary" icon={<SaveOutlined />} loading={editSaving} onClick={handleSaveEdit}>保存信息</Button>
+              <Button theme="solid" icon={<IconSave />} loading={editSaving} onClick={handleSaveEdit}>保存信息</Button>
             </div>
           </div>
-        )},
-        /* ---- 预处理配置 ---- */
-        { key: 'preprocess', label: <span><SettingOutlined /> 预处理</span>, children: (
+        </TabPane>
+        {/* ---- 预处理配置 ---- */}
+        <TabPane itemKey="preprocess" tab={<span><IconSetting size="small" /> 预处理</span>}>
           <div>
-            <Row gutter={[16, 16]} style={{ marginTop: 4 }}>
-              <Col span={12}>
-                <div style={{ color: '#94a3b8', fontSize: 12, marginBottom: 4 }}>复权方式</div>
+            <div style={{ display: 'flex', gap: 16, marginTop: 4, flexWrap: 'wrap' }}>
+              <div style={{ flex: '1 1 200px' }}>
+                <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>复权方式</div>
                 <Select size="small" style={{ width: '100%' }} value={ppEdit.adjust_price}
-                  onChange={(v) => setPpEdit(p => ({ ...p, adjust_price: v }))}>
-                  <Select.Option value="forward">前复权</Select.Option>
-                  <Select.Option value="backward">后复权</Select.Option>
-                  <Select.Option value="none">不复权</Select.Option>
-                </Select>
-              </Col>
-              <Col span={12}>
-                <div style={{ color: '#94a3b8', fontSize: 12, marginBottom: 4 }}>新股排除天数</div>
+                  onChange={(v) => setPpEdit(p => ({ ...p, adjust_price: v as PreprocessOptions['adjust_price'] }))}
+                  optionList={[
+                    { label: '前复权', value: 'forward' },
+                    { label: '后复权', value: 'backward' },
+                    { label: '不复权', value: 'none' },
+                  ]} />
+              </div>
+              <div style={{ flex: '1 1 200px' }}>
+                <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>新股排除天数</div>
                 <InputNumber size="small" min={1} max={250} value={ppEdit.new_stock_days}
                   disabled={!ppEdit.filter_new_stock} style={{ width: '100%' }}
-                  onChange={(v) => setPpEdit(p => ({ ...p, new_stock_days: v || 60 }))} />
-              </Col>
-              <Col span={6}><Checkbox checked={ppEdit.filter_st} onChange={(e) => setPpEdit(p => ({ ...p, filter_st: e.target.checked }))}>过滤 ST</Checkbox></Col>
-              <Col span={6}><Checkbox checked={ppEdit.filter_new_stock} onChange={(e) => setPpEdit(p => ({ ...p, filter_new_stock: e.target.checked }))}>过滤新股</Checkbox></Col>
-              <Col span={6}><Checkbox checked={ppEdit.handle_suspension} onChange={(e) => setPpEdit(p => ({ ...p, handle_suspension: e.target.checked }))}>停牌处理</Checkbox></Col>
-              <Col span={6}><Checkbox checked={ppEdit.mark_limit} onChange={(e) => setPpEdit(p => ({ ...p, mark_limit: e.target.checked }))}>涨跌停标记</Checkbox></Col>
-            </Row>
+                  onChange={(v) => setPpEdit(p => ({ ...p, new_stock_days: (v as number) || 60 }))} />
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 16, marginTop: 12, flexWrap: 'wrap' }}>
+              <Checkbox checked={ppEdit.filter_st} onChange={(e) => setPpEdit(p => ({ ...p, filter_st: !!e.target.checked }))}>过滤 ST</Checkbox>
+              <Checkbox checked={ppEdit.filter_new_stock} onChange={(e) => setPpEdit(p => ({ ...p, filter_new_stock: !!e.target.checked }))}>过滤新股</Checkbox>
+              <Checkbox checked={ppEdit.handle_suspension} onChange={(e) => setPpEdit(p => ({ ...p, handle_suspension: !!e.target.checked }))}>停牌处理</Checkbox>
+              <Checkbox checked={ppEdit.mark_limit} onChange={(e) => setPpEdit(p => ({ ...p, mark_limit: !!e.target.checked }))}>涨跌停标记</Checkbox>
+            </div>
             <div style={{ marginTop: 16, textAlign: 'right' }}>
-              <Button type="primary" icon={<SaveOutlined />} loading={ppSaving} onClick={handleSavePp}>保存预处理</Button>
+              <Button theme="solid" icon={<IconSave />} loading={ppSaving} onClick={handleSavePp}>保存预处理</Button>
             </div>
           </div>
-        )},
-        /* ---- 源代码 + 测试 ---- */
-        { key: 'code', label: <span><CodeOutlined /> 代码</span>, children: (
+        </TabPane>
+        {/* ---- 源代码 + 测试 ---- */}
+        <TabPane itemKey="code" tab={<span><IconCode size="small" /> 代码</span>}>
           <Spin spinning={codeLoading}>
             {code ? (
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                   <Tag color="blue">{code.filename}</Tag>
-                  <Button size="small" type="primary" icon={<SaveOutlined />} disabled={!codeChanged}
+                  <Button size="small" theme="solid" icon={<IconSave />} disabled={!codeChanged}
                     loading={codeSaving} onClick={handleSaveCode}>保存代码</Button>
                 </div>
-                <div style={{ border: '1px solid #334155', borderRadius: 4, overflow: 'hidden' }}>
-                  <Editor height="380px" language="python" theme="vs-dark"
+                <div style={{ border: '1px solid var(--border-color)', borderRadius: 4, overflow: 'hidden' }}>
+                  <Editor height="380px" language="python" theme={mode === 'dark' ? 'vs-dark' : 'vs-light'}
                     value={editedCode} onChange={(v) => { setEditedCode(v || ''); setCodeChanged(true); }}
                     options={{ minimap: { enabled: false }, fontSize: 13, scrollBeyondLastLine: false, automaticLayout: true, tabSize: 4 }} />
                 </div>
@@ -233,26 +261,26 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
               </div>
             ) : <Empty description="未找到源代码文件" />}
           </Spin>
-        )},
-        /* ---- 数据探查 ---- */
-        { key: 'data', label: <span><DatabaseOutlined /> 数据</span>, children: (
+        </TabPane>
+        {/* ---- 数据探查 ---- */}
+        <TabPane itemKey="data" tab={<span><IconServer size="small" /> 数据</span>}>
           <div>
-            <Space style={{ marginBottom: 12 }} wrap>
-              <Input size="small" placeholder="股票代码" style={{ width: 120 }} allowClear
-                onChange={(e) => setDataFilter(f => ({ ...f, ts_code: e.target.value || undefined }))} />
-              <Input size="small" placeholder="起始日期 (yyyymmdd)" style={{ width: 160 }} allowClear
-                onChange={(e) => setDataFilter(f => ({ ...f, start_date: e.target.value || undefined }))} />
-              <Input size="small" placeholder="截止日期 (yyyymmdd)" style={{ width: 160 }} allowClear
-                onChange={(e) => setDataFilter(f => ({ ...f, end_date: e.target.value || undefined }))} />
-              <Button size="small" type="primary" icon={<SearchOutlined />} onClick={loadData}>查询</Button>
-            </Space>
-            <Table dataSource={factorData} columns={dataColumns} rowKey={(r) => `${r.ts_code}-${r.trade_date}`}
-              loading={dataLoading} size="small" pagination={{ pageSize: 15 }} className="tech-table"
+            <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+              <Input size="small" placeholder="股票代码" style={{ width: 120 }} showClear
+                onChange={v => setDataFilter(f => ({ ...f, ts_code: v || undefined }))} />
+              <Input size="small" placeholder="起始日期 (yyyymmdd)" style={{ width: 160 }} showClear
+                onChange={v => setDataFilter(f => ({ ...f, start_date: v || undefined }))} />
+              <Input size="small" placeholder="截止日期 (yyyymmdd)" style={{ width: 160 }} showClear
+                onChange={v => setDataFilter(f => ({ ...f, end_date: v || undefined }))} />
+              <Button size="small" theme="solid" icon={<IconSearch />} onClick={loadData}>查询</Button>
+            </div>
+            <Table dataSource={factorData} columns={dataColumns} rowKey={(r: any) => `${r.ts_code}-${r.trade_date}`}
+              loading={dataLoading} size="small" pagination={{ pageSize: 15 }}
               scroll={{ y: 400 }} />
           </div>
-        )},
-      ]} />
-    </Drawer>
+        </TabPane>
+      </Tabs>
+    </SideSheet>
   );
 };
 
@@ -293,8 +321,8 @@ const CodeTestPanel: React.FC<{ code: string; dependsOn?: string[] }> = ({ code,
   const [showLogs, setShowLogs] = useState(true);
 
   const handleTest = async () => {
-    if (!code.trim()) { message.warning('请先编写因子代码'); return; }
-    if (!dateRange[0] || !dateRange[1]) { message.warning('请选择测试日期范围'); return; }
+    if (!code.trim()) { Toast.warning('请先编写因子代码'); return; }
+    if (!dateRange[0] || !dateRange[1]) { Toast.warning('请选择测试日期范围'); return; }
     setTesting(true);
     setTestResult(null);
     setTestError(null);
@@ -335,7 +363,7 @@ const CodeTestPanel: React.FC<{ code: string; dependsOn?: string[] }> = ({ code,
     { title: '股票代码', dataIndex: 'ts_code', key: 'ts_code', width: 120 },
     { title: '交易日期', dataIndex: 'trade_date', key: 'trade_date', width: 110 },
     { title: '因子值', dataIndex: 'factor_value', key: 'factor_value', width: 140,
-      render: (v: number) => v != null ? v.toFixed(6) : <span style={{ color: '#64748b' }}>null</span> },
+      render: (v: number) => v != null ? v.toFixed(6) : <span style={{ color: 'var(--text-muted)' }}>null</span> },
   ];
 
   const logColorMap: Record<string, string> = {
@@ -347,13 +375,20 @@ const CodeTestPanel: React.FC<{ code: string; dependsOn?: string[] }> = ({ code,
   };
 
   return (
-    <div style={{ marginTop: 8, borderTop: '1px solid #334155', paddingTop: 8 }}>
+    <div style={{ marginTop: 8, borderTop: '1px solid var(--border-color)', paddingTop: 8 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-        <span style={{ color: '#94a3b8', fontSize: 12, whiteSpace: 'nowrap' }}>测试区间:</span>
-        <DatePicker.RangePicker size="small" style={{ flex: 1 }}
-          onChange={(_, ds) => setDateRange([ds[0].replace(/-/g, ''), ds[1].replace(/-/g, '')])}
+        <span style={{ color: 'var(--text-secondary)', fontSize: 12, whiteSpace: 'nowrap' }}>测试区间:</span>
+        <DatePicker type="dateRange" size="small" style={{ flex: 1 }}
+          onChange={(date, dateStr) => {
+            const strs = dateStr as unknown as string[];
+            if (strs && Array.isArray(strs) && strs[0] && strs[1]) {
+              setDateRange([strs[0].replace(/-/g, ''), strs[1].replace(/-/g, '')]);
+            } else {
+              setDateRange(['', '']);
+            }
+          }}
           placeholder={['开始日期', '结束日期']} />
-        <Button size="small" type="primary" icon={<BugOutlined />}
+        <Button size="small" theme="solid" icon={<IconAlertTriangle />}
           loading={testing} onClick={handleTest}>编译测试</Button>
       </div>
 
@@ -361,29 +396,29 @@ const CodeTestPanel: React.FC<{ code: string; dependsOn?: string[] }> = ({ code,
       {(testLogs.length > 0 || testStdout || testError) && (
         <div style={{ marginBottom: 8 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-            <span style={{ color: '#94a3b8', fontSize: 11, cursor: 'pointer' }}
+            <span style={{ color: 'var(--text-secondary)', fontSize: 11, cursor: 'pointer' }}
               onClick={() => setShowLogs(!showLogs)}>
               {showLogs ? '▼' : '▶'} 执行日志 ({testLogs.length})
             </span>
           </div>
           {showLogs && (
             <div style={{
-              background: '#0c1222', border: '1px solid #1e293b', borderRadius: 4,
+              background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: 4,
               padding: '6px 8px', maxHeight: 200, overflowY: 'auto',
               fontFamily: 'monospace', fontSize: 11, lineHeight: '18px',
             }}>
               {testLogs.map((log: any, i: number) => (
                 <div key={i} style={{ color: logColorMap[log.level] || '#94a3b8' }}>
-                  <span style={{ color: phaseColorMap[log.phase] || '#64748b', marginRight: 6 }}>
+                  <span style={{ color: phaseColorMap[log.phase] || 'var(--text-muted)', marginRight: 6 }}>
                     [{log.phase}]
                   </span>
                   <span style={{ whiteSpace: 'pre-wrap' }}>{log.message}</span>
                 </div>
               ))}
               {testStdout && (
-                <div style={{ borderTop: '1px solid #1e293b', marginTop: 4, paddingTop: 4 }}>
-                  <span style={{ color: '#64748b' }}>[stdout]</span>
-                  <pre style={{ color: '#e2e8f0', margin: '2px 0 0 0', whiteSpace: 'pre-wrap', fontSize: 11 }}>{testStdout}</pre>
+                <div style={{ borderTop: '1px solid var(--border-color)', marginTop: 4, paddingTop: 4 }}>
+                  <span style={{ color: 'var(--text-muted)' }}>[stdout]</span>
+                  <pre style={{ color: 'var(--text-primary)', margin: '2px 0 0 0', whiteSpace: 'pre-wrap', fontSize: 11 }}>{testStdout}</pre>
                 </div>
               )}
             </div>
@@ -391,33 +426,47 @@ const CodeTestPanel: React.FC<{ code: string; dependsOn?: string[] }> = ({ code,
         </div>
       )}
 
-      {testError && <Alert type="error" message={testError} showIcon closable style={{ marginBottom: 8, fontSize: 12 }}
-        onClose={() => setTestError(null)} />}
+      {testError && <Banner type="danger" description={testError} closeIcon={null} style={{ marginBottom: 8, fontSize: 12 }} />}
       {testResult && (
         <div>
-          <Row gutter={8} style={{ marginBottom: 8 }}>
-            <Col span={5}><Statistic title="总行数" value={testResult.stats?.total_rows} valueStyle={{ color: '#00d4ff', fontSize: 14 }} /></Col>
-            <Col span={5}><Statistic title="股票数" value={testResult.stats?.stock_count} valueStyle={{ color: '#10b981', fontSize: 14 }} /></Col>
-            <Col span={5}><Statistic title="均值" value={testResult.stats?.factor_mean ?? '-'} precision={4} valueStyle={{ fontSize: 14, color: '#e2e8f0' }} /></Col>
-            <Col span={5}><Statistic title="标准差" value={testResult.stats?.factor_std ?? '-'} precision={4} valueStyle={{ fontSize: 14, color: '#e2e8f0' }} /></Col>
-            <Col span={4}><Statistic title="空值" value={testResult.stats?.null_count} valueStyle={{ fontSize: 14, color: testResult.stats?.null_count > 0 ? '#f59e0b' : '#10b981' }} /></Col>
-          </Row>
-          {testResult.truncated && <Alert type="warning" message="结果已截断，仅显示前 2000 行" showIcon style={{ marginBottom: 8, fontSize: 12 }} />}
           <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-            <Select size="small" allowClear placeholder="筛选股票" style={{ width: 160 }}
-              value={filterStock} onChange={setFilterStock} showSearch
-              options={testResult.stocks?.map((s: string) => ({ label: s, value: s }))} />
-            <Select size="small" allowClear placeholder="筛选日期" style={{ width: 140 }}
-              value={filterDate} onChange={setFilterDate} showSearch
-              options={testResult.dates?.map((d: string) => ({ label: d, value: d }))} />
-            <span style={{ color: '#64748b', fontSize: 12, lineHeight: '24px' }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ color: 'var(--text-secondary)', fontSize: 11 }}>总行数</div>
+              <div style={{ color: 'var(--color-primary)', fontSize: 14, fontWeight: 600 }}>{testResult.stats?.total_rows}</div>
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ color: 'var(--text-secondary)', fontSize: 11 }}>股票数</div>
+              <div style={{ color: 'var(--color-gain)', fontSize: 14, fontWeight: 600 }}>{testResult.stats?.stock_count}</div>
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ color: 'var(--text-secondary)', fontSize: 11 }}>均值</div>
+              <div style={{ color: 'var(--text-primary)', fontSize: 14 }}>{testResult.stats?.factor_mean != null ? Number(testResult.stats.factor_mean).toFixed(4) : '-'}</div>
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ color: 'var(--text-secondary)', fontSize: 11 }}>标准差</div>
+              <div style={{ color: 'var(--text-primary)', fontSize: 14 }}>{testResult.stats?.factor_std != null ? Number(testResult.stats.factor_std).toFixed(4) : '-'}</div>
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ color: 'var(--text-secondary)', fontSize: 11 }}>空值</div>
+              <div style={{ fontSize: 14, color: testResult.stats?.null_count > 0 ? 'var(--color-loss)' : 'var(--color-gain)' }}>{testResult.stats?.null_count}</div>
+            </div>
+          </div>
+          {testResult.truncated && <Banner type="warning" description="结果已截断，仅显示前 2000 行" closeIcon={null} style={{ marginBottom: 8, fontSize: 12 }} />}
+          <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+            <Select size="small" showClear placeholder="筛选股票" style={{ width: 160 }}
+              value={filterStock} onChange={v => setFilterStock(v as string | undefined)} filter
+              optionList={testResult.stocks?.map((s: string) => ({ label: s, value: s })) || []} />
+            <Select size="small" showClear placeholder="筛选日期" style={{ width: 140 }}
+              value={filterDate} onChange={v => setFilterDate(v as string | undefined)} filter
+              optionList={testResult.dates?.map((d: string) => ({ label: d, value: d })) || []} />
+            <span style={{ color: 'var(--text-muted)', fontSize: 12, lineHeight: '24px' }}>
               显示 {filteredPreview.length} 条
             </span>
           </div>
           <Table dataSource={filteredPreview} columns={resultColumns}
-            rowKey={(r) => `${r.ts_code}-${r.trade_date}`}
-            size="small" pagination={{ pageSize: 10, size: 'small' }}
-            scroll={{ y: 240 }} className="tech-table" />
+            rowKey={(r: any) => `${r.ts_code}-${r.trade_date}`}
+            size="small" pagination={{ pageSize: 10 }}
+            scroll={{ y: 240 }} />
         </div>
       )}
     </div>
@@ -426,6 +475,7 @@ const CodeTestPanel: React.FC<{ code: string; dependsOn?: string[] }> = ({ code,
 
 // ==================== 因子管理 Tab ====================
 const FactorManageTab: React.FC = () => {
+  const { mode } = useThemeStore();
   const [factors, setFactors] = useState<any[]>([]);
   const [history, setHistory] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -439,14 +489,18 @@ const FactorManageTab: React.FC = () => {
   const [drawerState, setDrawerState] = useState<{ open: boolean; factor: any; tab?: string }>({ open: false, factor: null });
   const [fullRunModal, setFullRunModal] = useState<{ visible: boolean; factorId: string | null }>({ visible: false, factorId: null });
   const [fullRunDates, setFullRunDates] = useState<[dayjs.Dayjs | null, dayjs.Dayjs | null]>([null, null]);
-  const [form] = Form.useForm();
+  // Create form state (replaces Form.useForm)
+  const [createFactorId, setCreateFactorId] = useState('');
+  const [createDesc, setCreateDesc] = useState('');
+  const [createCategory, setCreateCategory] = useState('custom');
+  const [createComputeMode, setCreateComputeMode] = useState('incremental');
 
   const loadFactors = useCallback(async () => {
     setLoading(true);
     try {
       const res = await productionApi.listFactors();
       setFactors(res.data?.data || []);
-    } catch { message.error('加载因子列表失败'); }
+    } catch { Toast.error('加载因子列表失败'); }
     setLoading(false);
   }, []);
 
@@ -459,63 +513,68 @@ const FactorManageTab: React.FC = () => {
 
   useEffect(() => { loadFactors(); loadHistory(); }, [loadFactors, loadHistory]);
 
-  const handleRun = async (factorId: string, mode: string, startDate?: string, endDate?: string) => {
+  const handleRun = async (factorId: string, runMode: string, startDate?: string, endDate?: string) => {
     setRunLoading(factorId);
     try {
       const factor = factors.find(f => f.factor_id === factorId);
       const pp = factor?.params?.preprocess || undefined;
-      await productionApi.runProduction(factorId, mode, undefined, startDate, endDate, pp);
-      message.success(`因子 ${factorId} ${mode === 'incremental' ? '增量' : '全量'}计算完成`);
+      await productionApi.runProduction(factorId, runMode, undefined, startDate, endDate, pp);
+      Toast.success(`因子 ${factorId} ${runMode === 'incremental' ? '增量' : '全量'}计算完成`);
       loadFactors();
       loadHistory(selectedFactor || undefined);
     } catch (e: any) {
-      message.error(e.response?.data?.detail || '执行失败');
+      Toast.error(e.response?.data?.detail || '执行失败');
     }
     setRunLoading(null);
   };
 
-  const handleBatchRun = async (mode: string) => {
-    if (selectedRowKeys.length === 0) { message.warning('请先勾选因子'); return; }
+  const handleBatchRun = async (runMode: string) => {
+    if (selectedRowKeys.length === 0) { Toast.warning('请先勾选因子'); return; }
     setBatchLoading(true);
     try {
-      // 批量运行不传 preprocess，由后端从各因子 params 中读取
-      const res = await productionApi.batchRunFactors(selectedRowKeys, mode);
+      const res = await productionApi.batchRunFactors(selectedRowKeys, runMode);
       const results = res.data?.data || [];
       const ok = results.filter((r: any) => r.success).length;
       const fail = results.length - ok;
-      message.success(`批量计算完成: ${ok} 成功, ${fail} 失败`);
+      Toast.success(`批量计算完成: ${ok} 成功, ${fail} 失败`);
       setSelectedRowKeys([]);
       loadFactors();
       loadHistory(selectedFactor || undefined);
     } catch (e: any) {
-      message.error(e.response?.data?.detail || '批量执行失败');
+      Toast.error(e.response?.data?.detail || '批量执行失败');
     }
     setBatchLoading(false);
   };
 
   const handleCreate = async () => {
+    if (!createFactorId.trim()) { Toast.warning('请输入因子ID'); return; }
     try {
-      const values = await form.validateFields();
-      const params = { ...(values.params || {}), preprocess: createPreprocess };
+      const values = {
+        factor_id: createFactorId,
+        description: createDesc,
+        category: createCategory,
+        compute_mode: createComputeMode,
+      };
+      const params = { preprocess: createPreprocess };
       await productionApi.createFactor({ ...values, params, code: createCode || undefined });
-      message.success(`因子 ${values.factor_id} 创建成功`);
+      Toast.success(`因子 ${values.factor_id} 创建成功`);
       setCreateModal(false);
-      form.resetFields();
+      setCreateFactorId(''); setCreateDesc(''); setCreateCategory('custom'); setCreateComputeMode('incremental');
       setCreateCode(CODE_TEMPLATE);
       setCreatePreprocess({ ...DEFAULT_PREPROCESS });
       loadFactors();
     } catch (e: any) {
-      if (e.response) message.error(e.response?.data?.detail || '创建失败');
+      if (e.response) Toast.error(e.response?.data?.detail || '创建失败');
     }
   };
 
   const handleDelete = async (factorId: string) => {
     try {
       await productionApi.deleteFactor(factorId, false);
-      message.success(`因子 ${factorId} 已删除`);
+      Toast.success(`因子 ${factorId} 已删除`);
       loadFactors();
     } catch (e: any) {
-      message.error(e.response?.data?.detail || '删除失败');
+      Toast.error(e.response?.data?.detail || '删除失败');
     }
   };
 
@@ -537,26 +596,26 @@ const FactorManageTab: React.FC = () => {
       render: (v: string) => <Tag color={v === 'incremental' ? 'cyan' : 'orange'}>{v === 'incremental' ? '增量' : '全量'}</Tag>
     },
     { title: '最新数据', dataIndex: 'latest_data_date', key: 'latest', width: 110,
-      render: (v: string) => v ? <span style={{ color: '#10b981' }}>{v}</span> : <span style={{ color: '#64748b' }}>-</span>
+      render: (v: string) => v ? <span style={{ color: 'var(--color-gain)' }}>{v}</span> : <span style={{ color: 'var(--text-muted)' }}>-</span>
     },
     { title: '上次计算', dataIndex: 'last_computed_at', key: 'computed', width: 140,
-      render: (v: string) => v ? <Tooltip title={v}><span style={{ color: '#94a3b8' }}>{v.slice(0, 16)}</span></Tooltip> : '-'
+      render: (v: string) => v ? <Tooltip content={v}><span style={{ color: 'var(--text-secondary)' }}>{v.slice(0, 16)}</span></Tooltip> : '-'
     },
     {
       title: '操作', key: 'action', width: 320, render: (_: any, record: any) => (
-        <Space size={4}>
-          <Button size="small" icon={<InfoCircleOutlined />}
+        <div style={{ display: 'flex', gap: 4 }}>
+          <Button size="small" icon={<IconInfoCircle />}
             onClick={() => openDrawer(record)}>详情</Button>
-          <Button size="small" type="primary" icon={<PlayCircleOutlined />}
+          <Button size="small" theme="solid" icon={<IconPlay />}
             loading={runLoading === record.factor_id}
             onClick={() => handleRun(record.factor_id, 'incremental')}>增量</Button>
-          <Button size="small" icon={<ReloadOutlined />}
+          <Button size="small" icon={<IconRefresh />}
             loading={runLoading === record.factor_id}
             onClick={() => { setFullRunModal({ visible: true, factorId: record.factor_id }); setFullRunDates([null, null]); }}>回溯</Button>
           <Popconfirm title="确认删除?" onConfirm={() => handleDelete(record.factor_id)}>
-            <Button size="small" danger icon={<DeleteOutlined />} />
+            <Button size="small" type="danger" icon={<IconDelete />} />
           </Popconfirm>
-        </Space>
+        </div>
       )
     },
   ];
@@ -572,96 +631,98 @@ const FactorManageTab: React.FC = () => {
 
   return (
     <div>
-      <Card className="tech-card" style={{ marginBottom: 16 }}>
+      <Card style={{ marginBottom: 16, background: 'var(--bg-card)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-          <span style={{ color: '#00d4ff', fontWeight: 600, fontSize: 15 }}>📋 已注册因子</span>
-          <Space>
+          <span style={{ color: 'var(--color-primary)', fontWeight: 600, fontSize: 15 }}>已注册因子</span>
+          <div style={{ display: 'flex', gap: 8 }}>
             {selectedRowKeys.length > 0 && (
-              <>
-                <Button size="small" type="primary" icon={<ThunderboltOutlined />} loading={batchLoading}
-                  onClick={() => handleBatchRun('incremental')}>批量增量 ({selectedRowKeys.length})</Button>
-              </>
+              <Button size="small" theme="solid" icon={<IconBolt />} loading={batchLoading}
+                onClick={() => handleBatchRun('incremental')}>批量增量 ({selectedRowKeys.length})</Button>
             )}
-            <Button size="small" icon={<PlusOutlined />} onClick={() => setCreateModal(true)}>新建因子</Button>
-            <Button icon={<ReloadOutlined />} onClick={loadFactors} size="small">刷新</Button>
-          </Space>
+            <Button size="small" icon={<IconPlus />} onClick={() => setCreateModal(true)}>新建因子</Button>
+            <Button icon={<IconRefresh />} onClick={loadFactors} size="small">刷新</Button>
+          </div>
         </div>
         <Table dataSource={factors} columns={factorColumns} rowKey="factor_id"
-          loading={loading} size="small" pagination={false} className="tech-table"
-          rowSelection={{ selectedRowKeys, onChange: (keys) => setSelectedRowKeys(keys as string[]) }} />
+          loading={loading} size="small" pagination={false}
+          rowSelection={{ selectedRowKeys, onChange: (keys) => setSelectedRowKeys(keys?.map(String) || []) }} />
       </Card>
 
-      <Card className="tech-card">
+      <Card style={{ background: 'var(--bg-card)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-          <span style={{ color: '#94a3b8', fontWeight: 600, fontSize: 15 }}>📜 计算历史</span>
-          <Select allowClear placeholder="筛选因子" style={{ width: 160 }} size="small"
-            value={selectedFactor} onChange={(v) => { setSelectedFactor(v); loadHistory(v || undefined); }}
-            options={factors.map(f => ({ label: f.factor_id, value: f.factor_id }))} />
+          <span style={{ color: 'var(--text-secondary)', fontWeight: 600, fontSize: 15 }}>计算历史</span>
+          <Select showClear placeholder="筛选因子" style={{ width: 160 }} size="small"
+            value={selectedFactor || undefined} onChange={(v) => { setSelectedFactor((v as string) || null); loadHistory((v as string) || undefined); }}
+            optionList={factors.map(f => ({ label: f.factor_id, value: f.factor_id }))} />
         </div>
-        <Table dataSource={history} columns={historyColumns} rowKey={(r) => `${r.factor_id}-${r.created_at}`}
-          size="small" pagination={{ pageSize: 10 }} className="tech-table" />
+        <Table dataSource={history} columns={historyColumns} rowKey={(r: any) => `${r.factor_id}-${r.created_at}`}
+          size="small" pagination={{ pageSize: 10 }} />
       </Card>
 
       {/* 新建因子 Modal */}
-      <Modal title="新建因子" open={createModal} onOk={handleCreate} width={820}
-        onCancel={() => { setCreateModal(false); form.resetFields(); setCreateCode(CODE_TEMPLATE); setCreatePreprocess({ ...DEFAULT_PREPROCESS }); }} okText="创建">
-        <Form form={form} layout="vertical" size="small">
-          <Row gutter={16}>
-            <Col span={12}>
-              <Form.Item name="factor_id" label="因子ID" rules={[{ required: true, message: '请输入因子ID' }]}>
-                <Input placeholder="如 factor_custom_01" />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item name="description" label="描述"><Input placeholder="因子描述" /></Form.Item>
-            </Col>
-          </Row>
-          <Row gutter={16}>
-            <Col span={8}>
-              <Form.Item name="category" label="分类" initialValue="custom">
-                <Select options={['momentum','value','technical','quality','custom'].map(v => ({ label: v, value: v }))} />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="compute_mode" label="计算模式" initialValue="incremental">
-                <Select options={[{ label: '增量', value: 'incremental' }, { label: '全量', value: 'full' }]} />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item label="复权方式">
-                <Select size="small" value={createPreprocess.adjust_price}
-                  onChange={(v) => setCreatePreprocess(p => ({ ...p, adjust_price: v }))}>
-                  <Select.Option value="forward">前复权</Select.Option>
-                  <Select.Option value="backward">后复权</Select.Option>
-                  <Select.Option value="none">不复权</Select.Option>
-                </Select>
-              </Form.Item>
-            </Col>
-          </Row>
-          <Row gutter={16}>
-            <Col span={6}><Checkbox checked={createPreprocess.filter_st} onChange={(e) => setCreatePreprocess(p => ({ ...p, filter_st: e.target.checked }))}>过滤 ST</Checkbox></Col>
-            <Col span={6}><Checkbox checked={createPreprocess.filter_new_stock} onChange={(e) => setCreatePreprocess(p => ({ ...p, filter_new_stock: e.target.checked }))}>过滤新股</Checkbox></Col>
-            <Col span={6}><Checkbox checked={createPreprocess.handle_suspension} onChange={(e) => setCreatePreprocess(p => ({ ...p, handle_suspension: e.target.checked }))}>停牌处理</Checkbox></Col>
-            <Col span={6}><Checkbox checked={createPreprocess.mark_limit} onChange={(e) => setCreatePreprocess(p => ({ ...p, mark_limit: e.target.checked }))}>涨跌停标记</Checkbox></Col>
-          </Row>
-          {createPreprocess.filter_new_stock && (
-            <Form.Item label="新股排除天数" style={{ marginTop: 8, marginBottom: 8 }}>
-              <InputNumber size="small" min={1} max={250} value={createPreprocess.new_stock_days}
-                onChange={(v) => setCreatePreprocess(p => ({ ...p, new_stock_days: v || 60 }))} />
-            </Form.Item>
-          )}
-          <Form.Item label="因子计算代码" style={{ marginTop: 8 }}>
-            <div style={{ border: '1px solid #334155', borderRadius: 4, overflow: 'hidden' }}>
-              <Editor height="300px" language="python" theme="vs-dark"
-                value={createCode} onChange={(v) => setCreateCode(v || '')}
-                options={{ minimap: { enabled: false }, fontSize: 13, scrollBeyondLastLine: false, automaticLayout: true, tabSize: 4 }} />
-            </div>
-            <CodeTestPanel code={createCode} />
-          </Form.Item>
-        </Form>
+      <Modal title="新建因子" visible={createModal} onOk={handleCreate} width={820}
+        onCancel={() => {
+          setCreateModal(false);
+          setCreateFactorId(''); setCreateDesc(''); setCreateCategory('custom'); setCreateComputeMode('incremental');
+          setCreateCode(CODE_TEMPLATE); setCreatePreprocess({ ...DEFAULT_PREPROCESS });
+        }} okText="创建">
+        <div style={{ display: 'flex', gap: 16, marginBottom: 12 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>因子ID <span style={{ color: 'var(--color-loss)' }}>*</span></div>
+            <Input size="small" placeholder="如 factor_custom_01" value={createFactorId} onChange={setCreateFactorId} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>描述</div>
+            <Input size="small" placeholder="因子描述" value={createDesc} onChange={setCreateDesc} />
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 16, marginBottom: 12 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>分类</div>
+            <Select size="small" style={{ width: '100%' }} value={createCategory} onChange={v => setCreateCategory(v as string)}
+              optionList={['momentum','value','technical','quality','custom'].map(v => ({ label: v, value: v }))} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>计算模式</div>
+            <Select size="small" style={{ width: '100%' }} value={createComputeMode} onChange={v => setCreateComputeMode(v as string)}
+              optionList={[{ label: '增量', value: 'incremental' }, { label: '全量', value: 'full' }]} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>复权方式</div>
+            <Select size="small" style={{ width: '100%' }} value={createPreprocess.adjust_price}
+              onChange={(v) => setCreatePreprocess(p => ({ ...p, adjust_price: v as PreprocessOptions['adjust_price'] }))}
+              optionList={[
+                { label: '前复权', value: 'forward' },
+                { label: '后复权', value: 'backward' },
+                { label: '不复权', value: 'none' },
+              ]} />
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 16, marginBottom: 8 }}>
+          <Checkbox checked={createPreprocess.filter_st} onChange={(e) => setCreatePreprocess(p => ({ ...p, filter_st: !!e.target.checked }))}>过滤 ST</Checkbox>
+          <Checkbox checked={createPreprocess.filter_new_stock} onChange={(e) => setCreatePreprocess(p => ({ ...p, filter_new_stock: !!e.target.checked }))}>过滤新股</Checkbox>
+          <Checkbox checked={createPreprocess.handle_suspension} onChange={(e) => setCreatePreprocess(p => ({ ...p, handle_suspension: !!e.target.checked }))}>停牌处理</Checkbox>
+          <Checkbox checked={createPreprocess.mark_limit} onChange={(e) => setCreatePreprocess(p => ({ ...p, mark_limit: !!e.target.checked }))}>涨跌停标记</Checkbox>
+        </div>
+        {createPreprocess.filter_new_stock && (
+          <div style={{ marginBottom: 8 }}>
+            <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>新股排除天数</div>
+            <InputNumber size="small" min={1} max={250} value={createPreprocess.new_stock_days}
+              onChange={(v) => setCreatePreprocess(p => ({ ...p, new_stock_days: (v as number) || 60 }))} />
+          </div>
+        )}
+        <div style={{ marginTop: 8 }}>
+          <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>因子计算代码</div>
+          <div style={{ border: '1px solid var(--border-color)', borderRadius: 4, overflow: 'hidden' }}>
+            <Editor height="300px" language="python" theme={mode === 'dark' ? 'vs-dark' : 'vs-light'}
+              value={createCode} onChange={(v) => setCreateCode(v || '')}
+              options={{ minimap: { enabled: false }, fontSize: 13, scrollBeyondLastLine: false, automaticLayout: true, tabSize: 4 }} />
+          </div>
+          <CodeTestPanel code={createCode} />
+        </div>
       </Modal>
 
-      <Modal title="全量计算" open={fullRunModal.visible}
+      <Modal title="全量计算" visible={fullRunModal.visible}
         onCancel={() => setFullRunModal({ visible: false, factorId: null })}
         onOk={() => {
           if (!fullRunModal.factorId) return;
@@ -673,9 +734,15 @@ const FactorManageTab: React.FC = () => {
         okText="开始计算" cancelText="取消">
         <p style={{ marginBottom: 12 }}>因子: <Tag color="blue">{fullRunModal.factorId}</Tag></p>
         <p style={{ marginBottom: 8 }}>选择日期范围（留空则使用默认252个交易日）:</p>
-        <DatePicker.RangePicker style={{ width: '100%' }}
-          value={fullRunDates}
-          onChange={(dates) => setFullRunDates(dates ? [dates[0], dates[1]] : [null, null])} />
+        <DatePicker type="dateRange" style={{ width: '100%' }}
+          value={fullRunDates as any}
+          onChange={(dates) => {
+            if (dates && Array.isArray(dates) && dates.length === 2) {
+              setFullRunDates([dates[0] ? dayjs(dates[0]) : null, dates[1] ? dayjs(dates[1]) : null]);
+            } else {
+              setFullRunDates([null, null]);
+            }
+          }} />
       </Modal>
 
       <FactorDrawer factor={drawerState.factor} open={drawerState.open} initialTab={drawerState.tab}
@@ -684,7 +751,6 @@ const FactorManageTab: React.FC = () => {
           const res = await productionApi.listFactors();
           const list = res.data?.data || [];
           setFactors(list);
-          // 同步更新 drawer 中的 factor 对象，避免后续保存用旧值
           if (drawerState.factor) {
             const updated = list.find((f: any) => f.factor_id === drawerState.factor.factor_id);
             if (updated) setDrawerState(prev => ({ ...prev, factor: updated }));
@@ -709,14 +775,14 @@ const AnalysisTab: React.FC = () => {
   }, []);
 
   const handleRunAnalysis = async () => {
-    if (!selectedFactor) { message.warning('请选择因子'); return; }
+    if (!selectedFactor) { Toast.warning('请选择因子'); return; }
     setRunLoading(true);
     try {
       const res = await productionApi.runAnalysis(selectedFactor, undefined, undefined, periods, quantiles);
-      message.success('分析完成');
+      Toast.success('分析完成');
       setAnalysisResult(res.data?.data);
     } catch (e: any) {
-      message.error(e.response?.data?.detail || '分析失败');
+      Toast.error(e.response?.data?.detail || '分析失败');
     }
     setRunLoading(false);
   };
@@ -736,13 +802,13 @@ const AnalysisTab: React.FC = () => {
     return {
       backgroundColor: 'transparent',
       tooltip: { trigger: 'axis' },
-      legend: { textStyle: { color: '#94a3b8' }, top: 0 },
+      legend: { textStyle: { color: '#94A3B8' }, top: 0 },
       grid: { top: 40, bottom: 30, left: 60, right: 20 },
-      xAxis: { type: 'category', data: data.map((d: any) => `${d.period}D`), axisLabel: { color: '#94a3b8' } },
-      yAxis: { type: 'value', axisLabel: { color: '#94a3b8' }, splitLine: { lineStyle: { color: 'rgba(148,163,184,0.1)' } } },
+      xAxis: { type: 'category', data: data.map((d: any) => `${d.period}D`), axisLabel: { color: '#94A3B8' } },
+      yAxis: { type: 'value', axisLabel: { color: '#94A3B8' }, splitLine: { lineStyle: { color: 'rgba(148,163,184,0.15)' } } },
       series: [
-        { name: 'IC均值', type: 'bar', data: data.map((d: any) => d.ic_mean?.toFixed(4)), itemStyle: { color: '#00d4ff' } },
-        { name: 'ICIR', type: 'bar', data: data.map((d: any) => d.icir?.toFixed(4)), itemStyle: { color: '#7c3aed' } },
+        { name: 'IC均值', type: 'bar', data: data.map((d: any) => d.ic_mean?.toFixed(4)), itemStyle: { color: '#0077FA' } },
+        { name: 'ICIR', type: 'bar', data: data.map((d: any) => d.icir?.toFixed(4)), itemStyle: { color: '#14C9C9' } },
       ]
     };
   };
@@ -752,14 +818,14 @@ const AnalysisTab: React.FC = () => {
     const data = analysisResult.layer_returns;
     const periodGroups = [...new Set(data.map((d: any) => d.period))];
     const quantileGroups = [...new Set(data.map((d: any) => d.quantile))];
-    const colors = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#00d4ff'];
+    const colors = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#0077FA'];
     return {
       backgroundColor: 'transparent',
       tooltip: { trigger: 'axis' },
-      legend: { data: quantileGroups as string[], textStyle: { color: '#94a3b8' }, top: 0 },
+      legend: { data: quantileGroups as string[], textStyle: { color: '#94A3B8' }, top: 0 },
       grid: { top: 40, bottom: 30, left: 60, right: 20 },
-      xAxis: { type: 'category', data: periodGroups.map((p: any) => `${p}D`), axisLabel: { color: '#94a3b8' } },
-      yAxis: { type: 'value', axisLabel: { color: '#94a3b8', formatter: (v: number) => `${(v * 100).toFixed(2)}%` }, splitLine: { lineStyle: { color: 'rgba(148,163,184,0.1)' } } },
+      xAxis: { type: 'category', data: periodGroups.map((p: any) => `${p}D`), axisLabel: { color: '#94A3B8' } },
+      yAxis: { type: 'value', axisLabel: { color: '#94A3B8', formatter: (v: number) => `${(v * 100).toFixed(2)}%` }, splitLine: { lineStyle: { color: 'rgba(148,163,184,0.15)' } } },
       series: quantileGroups.map((q: any, i: number) => ({
         name: q, type: 'bar',
         data: periodGroups.map((p: any) => { const item = data.find((d: any) => d.period === p && d.quantile === q); return item?.mean_return || 0; }),
@@ -770,42 +836,42 @@ const AnalysisTab: React.FC = () => {
 
   const icColumns = [
     { title: '周期', dataIndex: 'period', key: 'period', render: (v: number) => `${v}D` },
-    { title: 'IC均值', dataIndex: 'ic_mean', key: 'ic_mean', render: (v: number) => <span style={{ color: v > 0 ? '#10b981' : '#ef4444' }}>{v?.toFixed(4)}</span> },
+    { title: 'IC均值', dataIndex: 'ic_mean', key: 'ic_mean', render: (v: number) => <span style={{ color: v > 0 ? 'var(--color-gain)' : 'var(--color-loss)' }}>{v?.toFixed(4)}</span> },
     { title: 'IC标准差', dataIndex: 'ic_std', key: 'ic_std', render: (v: number) => v?.toFixed(4) },
-    { title: 'ICIR', dataIndex: 'icir', key: 'icir', render: (v: number) => <span style={{ color: Math.abs(v) > 0.5 ? '#00d4ff' : '#94a3b8', fontWeight: Math.abs(v) > 0.5 ? 700 : 400 }}>{v?.toFixed(4)}</span> },
+    { title: 'ICIR', dataIndex: 'icir', key: 'icir', render: (v: number) => <span style={{ color: Math.abs(v) > 0.5 ? 'var(--color-primary)' : 'var(--text-secondary)', fontWeight: Math.abs(v) > 0.5 ? 700 : 400 }}>{v?.toFixed(4)}</span> },
     { title: 'IC>0占比', dataIndex: 'ic_positive_ratio', key: 'ratio', render: (v: number) => `${(v * 100).toFixed(1)}%` },
-    { title: 'p值', dataIndex: 'p_value', key: 'p', render: (v: number) => <span style={{ color: v < 0.05 ? '#10b981' : '#ef4444' }}>{v?.toFixed(4)}</span> },
+    { title: 'p值', dataIndex: 'p_value', key: 'p', render: (v: number) => <span style={{ color: v < 0.05 ? 'var(--color-gain)' : 'var(--color-loss)' }}>{v?.toFixed(4)}</span> },
   ];
 
   return (
     <div>
-      <Card className="tech-card" style={{ marginBottom: 16 }}>
-        <Space wrap>
+      <Card style={{ marginBottom: 16, background: 'var(--bg-card)' }}>
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
           <Select placeholder="选择因子" style={{ width: 180 }} value={selectedFactor || undefined}
-            onChange={(v) => { setSelectedFactor(v); loadAnalysis(v); }}
-            options={factors.map(f => ({ label: `${f.factor_id}`, value: f.factor_id }))} />
-          <span style={{ color: '#94a3b8', fontSize: 12 }}>周期:</span>
-          <Select mode="multiple" style={{ width: 200 }} value={periods} onChange={setPeriods}
-            options={[1,2,3,5,10,20].map(v => ({ label: `${v}D`, value: v }))} />
-          <span style={{ color: '#94a3b8', fontSize: 12 }}>分层:</span>
-          <InputNumber min={3} max={10} value={quantiles} onChange={v => v && setQuantiles(v)} size="small" style={{ width: 60 }} />
-          <Button type="primary" icon={<BarChartOutlined />} loading={runLoading} onClick={handleRunAnalysis}>运行分析</Button>
-        </Space>
+            onChange={(v) => { setSelectedFactor(v as string); loadAnalysis(v as string); }}
+            optionList={factors.map(f => ({ label: `${f.factor_id}`, value: f.factor_id }))} />
+          <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>周期:</span>
+          <Select multiple style={{ width: 200 }} value={periods} onChange={v => setPeriods(v as number[])}
+            optionList={[1,2,3,5,10,20].map(v => ({ label: `${v}D`, value: v }))} />
+          <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>分层:</span>
+          <InputNumber min={3} max={10} value={quantiles} onChange={v => v && setQuantiles(v as number)} size="small" style={{ width: 60 }} />
+          <Button theme="solid" icon={<IconBarChartHStroked />} loading={runLoading} onClick={handleRunAnalysis}>运行分析</Button>
+        </div>
       </Card>
 
       {loading ? <Spin style={{ display: 'block', margin: '60px auto' }} /> : analysisResult ? (
         <>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
-            <Card className="tech-card" title={<span style={{ color: '#00d4ff' }}>IC 分析</span>} size="small">
+            <Card style={{ background: 'var(--bg-card)' }} title={<span style={{ color: 'var(--color-primary)' }}>IC 分析</span>}>
               <ReactECharts option={getICChartOption()} style={{ height: 240 }} />
             </Card>
-            <Card className="tech-card" title={<span style={{ color: '#7c3aed' }}>分层收益</span>} size="small">
+            <Card style={{ background: 'var(--bg-card)' }} title={<span style={{ color: 'var(--color-accent, #14C9C9)' }}>分层收益</span>}>
               <ReactECharts option={getLayerReturnOption()} style={{ height: 240 }} />
             </Card>
           </div>
-          <Card className="tech-card" title={<span style={{ color: '#94a3b8' }}>IC 详细指标</span>} size="small">
+          <Card style={{ background: 'var(--bg-card)' }} title={<span style={{ color: 'var(--text-secondary)' }}>IC 详细指标</span>}>
             <Table dataSource={analysisResult.ic_summary || []} columns={icColumns}
-              rowKey="period" size="small" pagination={false} className="tech-table" />
+              rowKey="period" size="small" pagination={false} />
           </Card>
         </>
       ) : <Empty description="选择因子并运行分析" style={{ marginTop: 60 }} />}
@@ -818,25 +884,25 @@ const FactorCenter: React.FC = () => (
   <div style={{ padding: '16px', maxWidth: '1600px', margin: '0 auto' }}>
     <div style={{ marginBottom: '16px' }}>
       <h1 style={{
-        color: '#00d4ff', fontSize: '24px', fontWeight: 700, margin: 0,
-        textShadow: '0 0 20px rgba(0, 212, 255, 0.5)', letterSpacing: '1px'
+        color: 'var(--color-primary)', fontSize: '24px', fontWeight: 700, margin: 0,
+        letterSpacing: '1px'
       }}>
-        <ExperimentOutlined style={{ marginRight: '8px' }} />
+        <IconTestScoreStroked style={{ marginRight: '8px' }} />
         因子中心
       </h1>
-      <p style={{ color: '#94a3b8', margin: '4px 0 0 0', fontSize: '12px' }}>
+      <p style={{ color: 'var(--text-secondary)', margin: '4px 0 0 0', fontSize: '12px' }}>
         因子注册管理与 IC 分析
       </p>
     </div>
 
-    <Tabs
-      defaultActiveKey="factors"
-      className="tech-tabs"
-      items={[
-        { key: 'factors', label: <span><ExperimentOutlined /> 因子管理</span>, children: <FactorManageTab /> },
-        { key: 'analysis', label: <span><BarChartOutlined /> 因子分析</span>, children: <AnalysisTab /> },
-      ]}
-    />
+    <Tabs defaultActiveKey="factors">
+      <TabPane itemKey="factors" tab={<span><IconTestScoreStroked /> 因子管理</span>}>
+        <FactorManageTab />
+      </TabPane>
+      <TabPane itemKey="analysis" tab={<span><IconBarChartHStroked /> 因子分析</span>}>
+        <AnalysisTab />
+      </TabPane>
+    </Tabs>
   </div>
 );
 

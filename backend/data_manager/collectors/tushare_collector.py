@@ -4,7 +4,7 @@ import tushare as ts
 from datetime import datetime, timedelta
 from app.core.config import settings
 from app.core.logger import logger
-from store.postgres_client import db_client
+from store.dolphindb_client import db_client
 
 
 class TushareCollector:

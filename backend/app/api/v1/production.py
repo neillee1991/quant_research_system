@@ -5,33 +5,22 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
-from store.postgres_client import db_client
+from store.dolphindb_client import db_client
 from engine.analysis.analyzer import FactorAnalyzer
 from engine.production.registry import list_factors, get_registry, discover_factors, unregister_factor
 from engine.production.engine import ProductionEngine
-from data_manager.dag_executor import DAGConfigManager, DAGExecutor
+import polars as pl
+import httpx
 from data_manager.refactored_sync_engine import sync_engine as _sync_engine
+from app.core.config import settings
 from app.core.logger import logger
 from app.core.utils import DateUtils
 
 router = APIRouter()
 analyzer = FactorAnalyzer(db_client)
 prod_engine = ProductionEngine(db_client)
-dag_config_mgr = DAGConfigManager()
-_dag_executor: Optional[DAGExecutor] = None
 
 FACTORS_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "..", "engine", "production", "factors")
-
-
-def _get_dag_executor() -> DAGExecutor:
-    global _dag_executor
-    if _dag_executor is None:
-        _dag_executor = DAGExecutor(
-            sync_engine=_sync_engine,
-            production_engine=prod_engine,
-            db_client=db_client,
-        )
-    return _dag_executor
 
 
 # ==================== 因子分析 ====================
@@ -224,17 +213,7 @@ def _parse_params(raw) -> dict:
 
 @router.get("/production/factors")
 async def list_registered_factors():
-    """列出所有因子（合并装饰器注册 + 数据库手动注册）- 带缓存"""
-    from store.redis_client import redis_client
-    from app.core.config import settings
-
-    # 尝试从缓存获取
-    cache_key = "production:factors:list"
-    cached_result = redis_client.get(cache_key)
-    if cached_result is not None:
-        logger.debug("Cache hit for factor list")
-        return cached_result
-
+    """列出所有因子（合并装饰器注册 + 数据库手动注册）"""
     discover_factors()
 
     # 装饰器注册的因子
@@ -244,25 +223,22 @@ async def list_registered_factors():
     db_meta = {}
     latest_dates: Dict[str, str] = {}
     try:
-        # 合并查询：一次性获取元数据和最新日期
-        df = db_client.query("""
-            SELECT
-                fm.*,
-                fv.latest_date
-            FROM factor_metadata fm
-            LEFT JOIN (
-                SELECT factor_id, MAX(trade_date) AS latest_date
-                FROM factor_values
-                GROUP BY factor_id
-            ) fv ON fm.factor_id = fv.factor_id
-            ORDER BY fm.factor_id
-        """)
-        if not df.is_empty():
-            for row in df.to_dicts():
-                factor_id = row["factor_id"]
-                db_meta[factor_id] = row
-                if row.get("latest_date"):
-                    latest_dates[factor_id] = row["latest_date"]
+        # 先查 factor_metadata
+        meta_df = db_client.query("SELECT * FROM factor_metadata ORDER BY factor_id")
+        if not meta_df.is_empty():
+            for row in meta_df.to_dicts():
+                db_meta[row["factor_id"]] = row
+
+        # 再查 factor_values 的最新日期
+        try:
+            fv_df = db_client.query(
+                "SELECT factor_id, max(trade_date) AS latest_date FROM factor_values GROUP BY factor_id"
+            )
+            if not fv_df.is_empty():
+                for row in fv_df.to_dicts():
+                    latest_dates[row["factor_id"]] = row["latest_date"]
+        except Exception:
+            pass
     except Exception:
         pass
 
@@ -270,14 +246,19 @@ async def list_registered_factors():
     for fid, fdef in code_factors.items():
         if fid not in db_meta:
             try:
-                db_client.execute("""
-                    INSERT INTO factor_metadata (factor_id, description, category, compute_mode, storage_target, params)
-                    VALUES (%s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (factor_id) DO NOTHING
-                """, (fid, fdef.get("description", ""), fdef.get("category", "custom"),
-                      fdef.get("compute_mode", "incremental"),
-                      fdef.get("storage_target", "factor_values"),
-                      json.dumps(fdef.get("params", {}))))
+                seed_df = pl.DataFrame({
+                    "factor_id": [fid],
+                    "description": [fdef.get("description", "")],
+                    "category": [fdef.get("category", "custom")],
+                    "compute_mode": [fdef.get("compute_mode", "incremental")],
+                    "storage_target": [fdef.get("storage_target", "factor_values")],
+                    "params": [json.dumps(fdef.get("params", {}))],
+                    "last_computed_date": [""],
+                    "last_computed_at": [None],
+                    "created_at": [datetime.now()],
+                    "updated_at": [datetime.now()],
+                })
+                db_client.upsert("factor_metadata", seed_df, ["factor_id"])
                 db_meta[fid] = {"factor_id": fid, "description": fdef.get("description", ""),
                                 "category": fdef.get("category", "custom")}
             except Exception:
@@ -305,10 +286,6 @@ async def list_registered_factors():
 
     result = {"status": "success", "data": merged}
 
-    # 缓存结果（1小时）
-    redis_client.set(cache_key, result, ttl=settings.redis.cache_ttl_factor_metadata)
-    logger.debug("Cached factor list")
-
     return result
 
 
@@ -322,11 +299,20 @@ async def create_factor(req: FactorCreateRequest):
         if not existing.is_empty():
             raise HTTPException(status_code=409, detail=f"因子 {req.factor_id} 已存在")
 
-        db_client.execute("""
-            INSERT INTO factor_metadata (factor_id, description, category, compute_mode, storage_target, params)
-            VALUES (%s, %s, %s, %s, %s, %s)
-        """, (req.factor_id, req.description, req.category, req.compute_mode,
-              req.storage_target, json.dumps(req.params)))
+        now = datetime.now()
+        new_df = pl.DataFrame({
+            "factor_id": [req.factor_id],
+            "description": [req.description],
+            "category": [req.category],
+            "compute_mode": [req.compute_mode],
+            "storage_target": [req.storage_target],
+            "params": [json.dumps(req.params)],
+            "last_computed_date": [""],
+            "last_computed_at": [None],
+            "created_at": [now],
+            "updated_at": [now],
+        })
+        db_client.upsert("factor_metadata", new_df, ["factor_id"])
 
         # 保存因子代码文件
         filename = None
@@ -337,12 +323,6 @@ async def create_factor(req: FactorCreateRequest):
             with open(fpath, "w", encoding="utf-8") as f:
                 f.write(req.code)
             logger.info(f"Created factor code file: {filename}")
-
-        # 清除因子列表缓存
-        from store.redis_client import redis_client
-        cache_key = "production:factors:list"
-        redis_client.delete(cache_key)
-        logger.debug(f"Cleared factor list cache after creating {req.factor_id}")
 
         return {"status": "success", "data": {"factor_id": req.factor_id, "filename": filename}}
     except HTTPException:
@@ -356,39 +336,38 @@ async def create_factor(req: FactorCreateRequest):
 async def update_factor(factor_id: str, req: FactorUpdateRequest):
     """修改因子元数据"""
     try:
-        updates = []
-        values = []
+        # 先读取现有记录
+        existing = db_client.query(
+            "SELECT * FROM factor_metadata WHERE factor_id = %s", (factor_id,)
+        )
+        if existing.is_empty():
+            # 不存在则创建默认记录
+            row = {
+                "factor_id": factor_id, "description": "", "category": "custom",
+                "compute_mode": "incremental", "storage_target": "factor_values",
+                "params": "{}", "last_computed_date": "", "last_computed_at": None,
+                "created_at": datetime.now(), "updated_at": datetime.now(),
+            }
+        else:
+            row = existing.to_dicts()[0]
+
+        # 应用更新
         if req.description is not None:
-            updates.append("description = %s")
-            values.append(req.description)
+            row["description"] = req.description
         if req.category is not None:
-            updates.append("category = %s")
-            values.append(req.category)
+            row["category"] = req.category
         if req.compute_mode is not None:
-            updates.append("compute_mode = %s")
-            values.append(req.compute_mode)
+            row["compute_mode"] = req.compute_mode
         if req.storage_target is not None:
-            updates.append("storage_target = %s")
-            values.append(req.storage_target)
+            row["storage_target"] = req.storage_target
         if req.params is not None:
-            updates.append("params = %s")
-            values.append(json.dumps(req.params))
-        if not updates:
-            return {"status": "success", "data": {"factor_id": factor_id}}
+            row["params"] = json.dumps(req.params)
+        row["updated_at"] = datetime.now()
 
-        updates.append("updated_at = CURRENT_TIMESTAMP")
-
-        # UPSERT: 如果不存在则插入
-        db_client.execute(f"""
-            INSERT INTO factor_metadata (factor_id, description, category, compute_mode, storage_target, params)
-            VALUES (%s, '', 'custom', 'incremental', 'factor_values', '{{}}')
-            ON CONFLICT (factor_id) DO UPDATE SET {', '.join(updates)}
-        """, (factor_id, *values))
+        update_df = pl.DataFrame([row])
+        db_client.upsert("factor_metadata", update_df, ["factor_id"])
 
         # 清除因子列表缓存
-        from store.redis_client import redis_client
-        cache_key = "production:factors:list"
-        redis_client.delete(cache_key)
         logger.debug(f"Cleared factor list cache after updating {factor_id}")
 
         return {"status": "success", "data": {"factor_id": factor_id}}
@@ -416,9 +395,6 @@ async def delete_factor(factor_id: str, delete_data: bool = False):
         unregister_factor(factor_id)
 
         # 清除因子列表缓存
-        from store.redis_client import redis_client
-        cache_key = "production:factors:list"
-        redis_client.delete(cache_key)
         logger.debug(f"Cleared factor list cache after deleting {factor_id}")
 
         return {"status": "success", "data": {"factor_id": factor_id, "data_deleted": delete_data}}
@@ -822,245 +798,123 @@ async def get_factor_stats(factor_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ==================== DAG 管理 ====================
+# ==================== Prefect 工作流管理 ====================
 
-class DAGRunRequest(BaseModel):
-    dag_id: str
+class FlowRunRequest(BaseModel):
+    flow_name: str
     target_date: Optional[str] = None
-    start_date: Optional[str] = None   # 回溯起始日期
-    end_date: Optional[str] = None     # 回溯结束日期
-    run_type: str = "today"            # today | single | backfill
-
-
-class DAGCreateRequest(BaseModel):
-    dag_id: str
-    description: str = ""
-    schedule: str = "manual"
-    tasks: List[Dict[str, Any]] = []
-
-
-class DAGUpdateRequest(BaseModel):
-    description: Optional[str] = None
-    schedule: Optional[str] = None
-    tasks: Optional[List[Dict[str, Any]]] = None
-
-
-def _validate_dag_tasks(tasks: List[Dict[str, Any]]):
-    """校验 DAG 任务列表中的 task_id 是否在 sync/production 注册表中"""
-    # 先发现所有已注册的因子
-    discover_factors()
-
-    sync_tasks = {t["task_id"] for t in _sync_engine.get_all_tasks()}
-    prod_factors = {f["factor_id"] for f in list_factors()}
-    valid_ids = sync_tasks | prod_factors
-    invalid = [t.get("task_id", "?") for t in tasks if t.get("task_id") not in valid_ids]
-    if invalid:
-        raise HTTPException(
-            status_code=400,
-            detail=f"未知的 task_id: {', '.join(invalid)}。可用: {', '.join(sorted(valid_ids))}",
-        )
-
-
-@router.get("/dag/list")
-async def list_dags():
-    """列出所有 DAG，附带最近成功执行时间"""
-    dags = dag_config_mgr.get_all_dags()
-    # 查询每个 DAG 最近一次成功运行时间
-    try:
-        df = db_client.query("""
-            SELECT dag_id, MAX(finished_at) as last_success
-            FROM dag_run_log WHERE status = 'success'
-            GROUP BY dag_id
-        """)
-        success_map = {}
-        if df is not None and not df.empty:
-            for _, row in df.iterrows():
-                success_map[row["dag_id"]] = str(row["last_success"])
-        for dag in dags:
-            dag["last_success"] = success_map.get(dag["dag_id"])
-    except Exception as e:
-        logger.warning(f"Failed to query last success time: {e}")
-    return {"status": "success", "data": dags}
-
-
-@router.post("/dag/create")
-async def create_dag(req: DAGCreateRequest):
-    """创建 DAG"""
-    try:
-        if req.tasks:
-            _validate_dag_tasks(req.tasks)
-        dag_config = {
-            "dag_id": req.dag_id,
-            "description": req.description,
-            "schedule": req.schedule,
-            "tasks": req.tasks,
-        }
-        dag_config_mgr.add_dag(dag_config)
-        return {"status": "success", "data": dag_config}
-    except ValueError as e:
-        raise HTTPException(status_code=409, detail=str(e))
-    except Exception as e:
-        logger.error(f"Create DAG failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.put("/dag/{dag_id}")
-async def update_dag(dag_id: str, req: DAGUpdateRequest):
-    """修改 DAG"""
-    try:
-        existing = dag_config_mgr.get_dag(dag_id)
-        if not existing:
-            raise HTTPException(status_code=404, detail=f"DAG {dag_id} 不存在")
-        updated = {**existing}
-        if req.description is not None:
-            updated["description"] = req.description
-        if req.schedule is not None:
-            updated["schedule"] = req.schedule
-        if req.tasks is not None:
-            _validate_dag_tasks(req.tasks)
-            updated["tasks"] = req.tasks
-        dag_config_mgr.update_dag(dag_id, updated)
-        return {"status": "success", "data": updated}
-    except HTTPException:
-        raise
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        logger.error(f"Update DAG failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.delete("/dag/{dag_id}")
-async def delete_dag(dag_id: str):
-    """删除 DAG"""
-    try:
-        dag_config_mgr.delete_dag(dag_id)
-        return {"status": "success", "data": {"dag_id": dag_id}}
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        logger.error(f"Delete DAG failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-def _build_dag_run_result(dag_run) -> dict:
-    """从 DAGRun 对象构建返回结果"""
-    dag_status = dag_run.status.value if hasattr(dag_run.status, 'value') else str(dag_run.status)
-    task_results = []
-    for node in dag_run.tasks.values():
-        task_results.append({
-            "task_id": node.task_id,
-            "task_type": node.task_type,
-            "status": node.status.value if hasattr(node.status, 'value') else str(node.status),
-            "error_message": node.error_message,
-            "started_at": str(node.started_at) if node.started_at else None,
-            "finished_at": str(node.finished_at) if node.finished_at else None,
-        })
-    failed_tasks = [t for t in task_results if t["status"] in ("failed", "skipped")]
-    return {
-        "run_id": dag_run.run_id,
-        "dag_id": dag_run.dag_id,
-        "status": dag_status,
-        "tasks": task_results,
-        "failed_tasks": failed_tasks,
-        "summary": f"{len(task_results)} 个任务: "
-                   f"{sum(1 for t in task_results if t['status'] == 'success')} 成功, "
-                   f"{sum(1 for t in task_results if t['status'] == 'failed')} 失败, "
-                   f"{sum(1 for t in task_results if t['status'] == 'skipped')} 跳过",
-    }
-
-
-def _generate_trading_dates(start_date: str, end_date: str) -> List[str]:
-    """生成日期范围内的交易日（简单实现：跳过周末），返回 YYYYMMDD 格式"""
-    norm_start = DateUtils.normalize_date(start_date)
-    norm_end = DateUtils.normalize_date(end_date)
-    start = datetime.strptime(norm_start, "%Y%m%d")
-    end = datetime.strptime(norm_end, "%Y%m%d")
-    dates = []
-    current = start
-    while current <= end:
-        if current.weekday() < 5:  # 周一到周五
-            dates.append(current.strftime("%Y%m%d"))
-        current += timedelta(days=1)
-    return dates
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
 
 
 @router.post("/dag/run")
-async def run_dag(req: DAGRunRequest):
-    """运行 DAG，支持单日执行和日期范围回溯"""
+async def run_flow(req: FlowRunRequest):
+    """触发 Prefect Flow 运行（兼容原 DAG 接口）"""
     try:
-        executor = _get_dag_executor()
+        async with httpx.AsyncClient(timeout=30) as client:
+            # 查找 deployment
+            resp = await client.post(
+                f"{settings.prefect_api_url}/deployments/filter",
+                json={"deployments": {"name": {"any_": [f"{req.flow_name}-deployment"]}}}
+            )
+            resp.raise_for_status()
+            deployments = resp.json()
 
-        # 日期范围回溯模式
-        if req.start_date and req.end_date:
-            dates = _generate_trading_dates(req.start_date, req.end_date)
-            if not dates:
-                raise HTTPException(status_code=400, detail="日期范围内无交易日")
+            if not deployments:
+                raise HTTPException(status_code=404, detail=f"Flow '{req.flow_name}' not found")
 
-            backfill_id = f"{req.dag_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-            logger.info(f"DAG backfill: {req.dag_id}, {len(dates)} trading days from {req.start_date} to {req.end_date}, backfill_id={backfill_id}")
-            results = []
-            total_success = 0
-            total_failed = 0
-            for d in dates:
-                dag_run = executor.execute_dag(req.dag_id, target_date=d,
-                                               run_type="backfill", backfill_id=backfill_id)
-                result = _build_dag_run_result(dag_run)
-                result["target_date"] = d
-                results.append(result)
-                if result["status"] == "success":
-                    total_success += 1
-                else:
-                    total_failed += 1
+            deployment_id = deployments[0]["id"]
+
+            params = {}
+            if req.target_date:
+                params["target_date"] = req.target_date
+            if req.start_date:
+                params["start_date"] = req.start_date
+            if req.end_date:
+                params["end_date"] = req.end_date
+
+            resp = await client.post(
+                f"{settings.prefect_api_url}/deployments/{deployment_id}/create_flow_run",
+                json={"parameters": params}
+            )
+            resp.raise_for_status()
+            flow_run = resp.json()
 
             return {
                 "status": "success",
                 "data": {
-                    "mode": "backfill",
-                    "dag_id": req.dag_id,
-                    "backfill_id": backfill_id,
-                    "date_range": [req.start_date, req.end_date],
-                    "total_days": len(dates),
-                    "success_days": total_success,
-                    "failed_days": total_failed,
-                    "summary": f"回溯 {len(dates)} 个交易日: {total_success} 天成功, {total_failed} 天失败",
-                    "runs": results,
+                    "run_id": flow_run["id"],
+                    "flow_name": req.flow_name,
+                    "state": flow_run.get("state_type", "SCHEDULED"),
                 }
             }
-
-        # 单日执行模式
-        run_type = req.run_type if req.run_type != "backfill" else "single"
-        dag_run = executor.execute_dag(req.dag_id, target_date=req.target_date, run_type=run_type)
-        result = _build_dag_run_result(dag_run)
-        return {"status": "success", "data": result}
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"DAG run failed: {e}")
+        logger.error(f"Flow run failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/dag/list")
+async def list_flows():
+    """列出所有 Prefect Flow 部署（兼容原 DAG 列表接口）"""
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(
+                f"{settings.prefect_api_url}/deployments/filter",
+                json={}
+            )
+            resp.raise_for_status()
+            deployments = resp.json()
+
+            return {
+                "status": "success",
+                "data": [
+                    {
+                        "dag_id": d.get("name", ""),
+                        "description": d.get("description", ""),
+                        "schedule": str(d.get("schedule", "")),
+                        "is_active": d.get("is_schedule_active", False),
+                        "tags": d.get("tags", []),
+                    }
+                    for d in deployments
+                ]
+            }
+    except Exception as e:
+        logger.error(f"Failed to list flows: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/dag/{dag_id}/history")
-async def get_dag_history(dag_id: str, limit: int = 10, run_type: Optional[str] = None):
-    """获取 DAG 运行历史，支持按 run_type 过滤"""
+async def get_flow_history(dag_id: str, limit: int = 10):
+    """获取 Flow 运行历史（兼容原 DAG 历史接口）"""
     try:
-        executor = _get_dag_executor()
-        records = executor.get_dag_runs(dag_id, limit, run_type=run_type)
-        return {"status": "success", "data": records}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(
+                f"{settings.prefect_api_url}/flow_runs/filter",
+                json={
+                    "sort": "EXPECTED_START_TIME_DESC",
+                    "limit": limit,
+                    "flow_runs": {"tags": {"all_": [dag_id]}} if dag_id else {},
+                }
+            )
+            resp.raise_for_status()
+            runs = resp.json()
 
-
-@router.get("/dag/backfill/{backfill_id}")
-async def get_backfill_detail(backfill_id: str):
-    """获取回溯批次详情"""
-    try:
-        executor = _get_dag_executor()
-        summary = executor.get_backfill_summary(backfill_id)
-        if not summary:
-            raise HTTPException(status_code=404, detail="回溯批次不存在")
-        return {"status": "success", "data": summary}
-    except HTTPException:
-        raise
+            return {
+                "status": "success",
+                "data": [
+                    {
+                        "run_id": r["id"],
+                        "status": r.get("state_type", ""),
+                        "state_name": r.get("state_name", ""),
+                        "start_time": r.get("start_time"),
+                        "end_time": r.get("end_time"),
+                        "parameters": r.get("parameters", {}),
+                    }
+                    for r in runs
+                ]
+            }
     except Exception as e:
+        logger.error(f"Failed to get flow history: {e}")
         raise HTTPException(status_code=500, detail=str(e))

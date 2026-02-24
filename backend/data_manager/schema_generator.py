@@ -15,22 +15,22 @@ import pandas as pd
 from typing import Dict, Any
 
 
-# Pandas dtype 到 PostgreSQL 类型的映射
+# Pandas dtype 到 DolphinDB 类型的映射
 DTYPE_MAPPING = {
-    'int64': 'BIGINT',
-    'int32': 'INTEGER',
-    'float64': 'DOUBLE PRECISION',
-    'float32': 'REAL',
-    'object': 'VARCHAR',
-    'bool': 'BOOLEAN',
+    'int64': 'LONG',
+    'int32': 'INT',
+    'float64': 'DOUBLE',
+    'float32': 'FLOAT',
+    'object': 'SYMBOL',
+    'bool': 'BOOL',
     'datetime64[ns]': 'TIMESTAMP',
 }
 
 
-def infer_pg_type(pandas_dtype: str) -> str:
-    """推断 PostgreSQL 列类型"""
+def infer_dolphindb_type(pandas_dtype: str) -> str:
+    """推断 DolphinDB 列类型"""
     dtype_str = str(pandas_dtype)
-    return DTYPE_MAPPING.get(dtype_str, 'VARCHAR')
+    return DTYPE_MAPPING.get(dtype_str, 'STRING')
 
 
 def generate_schema_from_api(api_name: str, token: str, sample_params: Dict[str, Any] = None) -> Dict[str, Dict]:
@@ -68,13 +68,13 @@ def generate_schema_from_api(api_name: str, token: str, sample_params: Dict[str,
     schema = {}
     for col in df.columns:
         dtype = df[col].dtype
-        duckdb_type = infer_pg_type(dtype)
+        ddb_type = infer_dolphindb_type(dtype)
 
         # 检查是否有空值
         has_null = df[col].isnull().any()
 
         schema[col] = {
-            "type": duckdb_type,
+            "type": ddb_type,
             "nullable": bool(has_null),
             "comment": col
         }

@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from typing import Optional
 import polars as pl
-from store.postgres_client import db_client
+from store.dolphindb_client import db_client
 from ml_module.pipeline import MLPipeline
 from ml_module.optimizer import FactorOptimizer
 from app.core.logger import logger

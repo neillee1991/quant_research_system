@@ -1,17 +1,31 @@
 import React from 'react';
 import { Handle, Position, NodeProps } from 'reactflow';
-import { Card, InputNumber, Form } from 'antd';
+import { Card, Form, InputNumber } from '@douyinfe/semi-ui';
 
 const BacktestOutputNode: React.FC<NodeProps> = ({ data }) => (
-  <Card size="small" title="Backtest Output" style={{ minWidth: 200, background: '#1a2a2a', borderColor: '#faad14' }}>
+  <Card
+    title="Backtest Output"
+    style={{ minWidth: 200, background: 'var(--bg-node-output)', border: '1px solid var(--color-warning)' }}
+    headerStyle={{ padding: '8px 12px' }}
+    bodyStyle={{ padding: '8px 12px' }}
+  >
     <Handle type="target" position={Position.Left} />
-    <Form layout="vertical" size="small">
-      <Form.Item label="Initial Capital">
-        <InputNumber defaultValue={data.config?.initial_capital || 1000000} style={{ width: '100%' }} />
-      </Form.Item>
-      <Form.Item label="Commission (%)">
-        <InputNumber defaultValue={(data.config?.commission_rate || 0.0003) * 100} step={0.01} style={{ width: '100%' }} />
-      </Form.Item>
+    <Form layout="vertical" labelPosition="top">
+      <Form.InputNumber
+        field="initial_capital"
+        label="Initial Capital"
+        initValue={data.config?.initial_capital || 1000000}
+        size="small"
+        style={{ width: '100%' }}
+      />
+      <Form.InputNumber
+        field="commission_rate"
+        label="Commission (%)"
+        initValue={(data.config?.commission_rate || 0.0003) * 100}
+        step={0.01}
+        size="small"
+        style={{ width: '100%' }}
+      />
     </Form>
   </Card>
 );

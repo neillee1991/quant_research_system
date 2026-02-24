@@ -6,9 +6,10 @@ from typing import List, Optional
 from fastapi import APIRouter, Query, HTTPException, status
 from pydantic import BaseModel, Field
 
-from store.postgres_client import db_client
+import httpx
+from store.dolphindb_client import db_client
 from data_manager.refactored_sync_engine import sync_engine
-from data_manager.scheduler import sync_scheduler
+from app.core.config import settings
 from app.core.logger import logger
 
 
@@ -303,7 +304,8 @@ def get_task_status(task_id: str):
         if table_name:
             try:
                 # 使用配置中指定的日期字段
-                max_date_sql = f"SELECT MAX({date_field}) as max_date FROM {table_name}"
+                db_path = db_client._resolve_db_path(table_name)
+                max_date_sql = f'SELECT MAX({date_field}) as max_date FROM loadTable("{db_path}", "{table_name}")'
                 df = db_client.query(max_date_sql)
                 if not df.is_empty() and df["max_date"][0]:
                     status_info["table_latest_date"] = df["max_date"][0]
@@ -323,155 +325,120 @@ def get_task_status(task_id: str):
 
 # ==================== 任务配置管理接口 ====================
 
-# ==================== 调度管理接口 ====================
+# ==================== Prefect 调度接口 ====================
 
-@router.post("/data/sync/scheduler/start")
-def start_scheduler():
-    """启动调度器"""
-    try:
-        sync_scheduler.start()
-        return {"status": "success", "message": "Scheduler started"}
-    except Exception as e:
-        logger.error(f"Failed to start scheduler: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/data/sync/scheduler/stop")
-def stop_scheduler():
-    """停止调度器"""
-    try:
-        sync_scheduler.shutdown()
-        return {"status": "success", "message": "Scheduler stopped"}
-    except Exception as e:
-        logger.error(f"Failed to stop scheduler: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/data/sync/scheduler/load")
-def load_schedules():
-    """从配置文件加载所有任务调度"""
-    try:
-        count = sync_scheduler.load_schedules_from_config()
-        return {
-            "status": "success",
-            "message": f"Loaded {count} task schedules",
-            "count": count
-        }
-    except Exception as e:
-        logger.error(f"Failed to load schedules: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/data/sync/scheduler/schedules")
-def get_all_schedules():
-    """获取所有调度任务信息"""
-    try:
-        schedules = sync_scheduler.get_all_schedules()
-        return {
-            "schedules": schedules,
-            "count": len(schedules)
-        }
-    except Exception as e:
-        logger.error(f"Failed to get schedules: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/data/sync/scheduler/task/{task_id}/enable")
-def enable_task_schedule(
-    task_id: str,
-    schedule: str = Query(..., description="调度类型: daily/weekly/monthly/custom"),
-    cron_expression: Optional[str] = Query(None, description="自定义 cron 表达式（schedule=custom 时使用）")
+@router.post("/data/flow/run/{flow_name}")
+async def trigger_flow_run(
+    flow_name: str,
+    target_date: Optional[str] = Query(None, description="目标日期 YYYYMMDD"),
 ):
-    """
-    启用任务调度
-
-    - **task_id**: 任务ID
-    - **schedule**: 调度类型 (daily/weekly/monthly/custom)
-    - **cron_expression**: 自定义 cron 表达式（仅当 schedule=custom 时需要）
-    """
+    """触发 Prefect Flow 运行"""
     try:
-        success = sync_scheduler.add_task_schedule(task_id, schedule, cron_expression)
-        if success:
+        async with httpx.AsyncClient() as client:
+            # 查找 deployment
+            resp = await client.get(
+                f"{settings.prefect_api_url}/deployments/filter",
+                json={"deployments": {"name": {"any_": [f"{flow_name}-deployment"]}}}
+            )
+            resp.raise_for_status()
+            deployments = resp.json()
+
+            if not deployments:
+                raise HTTPException(status_code=404, detail=f"Flow deployment '{flow_name}' not found")
+
+            deployment_id = deployments[0]["id"]
+
+            # 创建 flow run
+            params = {}
+            if target_date:
+                params["target_date"] = target_date
+
+            resp = await client.post(
+                f"{settings.prefect_api_url}/deployments/{deployment_id}/create_flow_run",
+                json={"parameters": params}
+            )
+            resp.raise_for_status()
+            flow_run = resp.json()
+
             return {
-                "status": "success",
-                "message": f"Schedule enabled for task {task_id}",
-                "task_id": task_id,
-                "schedule": schedule
+                "status": "scheduled",
+                "flow_run_id": flow_run["id"],
+                "flow_name": flow_name,
             }
-        else:
-            raise HTTPException(status_code=400, detail="Failed to enable schedule")
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Failed to enable schedule for task {task_id}: {e}")
+        logger.error(f"Failed to trigger flow run: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/data/sync/scheduler/task/{task_id}/disable")
-def disable_task_schedule(task_id: str):
-    """
-    禁用任务调度
-
-    - **task_id**: 任务ID
-    """
+@router.get("/data/flow/runs")
+async def list_flow_runs(
+    limit: int = Query(20, le=100, description="返回记录数"),
+):
+    """获取最近的 Flow 运行记录"""
     try:
-        success = sync_scheduler.remove_task_schedule(task_id)
-        if success:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f"{settings.prefect_api_url}/flow_runs/filter",
+                json={
+                    "sort": "EXPECTED_START_TIME_DESC",
+                    "limit": limit,
+                }
+            )
+            resp.raise_for_status()
+            runs = resp.json()
+
             return {
-                "status": "success",
-                "message": f"Schedule disabled for task {task_id}",
-                "task_id": task_id
-            }
-        else:
-            return {
-                "status": "warning",
-                "message": f"No schedule found for task {task_id}",
-                "task_id": task_id
+                "runs": [
+                    {
+                        "id": r["id"],
+                        "name": r.get("name", ""),
+                        "flow_id": r.get("flow_id", ""),
+                        "state_type": r.get("state_type", ""),
+                        "state_name": r.get("state_name", ""),
+                        "start_time": r.get("start_time"),
+                        "end_time": r.get("end_time"),
+                        "parameters": r.get("parameters", {}),
+                    }
+                    for r in runs
+                ],
+                "total": len(runs),
             }
     except Exception as e:
-        logger.error(f"Failed to disable schedule for task {task_id}: {e}")
+        logger.error(f"Failed to list flow runs: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/data/sync/scheduler/task/{task_id}")
-def get_task_schedule_info(task_id: str):
-    """
-    获取任务调度信息（包含历史统计）
-
-    - **task_id**: 任务ID
-    """
+@router.get("/data/flow/deployments")
+async def list_deployments():
+    """获取所有 Flow 部署"""
     try:
-        info = sync_scheduler.get_task_schedule_info(task_id)
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f"{settings.prefect_api_url}/deployments/filter",
+                json={}
+            )
+            resp.raise_for_status()
+            deployments = resp.json()
 
-        # 获取调度历史统计
-        try:
-            # 获取上次运行时间和成功次数
-            history_sql = """
-                SELECT
-                    MAX(created_at) as last_run_time,
-                    COUNT(*) FILTER (WHERE status = 'success') as success_count
-                FROM sync_log_history
-                WHERE source = 'tushare_config' AND data_type = %s
-            """
-            df = db_client.query(history_sql, (task_id,))
-
-            if not df.is_empty():
-                if info is None:
-                    info = {"task_id": task_id}
-
-                last_run = df["last_run_time"][0]
-                info["last_run_time"] = last_run.isoformat() if last_run else None
-                info["success_count"] = int(df["success_count"][0]) if df["success_count"][0] else 0
-        except Exception as e:
-            logger.warning(f"Failed to get schedule history for {task_id}: {e}")
-
-        if info:
-            return info
-        else:
             return {
-                "task_id": task_id,
-                "message": "No schedule configured for this task"
+                "deployments": [
+                    {
+                        "id": d["id"],
+                        "name": d.get("name", ""),
+                        "flow_id": d.get("flow_id", ""),
+                        "schedule": d.get("schedule"),
+                        "is_schedule_active": d.get("is_schedule_active", False),
+                        "tags": d.get("tags", []),
+                        "description": d.get("description", ""),
+                    }
+                    for d in deployments
+                ],
+                "total": len(deployments),
             }
     except Exception as e:
-        logger.error(f"Failed to get schedule info for task {task_id}: {e}")
+        logger.error(f"Failed to list deployments: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -649,8 +616,16 @@ def truncate_table(table_name: str):
                 detail=f"Cannot truncate system table: {table_name}"
             )
 
-        # 执行清空操作
-        sql = f"DELETE FROM {table_name}"
+        # 验证表名是否为已知表
+        if table_name not in db_client._ALL_TABLES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown table: {table_name}"
+            )
+
+        # 执行清空操作：DolphinDB 用 dropPartition 或 delete 全量
+        db_path = db_client._resolve_db_path(table_name)
+        sql = f'DELETE FROM loadTable("{db_path}", "{table_name}")'
         db_client.execute(sql)
 
         logger.info(f"Truncated table {table_name}")
@@ -671,77 +646,10 @@ def list_tables():
     """
     列出数据库中的所有表
 
-    返回数据库中所有表的名称和行数
+    返回 DolphinDB 中所有已知表的名称、行数和列信息
     """
     try:
-        # 获取所有表名（PostgreSQL 语法）
-        tables_df = db_client.query(
-            "SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE'"
-        )
-
-        # 表名白名单（防止SQL注入）
-        # 使用模式匹配支持分区表
-        import re
-        ALLOWED_TABLE_PATTERNS = [
-            r'^stock_basic$',
-            r'^daily_data$',
-            r'^daily_basic$',
-            r'^factor_values(_\d{6})?$',  # 支持 factor_values 和 factor_values_YYYYMM
-            r'^factor_metadata$',
-            r'^factor_analysis$',
-            r'^sync_log(_history)?$',  # 支持 sync_log 和 sync_log_history
-            r'^production_task_run$',
-            r'^dag_run_log$',
-            r'^dag_task_log$',
-            r'^migration_history$',
-            r'^adj_factor$',
-            r'^index_daily$',
-            r'^moneyflow$',
-            r'^trade_cal$',
-        ]
-
-        def is_table_allowed(table_name: str) -> bool:
-            """检查表名是否在白名单中"""
-            return any(re.match(pattern, table_name) for pattern in ALLOWED_TABLE_PATTERNS)
-
-        tables_info = []
-        for table_name in tables_df["table_name"].to_list():
-            # 验证表名
-            if not is_table_allowed(table_name):
-                logger.warning(f"Skipping unauthorized table: {table_name}")
-                continue
-
-            try:
-                # 获取表的行数（使用参数化查询）
-                count_df = db_client.query(
-                    "SELECT COUNT(*) as count FROM " + table_name
-                )
-                row_count = count_df["count"][0] if not count_df.is_empty() else 0
-
-                # 获取表结构（使用参数化查询）
-                schema_df = db_client.query("""
-                    SELECT column_name
-                    FROM information_schema.columns
-                    WHERE table_schema='public' AND table_name=%s
-                    ORDER BY ordinal_position
-                """, (table_name,))
-                columns = schema_df["column_name"].to_list() if not schema_df.is_empty() else []
-
-                tables_info.append({
-                    "table_name": table_name,
-                    "row_count": int(row_count),
-                    "column_count": len(columns),
-                    "columns": columns
-                })
-            except Exception as e:
-                logger.warning(f"Failed to get info for table {table_name}: {e}")
-                tables_info.append({
-                    "table_name": table_name,
-                    "row_count": 0,
-                    "column_count": 0,
-                    "columns": []
-                })
-
+        tables_info = db_client.list_tables()
         return {
             "tables": tables_info,
             "total": len(tables_info)
