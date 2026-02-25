@@ -105,10 +105,11 @@ def main():
             "daily_data", "daily_basic", "adj_factor",
             "index_daily", "moneyflow", "factor_values",
         ]
+        # 维度表由后端应用启动时动态创建，此处仅验证数据库是否存在
         meta_tables = [
             "sync_log", "sync_log_history", "stock_basic",
             "factor_metadata", "factor_analysis",
-            "dag_run_log", "dag_task_log",
+            "production_task_run", "trade_cal",
         ]
 
         print("\n  dfs://quant_research:")
@@ -117,11 +118,14 @@ def main():
             status = "OK" if exists else "缺失"
             print(f"    {t:20s} [{status}]")
 
-        print("\n  dfs://quant_meta:")
-        for t in meta_tables:
-            exists = sess2.run(f'existsTable("dfs://quant_meta", "{t}")')
-            status = "OK" if exists else "缺失"
-            print(f"    {t:20s} [{status}]")
+        db_meta_exists = sess2.run('existsDatabase("dfs://quant_meta")')
+        print(f"\n  dfs://quant_meta: {'OK' if db_meta_exists else '缺失'}")
+        if db_meta_exists:
+            print("    (维度表将在后端应用首次启动时自动创建)")
+            for t in meta_tables:
+                exists = sess2.run(f'existsTable("dfs://quant_meta", "{t}")')
+                status = "OK" if exists else "待创建"
+                print(f"    {t:20s} [{status}]")
 
     except Exception as e:
         print(f"[警告] 验证阶段出错: {e}")

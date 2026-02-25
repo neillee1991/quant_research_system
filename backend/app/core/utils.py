@@ -188,7 +188,7 @@ class TradingCalendar:
         try:
             df = db_client.query(
                 "SELECT cal_date FROM trade_cal "
-                "WHERE exchange = 'SSE' AND is_open = '1' "
+                "WHERE exchange = 'SSE' AND is_open = 1 "
                 "ORDER BY cal_date"
             )
             if df.is_empty():

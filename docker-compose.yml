@@ -4,10 +4,8 @@ services:
     container_name: quant_dolphindb
     ports:
       - "8848:8848"
-      - "8849:8849"
     volumes:
-      - /Users/lisheng/Code/application/dolphin/etc:/dolphindb/etc
-      - /Users/lisheng/Code/application/dolphin/data:/dolphindb/data
+      - /Users/lisheng/Code/application/dolphin/data:/data/ddb/server/data
     environment:
       TZ: Asia/Shanghai
     ulimits:
@@ -30,11 +28,12 @@ services:
   prefect-server:
     image: prefecthq/prefect:3-latest
     container_name: quant_prefect
-    command: prefect server start --host 0.0.0.0
+    command: prefect server start 
     ports:
       - "4200:4200"
     environment:
       PREFECT_SERVER_API_HOST: "0.0.0.0"
+      PREFECT_UI_API_URL: "http://localhost:4200/api"
       PREFECT_API_DATABASE_CONNECTION_URL: "sqlite+aiosqlite:////data/prefect.db"
       TZ: Asia/Shanghai
     volumes:

@@ -1,0 +1,21 @@
+name: daily-sync
+description: 每日数据同步流水线
+cron: "0 18 * * 1-5"
+tags:
+  - daily
+enabled: true
+tasks:
+  - id: daily
+    type: sync
+  - id: daily_basic
+    type: sync
+  - id: adj_factor
+    type: sync
+  - id: factor_ma_20
+    type: factor
+    depends_on:
+      - daily
+  - id: factor_pe_rank
+    type: factor
+    depends_on:
+      - daily_basic

@@ -1,0 +1,19 @@
+name: weekly-analysis
+description: 每周因子分析流水线
+cron: "0 3 * * 6"
+tags:
+  - weekly
+enabled: true
+tasks:
+  - id: stock_basic
+    type: sync
+  - id: daily
+    type: sync
+  - id: factor_ma_5
+    type: factor
+    depends_on:
+      - daily
+  - id: factor_rsi_14
+    type: factor
+    depends_on:
+      - daily

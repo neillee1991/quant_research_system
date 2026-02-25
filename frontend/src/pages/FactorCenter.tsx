@@ -888,7 +888,7 @@ const FactorCenter: React.FC = () => (
         letterSpacing: '1px'
       }}>
         <IconTestScoreStroked style={{ marginRight: '8px' }} />
-        因子中心
+        因子
       </h1>
       <p style={{ color: 'var(--text-secondary)', margin: '4px 0 0 0', fontSize: '12px' }}>
         因子注册管理与 IC 分析

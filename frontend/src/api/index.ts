@@ -138,20 +138,41 @@ export const productionApi = {
   getAnalysis: (factorId: string) => api.get(`/analysis/${factorId}`),
   getAnalysisHistory: (factorId: string, limit = 10) =>
     api.get(`/analysis/${factorId}/history`, { params: { limit } }),
+};
 
-  // DAG CRUD
-  listDags: () => api.get('/dag/list'),
-  createDag: (data: { dag_id: string; description?: string; schedule?: string; tasks?: any[] }) =>
-    api.post('/dag/create', data),
-  updateDag: (dagId: string, data: { description?: string; schedule?: string; tasks?: any[] }) =>
-    api.put(`/dag/${dagId}`, data),
-  deleteDag: (dagId: string) => api.delete(`/dag/${dagId}`),
-  runDag: (dagId: string, params?: { target_date?: string; start_date?: string; end_date?: string; run_type?: string }) =>
-    longRunningApi.post('/dag/run', { dag_id: dagId, ...params }),
-  getDagHistory: (dagId: string, limit = 10, run_type?: string) =>
-    api.get(`/dag/${dagId}/history`, { params: { limit, ...(run_type ? { run_type } : {}) } }),
-  getBackfillDetail: (backfillId: string) =>
-    api.get(`/dag/backfill/${backfillId}`),
+// Flow 配置管理
+export interface TaskConfig {
+  id: string;
+  type: 'sync' | 'factor';
+  depends_on?: string[];
+}
+
+export interface FlowConfig {
+  name: string;
+  description?: string;
+  cron: string;
+  tags?: string[];
+  enabled?: boolean;
+  tasks: TaskConfig[];
+}
+
+export interface FlowListItem {
+  name: string;
+  description: string;
+  cron: string;
+  tags: string[];
+  enabled: boolean;
+  task_count: number;
+}
+
+export const flowApi = {
+  list: () => api.get<FlowListItem[]>('/flows'),
+  get: (name: string) => api.get<FlowConfig>(`/flows/${name}`),
+  create: (config: FlowConfig) => api.post<FlowConfig>('/flows', config),
+  update: (name: string, config: FlowConfig) => api.put<FlowConfig>(`/flows/${name}`, config),
+  delete: (name: string) => api.delete(`/flows/${name}`),
+  run: (name: string, targetDate?: string) =>
+    longRunningApi.post(`/flows/${name}/run`, null, { params: { target_date: targetDate } }),
 };
 
 export default api;

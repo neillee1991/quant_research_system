@@ -48,45 +48,29 @@ else
 fi
 echo ""
 
-# 检查 PostgreSQL
-echo -e "${BLUE}3. PostgreSQL 状态${NC}"
+# 检查 DolphinDB
+echo -e "${BLUE}3. DolphinDB 状态${NC}"
 echo "-----------------------------------------"
-if docker ps | grep -q $POSTGRES_CONTAINER; then
-    echo -e "${GREEN}✅ PostgreSQL 容器运行中${NC}"
+if docker ps | grep -q $DOLPHINDB_CONTAINER; then
+    echo -e "${GREEN}✅ DolphinDB 容器运行中${NC}"
 
-    if docker exec $POSTGRES_CONTAINER pg_isready -U $POSTGRES_USER -d $POSTGRES_DB > /dev/null 2>&1; then
-        echo -e "${GREEN}✅ 数据库连接正常${NC}"
-
-        # 获取数据库大小
-        DB_SIZE=$(docker exec $POSTGRES_CONTAINER psql -U $POSTGRES_USER -d $POSTGRES_DB -t -c "SELECT pg_size_pretty(pg_database_size('$POSTGRES_DB'));" 2>/dev/null | xargs)
-        echo "   数据库大小: $DB_SIZE"
+    if curl -sf http://localhost:$DOLPHINDB_PORT/ > /dev/null 2>&1; then
+        echo -e "${GREEN}✅ DolphinDB 连接正常${NC}"
     else
-        echo -e "${RED}❌ 数据库连接失败${NC}"
+        echo -e "${RED}❌ DolphinDB 连接失败${NC}"
     fi
 else
-    echo -e "${RED}❌ PostgreSQL 容器未运行${NC}"
+    echo -e "${RED}❌ DolphinDB 容器未运行${NC}"
 fi
 echo ""
 
-# 检查 Redis
-echo -e "${BLUE}4. Redis 状态${NC}"
+# 检查 Prefect Server
+echo -e "${BLUE}4. Prefect Server 状态${NC}"
 echo "-----------------------------------------"
-if docker ps | grep -q $REDIS_CONTAINER; then
-    echo -e "${GREEN}✅ Redis 容器运行中${NC}"
-
-    if docker exec $REDIS_CONTAINER redis-cli ping > /dev/null 2>&1; then
-        echo -e "${GREEN}✅ Redis 连接正常${NC}"
-
-        # 获取 Redis 信息
-        REDIS_MEMORY=$(docker exec $REDIS_CONTAINER redis-cli info memory 2>/dev/null | grep "used_memory_human" | cut -d: -f2 | tr -d '\r')
-        REDIS_KEYS=$(docker exec $REDIS_CONTAINER redis-cli dbsize 2>/dev/null | tr -d '\r')
-        echo "   内存使用: $REDIS_MEMORY"
-        echo "   缓存键数: $REDIS_KEYS"
-    else
-        echo -e "${RED}❌ Redis 连接失败${NC}"
-    fi
+if curl -sf http://localhost:$PREFECT_PORT/api/health > /dev/null 2>&1; then
+    echo -e "${GREEN}✅ Prefect Server 运行中 (端口 $PREFECT_PORT)${NC}"
 else
-    echo -e "${YELLOW}⚠️  Redis 容器未运行${NC}"
+    echo -e "${RED}❌ Prefect Server 未运行${NC}"
 fi
 echo ""
 
@@ -104,11 +88,10 @@ echo ""
 # 访问地址
 echo -e "${BLUE}6. 访问地址${NC}"
 echo "-----------------------------------------"
-echo -e "📖 API 文档: ${GREEN}http://localhost:$BACKEND_PORT/docs${NC}"
-echo -e "🌐 前端应用: ${GREEN}http://localhost:$FRONTEND_PORT${NC}"
-if [ "$ENABLE_PGADMIN" = true ]; then
-    echo -e "🗄️  pgAdmin:  ${GREEN}http://localhost:5050${NC}"
-fi
+echo -e "📖 API 文档:    ${GREEN}http://localhost:$BACKEND_PORT/docs${NC}"
+echo -e "🌐 前端应用:    ${GREEN}http://localhost:$FRONTEND_PORT${NC}"
+echo -e "🗄️  DolphinDB:  ${GREEN}http://localhost:$DOLPHINDB_PORT${NC}"
+echo -e "📋 Prefect UI:  ${GREEN}http://localhost:$PREFECT_PORT${NC}"
 echo ""
 
 echo -e "${BLUE}=========================================${NC}"

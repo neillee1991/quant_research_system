@@ -109,19 +109,19 @@ class FlowParser:
 
         if op == "sma":
             df = df.with_columns(
-                TechnicalFactors.sma(pl.col("close"), data.get("window", 20)).alias(out_col)
+                TechnicalFactors.sma(df["close"], data.get("window", 20)).alias(out_col)
             )
         elif op == "ema":
             df = df.with_columns(
-                TechnicalFactors.ema(pl.col("close"), data.get("window", 20)).alias(out_col)
+                TechnicalFactors.ema(df["close"], data.get("window", 20)).alias(out_col)
             )
         elif op == "rsi":
             df = df.with_columns(
-                TechnicalFactors.rsi(pl.col("close"), data.get("window", 14)).alias(out_col)
+                TechnicalFactors.rsi(df["close"], data.get("window", 14)).alias(out_col)
             )
         elif op == "macd":
             macd_line, signal_line, hist = TechnicalFactors.macd(
-                pl.col("close"),
+                df["close"],
                 data.get("fast", 12),
                 data.get("slow", 26),
                 data.get("signal", 9),
@@ -133,7 +133,7 @@ class FlowParser:
             ])
         elif op == "bollinger":
             upper, mid, lower = TechnicalFactors.bollinger_bands(
-                pl.col("close"), data.get("window", 20), data.get("num_std", 2.0)
+                df["close"], data.get("window", 20), data.get("num_std", 2.0)
             )
             df = df.with_columns([
                 upper.alias(f"{out_col}_upper"),

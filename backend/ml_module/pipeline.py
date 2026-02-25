@@ -21,11 +21,20 @@ class MLPipeline:
         """Compute standard factor features from OHLCV data."""
         df = self.df.sort(["ts_code", "trade_date"])
         df = df.with_columns([
-            TechnicalFactors.sma(pl.col("close"), 5).over("ts_code").alias("sma5"),
-            TechnicalFactors.sma(pl.col("close"), 20).over("ts_code").alias("sma20"),
-            TechnicalFactors.rsi(pl.col("close"), 14).over("ts_code").alias("rsi14"),
-            TechnicalFactors.rolling_std(pl.col("close"), 20).over("ts_code").alias("vol20"),
+            pl.col("close").rolling_mean(window_size=5, min_periods=1).over("ts_code").alias("sma5"),
+            pl.col("close").rolling_mean(window_size=20, min_periods=1).over("ts_code").alias("sma20"),
+            pl.col("close").rolling_std(window_size=20, min_periods=1).over("ts_code").alias("vol20"),
         ])
+        # RSI requires diff/clip/ewm which are harder in pure expressions,
+        # so compute per group and join back
+        rsi_frames = []
+        for name, group in df.group_by("ts_code"):
+            rsi_series = TechnicalFactors.rsi(group["close"], 14)
+            rsi_frames.append(group.select("ts_code", "trade_date").with_columns(
+                rsi_series.alias("rsi14")
+            ))
+        rsi_df = pl.concat(rsi_frames)
+        df = df.join(rsi_df, on=["ts_code", "trade_date"], how="left")
         # Forward return as target (next 5-day return)
         df = df.with_columns(
             (pl.col("close").shift(-5).over("ts_code") / pl.col("close") - 1).alias("fwd_return_5d")

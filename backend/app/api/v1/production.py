@@ -1,4 +1,4 @@
-"""生产系统 API：因子分析、生产任务、DAG 管理"""
+"""生产系统 API：因子分析、生产任务"""
 import json
 import os
 from datetime import datetime, timedelta
@@ -10,7 +10,6 @@ from engine.analysis.analyzer import FactorAnalyzer
 from engine.production.registry import list_factors, get_registry, discover_factors, unregister_factor
 from engine.production.engine import ProductionEngine
 import polars as pl
-import httpx
 from data_manager.refactored_sync_engine import sync_engine as _sync_engine
 from app.core.config import settings
 from app.core.logger import logger
@@ -246,6 +245,7 @@ async def list_registered_factors():
     for fid, fdef in code_factors.items():
         if fid not in db_meta:
             try:
+                now = datetime.now()
                 seed_df = pl.DataFrame({
                     "factor_id": [fid],
                     "description": [fdef.get("description", "")],
@@ -254,9 +254,9 @@ async def list_registered_factors():
                     "storage_target": [fdef.get("storage_target", "factor_values")],
                     "params": [json.dumps(fdef.get("params", {}))],
                     "last_computed_date": [""],
-                    "last_computed_at": [None],
-                    "created_at": [datetime.now()],
-                    "updated_at": [datetime.now()],
+                    "last_computed_at": pl.Series([None], dtype=pl.Datetime),
+                    "created_at": [now],
+                    "updated_at": [now],
                 })
                 db_client.upsert("factor_metadata", seed_df, ["factor_id"])
                 db_meta[fid] = {"factor_id": fid, "description": fdef.get("description", ""),
@@ -308,7 +308,7 @@ async def create_factor(req: FactorCreateRequest):
             "storage_target": [req.storage_target],
             "params": [json.dumps(req.params)],
             "last_computed_date": [""],
-            "last_computed_at": [None],
+            "last_computed_at": pl.Series([None], dtype=pl.Datetime),
             "created_at": [now],
             "updated_at": [now],
         })
@@ -342,11 +342,12 @@ async def update_factor(factor_id: str, req: FactorUpdateRequest):
         )
         if existing.is_empty():
             # 不存在则创建默认记录
+            now = datetime.now()
             row = {
                 "factor_id": factor_id, "description": "", "category": "custom",
                 "compute_mode": "incremental", "storage_target": "factor_values",
                 "params": "{}", "last_computed_date": "", "last_computed_at": None,
-                "created_at": datetime.now(), "updated_at": datetime.now(),
+                "created_at": now, "updated_at": now,
             }
         else:
             row = existing.to_dicts()[0]
@@ -364,7 +365,19 @@ async def update_factor(factor_id: str, req: FactorUpdateRequest):
             row["params"] = json.dumps(req.params)
         row["updated_at"] = datetime.now()
 
-        update_df = pl.DataFrame([row])
+        # 使用显式 schema 确保 TIMESTAMP 列类型正确
+        update_df = pl.DataFrame([row], schema={
+            "factor_id": pl.Utf8,
+            "description": pl.Utf8,
+            "category": pl.Utf8,
+            "compute_mode": pl.Utf8,
+            "storage_target": pl.Utf8,
+            "params": pl.Utf8,
+            "last_computed_date": pl.Utf8,
+            "last_computed_at": pl.Datetime,
+            "created_at": pl.Datetime,
+            "updated_at": pl.Datetime,
+        })
         db_client.upsert("factor_metadata", update_df, ["factor_id"])
 
         # 清除因子列表缓存
@@ -795,126 +808,4 @@ async def get_factor_stats(factor_id: str):
     except Exception as e:
         if "does not exist" in str(e):
             return {"status": "success", "data": None}
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# ==================== Prefect 工作流管理 ====================
-
-class FlowRunRequest(BaseModel):
-    flow_name: str
-    target_date: Optional[str] = None
-    start_date: Optional[str] = None
-    end_date: Optional[str] = None
-
-
-@router.post("/dag/run")
-async def run_flow(req: FlowRunRequest):
-    """触发 Prefect Flow 运行（兼容原 DAG 接口）"""
-    try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            # 查找 deployment
-            resp = await client.post(
-                f"{settings.prefect_api_url}/deployments/filter",
-                json={"deployments": {"name": {"any_": [f"{req.flow_name}-deployment"]}}}
-            )
-            resp.raise_for_status()
-            deployments = resp.json()
-
-            if not deployments:
-                raise HTTPException(status_code=404, detail=f"Flow '{req.flow_name}' not found")
-
-            deployment_id = deployments[0]["id"]
-
-            params = {}
-            if req.target_date:
-                params["target_date"] = req.target_date
-            if req.start_date:
-                params["start_date"] = req.start_date
-            if req.end_date:
-                params["end_date"] = req.end_date
-
-            resp = await client.post(
-                f"{settings.prefect_api_url}/deployments/{deployment_id}/create_flow_run",
-                json={"parameters": params}
-            )
-            resp.raise_for_status()
-            flow_run = resp.json()
-
-            return {
-                "status": "success",
-                "data": {
-                    "run_id": flow_run["id"],
-                    "flow_name": req.flow_name,
-                    "state": flow_run.get("state_type", "SCHEDULED"),
-                }
-            }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Flow run failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/dag/list")
-async def list_flows():
-    """列出所有 Prefect Flow 部署（兼容原 DAG 列表接口）"""
-    try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(
-                f"{settings.prefect_api_url}/deployments/filter",
-                json={}
-            )
-            resp.raise_for_status()
-            deployments = resp.json()
-
-            return {
-                "status": "success",
-                "data": [
-                    {
-                        "dag_id": d.get("name", ""),
-                        "description": d.get("description", ""),
-                        "schedule": str(d.get("schedule", "")),
-                        "is_active": d.get("is_schedule_active", False),
-                        "tags": d.get("tags", []),
-                    }
-                    for d in deployments
-                ]
-            }
-    except Exception as e:
-        logger.error(f"Failed to list flows: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/dag/{dag_id}/history")
-async def get_flow_history(dag_id: str, limit: int = 10):
-    """获取 Flow 运行历史（兼容原 DAG 历史接口）"""
-    try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(
-                f"{settings.prefect_api_url}/flow_runs/filter",
-                json={
-                    "sort": "EXPECTED_START_TIME_DESC",
-                    "limit": limit,
-                    "flow_runs": {"tags": {"all_": [dag_id]}} if dag_id else {},
-                }
-            )
-            resp.raise_for_status()
-            runs = resp.json()
-
-            return {
-                "status": "success",
-                "data": [
-                    {
-                        "run_id": r["id"],
-                        "status": r.get("state_type", ""),
-                        "state_name": r.get("state_name", ""),
-                        "start_time": r.get("start_time"),
-                        "end_time": r.get("end_time"),
-                        "parameters": r.get("parameters", {}),
-                    }
-                    for r in runs
-                ]
-            }
-    except Exception as e:
-        logger.error(f"Failed to get flow history: {e}")
         raise HTTPException(status_code=500, detail=str(e))

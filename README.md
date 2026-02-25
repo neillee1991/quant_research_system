@@ -16,7 +16,9 @@
 ```bash
 # 1. 配置环境变量（首次运行）
 cp .env.example .env
-# 编辑 .env 填入 TUSHARE_TOKEN 和 POSTGRES_PASSWORD
+# 编辑 .env 填入 TUSHARE_TOKEN 和 DOLPHINDB_PASSWORD
+
+./setup.sh
 
 # 2. 启动所有服务
 ./start.sh
@@ -31,17 +33,18 @@ cp .env.example .env
 启动后访问：
 - **前端界面**: http://localhost:3000
 - **API 文档**: http://localhost:8000/docs
-- **健康检查**: `python backend/health_check.py`
+- **Prefect UI**: http://localhost:4200
+- **DolphinDB**: http://localhost:8848
 
 ## 核心功能
 
 | 模块 | 功能 | 技术栈 |
 |------|------|--------|
-| **数据层** | PostgreSQL 16 + Redis 7 | 连接池 + 索引优化 + 缓存层 |
-| **数据同步** | Tushare/AkShare | 增量同步 + DAG 编排 + 定时任务 |
+| **数据层** | DolphinDB (TSDB) | 列存分区表 + 内存表缓存 |
+| **数据同步** | Tushare/AkShare | 增量同步 + Prefect 编排 + 定时任务 |
 | **因子库** | 技术指标计算 | Polars 向量化: MA, EMA, RSI, MACD, KDJ, Bollinger, ATR |
 | **生产因子** | 因子注册与分析 | @factor 装饰器 + IC/IR 分析 + 分组收益 |
-| **回测引擎** | 向量化回测 | Sharpe, MaxDD, WinRate, ProfitFactor |
+| **回测引擎** | 向量化回测 | VectorBT: Sharpe, MaxDD, WinRate, ProfitFactor |
 | **策略建模** | 可视化拖拽 | React Flow + DSL 解析器 |
 | **AutoML** | 模型训练优化 | PyCaret + Optuna 贝叶斯优化 |
 | **前端** | 交互界面 | React 18 + TypeScript + Ant Design + ECharts |
@@ -57,8 +60,12 @@ quant_research_system/
 │   │   └── services/          # 业务逻辑层
 │   ├── data_manager/          # 数据同步引擎
 │   │   ├── collectors/        # Tushare/AkShare 采集器
-│   │   ├── dag_executor.py    # DAG 任务编排
-│   │   └── scheduler.py       # 定时任务调度
+│   │   └── sync_components.py # 同步组件
+│   ├── flows/                 # Prefect 流程定义
+│   │   ├── data_sync_flow.py  # 数据同步流
+│   │   ├── factor_compute_flow.py # 因子计算流
+│   │   ├── backtest_flow.py   # 回测流
+│   │   └── serve.py           # 流程部署入口
 │   ├── engine/
 │   │   ├── analysis/          # 因子分析（IC/IR）
 │   │   ├── backtester/        # 向量化回测
@@ -67,10 +74,10 @@ quant_research_system/
 │   │   └── production/        # 生产因子框架
 │   ├── ml_module/             # AutoML 模块
 │   ├── store/                 # 数据库客户端
-│   │   ├── postgres_client.py # PostgreSQL 连接池
-│   │   └── redis_client.py    # Redis 缓存
+│   │   └── dolphindb_client.py # DolphinDB 连接管理
 │   ├── database/
-│   │   └── migrations/        # 数据库迁移脚本
+│   │   ├── init_dolphindb.dos # DolphinDB 初始化脚本
+│   │   └── init_dolphindb.py  # 初始化执行器
 │   └── health_check.py        # 系统健康检查
 ├── frontend/                   # React 前端
 │   └── src/
@@ -95,11 +102,12 @@ quant_research_system/
 ```bash
 # 扁平命名
 TUSHARE_TOKEN=your_token_here
-POSTGRES_PASSWORD=your_password
+DOLPHINDB_HOST=localhost
+DOLPHINDB_PORT=8848
 
 # 嵌套命名（对应 settings.xxx.yyy）
-DATABASE__CONNECTION_POOL_SIZE=50
-CACHE_TTL_STOCK_LIST=3600
+DOLPHINDB__USERNAME=admin
+DOLPHINDB__PASSWORD=123456
 BACKTEST__INITIAL_CAPITAL=1000000
 ```
 
@@ -113,40 +121,33 @@ BACKTEST__INITIAL_CAPITAL=1000000
 - Docker 容器名称
 - 日志和 PID 文件路径
 - Python 版本要求
-- 功能开关（Redis、索引检查等）
+- 功能开关（Prefect Worker 等）
 
 ## 数据库管理
 
-### PostgreSQL
+### DolphinDB
 
 ```bash
-# 连接数据库
-docker exec -it quant_postgres psql -U quant_user -d quant_research
+# 初始化数据库（首次运行）
+cd backend
+python -m database.init_dolphindb
 
-# 备份数据库
-docker exec quant_postgres pg_dump -U quant_user quant_research > backup.sql
-
-# 恢复数据库
-docker exec -i quant_postgres psql -U quant_user quant_research < backup.sql
+# 查看容器状态
+docker ps | grep quant_dolphindb
 
 # 查看日志
-docker-compose logs -f postgres
+docker-compose logs -f dolphindb
 ```
 
-### Redis 缓存
+### Prefect 调度
 
 ```bash
-# 连接 Redis
-docker exec -it quant_redis redis-cli
+# 部署 Prefect 流程
+cd backend
+python -m flows.serve
 
-# 查看缓存键
-docker exec quant_redis redis-cli keys "*"
-
-# 查看缓存统计
-docker exec quant_redis redis-cli info stats
-
-# 清空缓存
-docker exec quant_redis redis-cli flushdb
+# 查看 Prefect UI
+# 浏览器访问 http://localhost:4200
 ```
 
 ## 性能优化
@@ -165,14 +166,12 @@ docker exec quant_redis redis-cli flushdb
 
 ### 优化措施
 
-- ✅ 数据库索引优化（47个性能索引）
+- ✅ DolphinDB TSDB 分区表（COMPO 分区策略）
 - ✅ SQL 注入防护（参数化查询）
-- ✅ N+1 查询优化
 - ✅ 流式查询（大数据集支持）
-- ✅ 连接池优化（10-50连接）
-- ✅ Redis 缓存层（Docker 部署）
+- ✅ Prefect 任务编排与调度
 - ✅ GZip 压缩（响应减少60-80%）
-- ✅ 前端轮询优化
+- ✅ VectorBT 向量化回测
 
 ## 开发指南
 
@@ -206,16 +205,13 @@ npm install
 npm start
 ```
 
-### 数据库迁移
+### 数据库初始化
 
 ```bash
 cd backend
 
-# 应用性能索引
-python database/migrations/apply_indexes_direct.py
-
-# 初始化数据库表
-python init_database.py
+# 初始化 DolphinDB 表结构
+python -m database.init_dolphindb
 ```
 
 ## API 文档
@@ -250,27 +246,27 @@ lsof -ti:3000  # 前端
 ### 数据库连接失败
 
 ```bash
-# 检查 PostgreSQL 状态
-docker ps | grep quant_postgres
+# 检查 DolphinDB 状态
+docker ps | grep quant_dolphindb
 
 # 查看数据库日志
-docker-compose logs postgres
+docker-compose logs dolphindb
 
 # 重启数据库
-docker-compose restart postgres
+docker-compose restart dolphindb
 ```
 
-### Redis 缓存不可用
+### Prefect 调度异常
 
 ```bash
-# 检查 Redis 状态
-docker ps | grep quant_redis
+# 检查 Prefect Server 状态
+curl http://localhost:4200/api/health
 
-# 启动 Redis
-docker-compose up -d redis
+# 查看 Prefect 日志
+docker-compose logs prefect-server
 
-# 测试连接
-docker exec quant_redis redis-cli ping
+# 重启 Prefect
+docker-compose restart prefect-server
 ```
 
 ### 系统健康检查
@@ -282,18 +278,22 @@ python health_check.py
 
 ## 技术特点
 
-### PostgreSQL 优势
-- 多用户并发访问
-- 事务隔离和 ACID 保证
-- 连接池管理（10-50连接）
-- 丰富的索引和查询优化
+### DolphinDB 优势
+- TSDB 引擎，专为时序数据优化
+- COMPO 分区策略（按月 + 按股票代码）
+- 列式存储，高效聚合查询
+- 内置流计算和分布式计算能力
 
-### Redis 缓存策略
-- 股票列表缓存：1小时
-- 日线数据缓存：30分钟
-- 因子元数据缓存：1小时
-- 因子分析缓存：2小时
-- 自动失效机制
+### Prefect 调度
+- 声明式流程定义
+- 可视化 DAG 监控
+- 自动重试与错误处理
+- Cron 定时调度
+
+### VectorBT 回测
+- 向量化计算，高性能回测
+- 丰富的指标库（Sharpe, MaxDD, WinRate）
+- 支持组合优化与参数扫描
 
 ### Polars 数据处理
 - 比 Pandas 快 5-10 倍
@@ -301,10 +301,10 @@ python health_check.py
 - 惰性求值优化
 - 向量化操作
 
-### 向量化回测
+### 向量化回测 (VectorBT)
 - 处理整个价格序列（无循环）
-- 使用 Polars 高效计算
-- 支持复杂策略逻辑
+- 基于 VectorBT 高效计算
+- 支持复杂策略逻辑与参数优化
 
 ## 相关文档
 

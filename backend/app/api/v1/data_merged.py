@@ -7,6 +7,7 @@ from fastapi import APIRouter, Query, HTTPException, status
 from pydantic import BaseModel, Field
 
 import httpx
+import polars as pl
 from store.dolphindb_client import db_client
 from data_manager.refactored_sync_engine import sync_engine
 from app.core.config import settings
@@ -263,11 +264,12 @@ def get_sync_status(
             conditions.append("sync_date <= %s")
             params.append(end_date)
 
-        where_clause = " AND ".join(conditions) if conditions else "1=1"
+        where_clause = " AND ".join(conditions) if conditions else ""
+        where_part = f"WHERE {where_clause}" if where_clause else ""
         sql = f"""
-            SELECT id, source, data_type, last_date, sync_date, rows_synced, status, created_at
+            SELECT source, data_type, last_date, sync_date, rows_synced, status, created_at
             FROM sync_log_history
-            WHERE {where_clause}
+            {where_part}
             ORDER BY created_at DESC
             LIMIT {limit}
         """
@@ -301,7 +303,7 @@ def get_task_status(task_id: str):
         # 获取表中最新日期
         table_name = status_info.get("table_name")
         date_field = status_info.get("date_field", "trade_date")  # 使用配置中的日期字段
-        if table_name:
+        if table_name and date_field:
             try:
                 # 使用配置中指定的日期字段
                 db_path = db_client._resolve_db_path(table_name)
@@ -466,32 +468,35 @@ def update_task_config(task_id: str, config: dict):
     - **config**: 任务配置JSON
     """
     try:
-        import json
-        from pathlib import Path
+        import json as _json
+        from datetime import datetime as _dt
+        from store.dolphindb_client import db_client
 
-        # 读取当前配置文件
-        config_path = sync_engine.config_manager.config_path
-        with open(config_path, 'r', encoding='utf-8') as f:
-            full_config = json.load(f)
-
-        # 查找并更新任务
-        tasks = full_config.get("sync_tasks", [])
-        task_found = False
-        for i, task in enumerate(tasks):
-            if task.get("task_id") == task_id:
-                tasks[i] = config
-                task_found = True
-                break
-
-        if not task_found:
+        # 确认任务存在
+        existing = db_client.query(f"SELECT * FROM sync_task_config WHERE task_id = '{task_id}'")
+        if existing.is_empty():
             raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
 
-        # 保存配置文件
-        with open(config_path, 'w', encoding='utf-8') as f:
-            json.dump(full_config, f, indent=2, ensure_ascii=False)
-
-        # 重新加载配置
-        sync_engine.config_manager.config = sync_engine.config_manager._load_config()
+        # 构建更新行
+        now = _dt.now()
+        row = pl.DataFrame({
+            "task_id": [config.get("task_id", task_id)],
+            "api_name": [config.get("api_name", "")],
+            "description": [config.get("description", "")],
+            "sync_type": [config.get("sync_type", "incremental")],
+            "params_json": [_json.dumps(config.get("params", {}), ensure_ascii=False)],
+            "date_field": [config.get("date_field", "")],
+            "primary_keys_json": [_json.dumps(config.get("primary_keys", []))],
+            "table_name": [config.get("table_name", "")],
+            "schema_json": [_json.dumps(config.get("schema", {}), ensure_ascii=False)],
+            "enabled": [config.get("enabled", True)],
+            "api_limit": [config.get("api_limit", 5000)],
+            "schedule": [config.get("schedule", "daily")],
+            "created_at": existing["created_at"].to_list(),
+            "updated_at": [now],
+        })
+        db_client.upsert("sync_task_config", row, ["task_id"])
+        sync_engine.config_manager.reload()
 
         logger.info(f"Updated config for task {task_id}")
         return {"status": "success", "message": f"Task {task_id} config updated"}
@@ -510,7 +515,9 @@ def create_task(config: dict):
     - **config**: 任务配置JSON
     """
     try:
-        import json
+        import json as _json
+        from datetime import datetime as _dt
+        from store.dolphindb_client import db_client
 
         # 验证必需字段
         required_fields = ["task_id", "api_name", "sync_type", "table_name", "primary_keys"]
@@ -518,26 +525,31 @@ def create_task(config: dict):
             if field not in config:
                 raise HTTPException(status_code=400, detail=f"Missing required field: {field}")
 
-        # 读取当前配置文件
-        config_path = sync_engine.config_manager.config_path
-        with open(config_path, 'r', encoding='utf-8') as f:
-            full_config = json.load(f)
-
         # 检查任务ID是否已存在
-        tasks = full_config.get("sync_tasks", [])
-        for task in tasks:
-            if task.get("task_id") == config["task_id"]:
-                raise HTTPException(status_code=400, detail=f"Task {config['task_id']} already exists")
+        existing = db_client.query(f"SELECT task_id FROM sync_task_config WHERE task_id = '{config['task_id']}'")
+        if not existing.is_empty():
+            raise HTTPException(status_code=400, detail=f"Task {config['task_id']} already exists")
 
-        # 添加新任务
-        tasks.append(config)
-
-        # 保存配置文件
-        with open(config_path, 'w', encoding='utf-8') as f:
-            json.dump(full_config, f, indent=2, ensure_ascii=False)
-
-        # 重新加载配置
-        sync_engine.config_manager.config = sync_engine.config_manager._load_config()
+        # 插入新任务
+        now = _dt.now()
+        row = pl.DataFrame({
+            "task_id": [config["task_id"]],
+            "api_name": [config["api_name"]],
+            "description": [config.get("description", "")],
+            "sync_type": [config["sync_type"]],
+            "params_json": [_json.dumps(config.get("params", {}), ensure_ascii=False)],
+            "date_field": [config.get("date_field", "")],
+            "primary_keys_json": [_json.dumps(config["primary_keys"])],
+            "table_name": [config["table_name"]],
+            "schema_json": [_json.dumps(config.get("schema", {}), ensure_ascii=False)],
+            "enabled": [config.get("enabled", True)],
+            "api_limit": [config.get("api_limit", 5000)],
+            "schedule": [config.get("schedule", "daily")],
+            "created_at": [now],
+            "updated_at": [now],
+        })
+        db_client.upsert("sync_task_config", row, ["task_id"])
+        sync_engine.config_manager.reload()
 
         logger.info(f"Created new task {config['task_id']}")
         return {"status": "success", "message": f"Task {config['task_id']} created"}
@@ -556,36 +568,16 @@ def delete_task(task_id: str):
     - **task_id**: 任务ID
     """
     try:
-        import json
+        from store.dolphindb_client import db_client
 
-        # 读取当前配置文件
-        config_path = sync_engine.config_manager.config_path
-        with open(config_path, 'r', encoding='utf-8') as f:
-            full_config = json.load(f)
-
-        # 查找并删除任务
-        tasks = full_config.get("sync_tasks", [])
-        task_found = False
-        new_tasks = []
-        for task in tasks:
-            if task.get("task_id") == task_id:
-                task_found = True
-                logger.info(f"Deleting task {task_id}")
-            else:
-                new_tasks.append(task)
-
-        if not task_found:
+        # 确认任务存在
+        existing = db_client.query(f"SELECT task_id FROM sync_task_config WHERE task_id = '{task_id}'")
+        if existing.is_empty():
             raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
 
-        # 更新配置
-        full_config["sync_tasks"] = new_tasks
-
-        # 保存配置文件
-        with open(config_path, 'w', encoding='utf-8') as f:
-            json.dump(full_config, f, indent=2, ensure_ascii=False)
-
-        # 重新加载配置
-        sync_engine.config_manager.config = sync_engine.config_manager._load_config()
+        # 从数据库删除
+        db_client.execute(f"DELETE FROM sync_task_config WHERE task_id = '{task_id}'")
+        sync_engine.config_manager.reload()
 
         logger.info(f"Deleted task {task_id}")
         return {"status": "success", "message": f"Task {task_id} deleted"}

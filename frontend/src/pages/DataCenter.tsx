@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   Table,
   Button,
@@ -11,13 +11,15 @@ import {
   TabPane,
   Modal,
   Tooltip,
-  Collapse,
   Popconfirm,
   DatePicker,
   RadioGroup,
   Radio,
   Progress,
   TextArea,
+  SideSheet,
+  Switch,
+  Collapse,
 } from '@douyinfe/semi-ui';
 import {
   IconSync,
@@ -25,13 +27,11 @@ import {
   IconCode,
   IconPlay,
   IconRefresh,
-  IconEdit,
   IconDelete,
   IconClock,
   IconCalendar,
-  IconFlowChartStroked,
   IconHistory,
-  IconPlus,
+  IconExternalOpen,
 } from '@douyinfe/semi-icons';
 import ReactECharts from 'echarts-for-react';
 import dayjs from 'dayjs';
@@ -77,497 +77,6 @@ interface TableInfo {
   columns: string[];
 }
 
-// ==================== DAG 管理 Section ====================
-const DAGManageSection: React.FC = () => {
-  const [dags, setDags] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [runLoading, setRunLoading] = useState<string | null>(null);
-  const [historyModal, setHistoryModal] = useState<{ visible: boolean; dagId: string; data: any[]; filter: string }>({ visible: false, dagId: '', data: [], filter: '' });
-  const [backfillDetail, setBackfillDetail] = useState<Record<string, any[]>>({});
-  const [createModal, setCreateModal] = useState(false);
-  const [editModal, setEditModal] = useState<{ visible: boolean; dag: any }>({ visible: false, dag: null });
-  const [runModal, setRunModal] = useState<{ visible: boolean; dagId: string }>({ visible: false, dagId: '' });
-  const [runMode, setRunMode] = useState<'today' | 'date' | 'range'>('today');
-  const [runDate, setRunDate] = useState<Date | null>(null);
-  const [runRange, setRunRange] = useState<[Date | null, Date | null]>([null, null]);
-  const [backfillProgress, setBackfillProgress] = useState<{ visible: boolean; data: any } | null>(null);
-
-  // DAG form state (managed via useState)
-  const [createForm, setCreateForm] = useState({ dag_id: '', description: '', schedule: '', tasks_json: '[]' });
-  const [editFormData, setEditFormData] = useState({ description: '', schedule: '', tasks_json: '' });
-
-  const loadDags = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await productionApi.listDags();
-      setDags(res.data?.dags || res.data?.data || []);
-    } catch { Toast.error('加载 DAG 列表失败'); }
-    setLoading(false);
-  }, []);
-
-  useEffect(() => { loadDags(); }, [loadDags]);
-
-  const openRunModal = (dagId: string) => {
-    setRunMode('today');
-    setRunDate(null);
-    setRunRange([null, null]);
-    setRunModal({ visible: true, dagId });
-  };
-
-  const handleRunDag = async () => {
-    const dagId = runModal.dagId;
-    let params: any = {};
-
-    if (runMode === 'date') {
-      if (!runDate) { Toast.warning('请选择执行日期'); return; }
-      params.target_date = dayjs(runDate).format('YYYY-MM-DD');
-      params.run_type = 'single';
-    } else if (runMode === 'range') {
-      if (!runRange[0] || !runRange[1]) { Toast.warning('请选择日期范围'); return; }
-      params.start_date = dayjs(runRange[0]).format('YYYY-MM-DD');
-      params.end_date = dayjs(runRange[1]).format('YYYY-MM-DD');
-      params.run_type = 'backfill';
-    } else {
-      params.run_type = 'today';
-    }
-
-    setRunModal({ visible: false, dagId: '' });
-    setRunLoading(dagId);
-    try {
-      const res = await productionApi.runDag(dagId, Object.keys(params).length ? params : undefined);
-      const data = res.data?.data || res.data;
-
-      if (data?.mode === 'backfill') {
-        setBackfillProgress({ visible: true, data });
-        loadDags();
-        setRunLoading(null);
-        return;
-      }
-
-      const dagStatus = data?.status || 'unknown';
-      const summary = data?.summary || '';
-      const failedTasks: any[] = data?.failed_tasks || [];
-
-      if (dagStatus === 'success') {
-        Toast.success(`DAG ${dagId} 执行成功${summary ? ` (${summary})` : ''}`);
-      } else {
-        Modal.warning({
-          title: `DAG ${dagId} 执行完成 - ${dagStatus}`,
-          width: 520,
-          content: (
-            <div>
-              <p>{summary}</p>
-              {failedTasks.length > 0 && (
-                <div style={{ marginTop: 8 }}>
-                  <p style={{ fontWeight: 600, marginBottom: 4 }}>失败任务:</p>
-                  {failedTasks.map((t: any) => (
-                    <div key={t.task_id} style={{ marginBottom: 4, padding: '4px 8px', background: 'var(--bg-surface)', borderRadius: 4, fontSize: 12 }}>
-                      <Tag color="red">{t.task_id}</Tag>
-                      <span style={{ color: 'var(--color-loss)' }}>{t.error_message || '无详细信息'}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          ),
-        });
-      }
-      loadDags();
-    } catch (e: any) {
-      Toast.error(e.response?.data?.detail || 'DAG 执行失败');
-    }
-    setRunLoading(null);
-  };
-
-  const showHistory = async (dagId: string, runType?: string) => {
-    try {
-      const res = await productionApi.getDagHistory(dagId, 20, runType || undefined);
-      setHistoryModal({ visible: true, dagId, data: res.data?.runs || res.data?.data || [], filter: runType || '' });
-      setBackfillDetail({});
-    } catch { Toast.error('加载历史失败'); }
-  };
-
-  const loadBackfillDetail = async (backfillId: string) => {
-    if (backfillDetail[backfillId]) return;
-    try {
-      const res = await productionApi.getBackfillDetail(backfillId);
-      const runs = res.data?.data?.runs || res.data?.runs || [];
-      setBackfillDetail(prev => ({ ...prev, [backfillId]: runs }));
-    } catch { Toast.error('加载回溯详情失败'); }
-  };
-
-  const handleCreate = async () => {
-    try {
-      if (!createForm.dag_id) { Toast.warning('请输入 DAG ID'); return; }
-      const tasks = createForm.tasks_json ? JSON.parse(createForm.tasks_json) : [];
-      await productionApi.createDag({ dag_id: createForm.dag_id, description: createForm.description, schedule: createForm.schedule, tasks });
-      Toast.success(`DAG ${createForm.dag_id} 创建成功`);
-      setCreateModal(false);
-      setCreateForm({ dag_id: '', description: '', schedule: '', tasks_json: '[]' });
-      loadDags();
-    } catch (e: any) {
-      if (e.response) Toast.error(e.response?.data?.detail || '创建失败');
-      else if (e instanceof SyntaxError) Toast.error('任务 JSON 格式错误');
-    }
-  };
-
-  const handleEdit = async () => {
-    try {
-      const tasks = editFormData.tasks_json ? JSON.parse(editFormData.tasks_json) : undefined;
-      await productionApi.updateDag(editModal.dag.dag_id, { description: editFormData.description, schedule: editFormData.schedule, tasks });
-      Toast.success('DAG 更新成功');
-      setEditModal({ visible: false, dag: null });
-      loadDags();
-    } catch (e: any) {
-      if (e.response) Toast.error(e.response?.data?.detail || '更新失败');
-      else if (e instanceof SyntaxError) Toast.error('任务 JSON 格式错误');
-    }
-  };
-
-  const handleDelete = async (dagId: string) => {
-    try {
-      await productionApi.deleteDag(dagId);
-      Toast.success(`DAG ${dagId} 已删除`);
-      loadDags();
-    } catch (e: any) {
-      Toast.error(e.response?.data?.detail || '删除失败');
-    }
-  };
-
-  const openEdit = (record: any) => {
-    setEditFormData({
-      description: record.description || '',
-      schedule: record.schedule || '',
-      tasks_json: JSON.stringify(record.tasks || [], null, 2),
-    });
-    setEditModal({ visible: true, dag: record });
-  };
-
-  const dagColumns = [
-    { title: 'DAG ID', dataIndex: 'dag_id', key: 'dag_id', render: (text: string) => <Tag color="purple">{text}</Tag> },
-    { title: '描述', dataIndex: 'description', key: 'desc' },
-    { title: '调度', dataIndex: 'schedule', key: 'schedule', render: (text: string) => text ? <Tag color="cyan">{text}</Tag> : <Tag>手动</Tag> },
-    { title: '任务数', dataIndex: 'tasks', key: 'tasks', render: (text: any[]) => text?.length || 0 },
-    { title: '最近成功', dataIndex: 'last_success', key: 'last_success', render: (text: string) => text ? <span style={{ color: 'var(--color-gain)', fontSize: 12 }}>{text.slice(0, 19)}</span> : <span style={{ color: 'var(--text-muted)' }}>-</span> },
-    {
-      title: '操作', key: 'action', width: 280, render: (text: any, record: any) => (
-        <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-          <Button size="small" theme="solid" type="primary" icon={<IconPlay />}
-            loading={runLoading === record.dag_id}
-            onClick={() => openRunModal(record.dag_id)}>执行</Button>
-          <Button size="small" icon={<IconHistory />}
-            onClick={() => showHistory(record.dag_id)}>历史</Button>
-          <Button size="small" icon={<IconEdit />} onClick={() => openEdit(record)} />
-          <Popconfirm title="确认删除此 DAG?" onConfirm={() => handleDelete(record.dag_id)}>
-            <Button size="small" type="danger" icon={<IconDelete />} />
-          </Popconfirm>
-        </div>
-      )
-    },
-  ];
-
-  const runTypeLabel: Record<string, { text: string; color: string }> = {
-    today: { text: '今日', color: 'blue' },
-    single: { text: '指定日期', color: 'cyan' },
-    backfill: { text: '回溯', color: 'purple' },
-  };
-
-  const historyColumns = [
-    { title: '运行ID', dataIndex: 'run_id', key: 'run_id', width: 100, render: (text: string) => <Tooltip content={text}><span>{text?.slice(0, 8)}...</span></Tooltip> },
-    { title: '类型', dataIndex: 'run_type', key: 'run_type', width: 80, render: (text: string) => {
-      const info = runTypeLabel[text] || { text: text || '-', color: 'grey' };
-      return <Tag color={info.color as any}>{info.text}</Tag>;
-    }},
-    { title: '目标日期', dataIndex: 'target_date', key: 'target_date', width: 110, render: (text: string) => text || '-' },
-    { title: '状态', dataIndex: 'status', key: 'status', width: 80, render: (text: string) => <Tag color={text === 'success' ? 'green' : text === 'running' ? 'blue' : 'red'}>{text}</Tag> },
-    { title: '开始时间', dataIndex: 'started_at', key: 'start', width: 160, render: (text: string) => text?.slice(0, 19) },
-    { title: '结束时间', dataIndex: 'finished_at', key: 'end', width: 160, render: (text: string) => text?.slice(0, 19) || '-' },
-    { title: '任务详情', dataIndex: 'task_results', key: 'tasks', render: (text: any) => {
-      if (!text) return '-';
-      const tasks = typeof text === 'string' ? JSON.parse(text) : text;
-      if (Array.isArray(tasks)) {
-        return <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>{tasks.map((t: any) => (
-          <Tooltip key={t.task_id} content={t.error_message || (t.status === 'success' ? '成功' : t.status)}>
-            <Tag color={t.status === 'success' ? 'green' : t.status === 'skipped' ? 'orange' : 'red'}>{t.task_id}</Tag>
-          </Tooltip>
-        ))}</div>;
-      }
-      return <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>{Object.entries(tasks).map(([k, s]: any) => <Tag key={k} color={s === 'success' ? 'green' : 'red'}>{k}</Tag>)}</div>;
-    }},
-  ];
-
-  const backfillSubColumns = [
-    { title: '目标日期', dataIndex: 'target_date', key: 'date', width: 120 },
-    { title: '状态', dataIndex: 'status', key: 'status', width: 80, render: (text: string) => <Tag color={text === 'success' ? 'green' : text === 'running' ? 'blue' : 'red'}>{text}</Tag> },
-    { title: '开始', dataIndex: 'started_at', key: 'start', width: 160, render: (text: string) => text?.slice(0, 19) },
-    { title: '结束', dataIndex: 'finished_at', key: 'end', width: 160, render: (text: string) => text?.slice(0, 19) || '-' },
-    { title: '任务', dataIndex: 'task_results', key: 'tasks', render: (text: any) => {
-      if (!text) return '-';
-      const tasks = typeof text === 'string' ? JSON.parse(text) : text;
-      if (Array.isArray(tasks)) {
-        return <div style={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>{tasks.map((t: any) => (
-          <Tooltip key={t.task_id} content={t.error_message || t.status}>
-            <Tag color={t.status === 'success' ? 'green' : t.status === 'skipped' ? 'orange' : 'red'} style={{ fontSize: 11 }}>{t.task_id}</Tag>
-          </Tooltip>
-        ))}</div>;
-      }
-      return '-';
-    }},
-  ];
-
-  return (
-    <div>
-      <Card style={{ marginBottom: 16 }} className="content-card">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-          <span style={{ color: 'var(--color-primary)', fontWeight: 600, fontSize: 15 }}>DAG 列表</span>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <Button size="small" icon={<IconPlus />} onClick={() => setCreateModal(true)}>新建 DAG</Button>
-            <Button icon={<IconRefresh />} onClick={loadDags} size="small">刷新</Button>
-          </div>
-        </div>
-        <Table dataSource={dags} columns={dagColumns} rowKey="dag_id"
-          loading={loading} size="small" pagination={false}
-          expandedRowRender={(record) => {
-            const tasks: any[] = record?.tasks || [];
-            if (!tasks.length) return <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>暂无任务</span>;
-
-            const depMap: Record<string, string[]> = {};
-            tasks.forEach(t => { depMap[t.task_id] = t.depends_on || []; });
-            const layerOf: Record<string, number> = {};
-            const calcLayer = (id: string, visited: Set<string> = new Set()): number => {
-              if (layerOf[id] !== undefined) return layerOf[id];
-              if (visited.has(id)) return 0;
-              visited.add(id);
-              const deps = depMap[id] || [];
-              const layer = deps.length === 0 ? 0 : Math.max(...deps.map(d => calcLayer(d, visited))) + 1;
-              layerOf[id] = layer;
-              return layer;
-            };
-            tasks.forEach(t => calcLayer(t.task_id));
-
-            const layerGroups: Record<number, string[]> = {};
-            Object.entries(layerOf).forEach(([id, l]) => {
-              if (!layerGroups[l]) layerGroups[l] = [];
-              layerGroups[l].push(id);
-            });
-            const maxLayer = Math.max(...Object.values(layerOf), 0);
-            const xGap = 180;
-            const yGap = 60;
-
-            const nodes = tasks.map(t => {
-              const layer = layerOf[t.task_id] || 0;
-              const siblings = layerGroups[layer] || [t.task_id];
-              const idx = siblings.indexOf(t.task_id);
-              const yOffset = (idx - (siblings.length - 1) / 2) * yGap;
-              return {
-                name: t.task_id,
-                x: layer * xGap,
-                y: yOffset,
-                symbolSize: 40,
-                label: { show: true, fontSize: 11, color: '#94A3B8', formatter: (p: any) => p.name.length > 10 ? p.name.slice(0, 10) + '..' : p.name },
-                itemStyle: {
-                  color: (t.depends_on?.length ? '#0077FA' : '#14C9C9'),
-                  borderColor: 'var(--border-color)', borderWidth: 2,
-                },
-                tooltip: { formatter: `${t.task_id}<br/>Action: ${t.action || '-'}<br/>依赖: ${t.depends_on?.join(', ') || '无'}` },
-              };
-            });
-
-            const edges = tasks.flatMap(t =>
-              (t.depends_on || []).map((dep: string) => ({
-                source: dep, target: t.task_id,
-                lineStyle: { color: '#64748B', width: 2, curveness: 0.1 },
-              }))
-            );
-
-            const chartH = Math.max(120, Object.values(layerGroups).reduce((m, g) => Math.max(m, g.length), 0) * yGap + 40);
-
-            const option = {
-              backgroundColor: 'transparent',
-              tooltip: { trigger: 'item' as const },
-              series: [{
-                type: 'graph',
-                layout: 'none',
-                roam: false,
-                edgeSymbol: ['none', 'arrow'],
-                edgeSymbolSize: [0, 8],
-                data: nodes,
-                links: edges,
-                lineStyle: { opacity: 0.8 },
-                emphasis: { focus: 'adjacency' as const, lineStyle: { width: 3 } },
-              }],
-            };
-
-            return (
-              <div style={{ padding: '8px 0' }}>
-                <span style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4, display: 'block' }}>
-                  任务依赖图 ({tasks.length} 个任务, {maxLayer + 1} 层)
-                </span>
-                <ReactECharts option={option} style={{ height: chartH, width: Math.max(300, (maxLayer + 1) * xGap + 80) }} />
-              </div>
-            );
-          }}
-        />
-      </Card>
-
-      {/* 运行历史 Modal */}
-      <Modal title={`DAG 运行历史 - ${historyModal.dagId}`} visible={historyModal.visible}
-        onCancel={() => setHistoryModal({ visible: false, dagId: '', data: [], filter: '' })}
-        footer={null} width={960}>
-        <div style={{ marginBottom: 12 }}>
-          <RadioGroup type="button" value={historyModal.filter} onChange={e => showHistory(historyModal.dagId, (e.target as any).value)} style={{ fontSize: 13 }}>
-            <Radio value="">全部</Radio>
-            <Radio value="today">今日执行</Radio>
-            <Radio value="single">指定日期</Radio>
-            <Radio value="backfill">回溯</Radio>
-          </RadioGroup>
-        </div>
-        <Table dataSource={historyModal.data} columns={historyColumns}
-          rowKey="run_id" size="small" pagination={{ pageSize: 10 }}
-          expandedRowRender={(record: any) => {
-            if (!(record?.run_type === 'backfill' && record?.backfill_id)) return null;
-            const runs = backfillDetail[record.backfill_id];
-            if (!runs) return <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>加载中...</span>;
-            return (
-              <div style={{ padding: '4px 0' }}>
-                <span style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4, display: 'block' }}>
-                  回溯详情 ({runs.length} 天)
-                </span>
-                <Table dataSource={runs} columns={backfillSubColumns}
-                  rowKey="run_id" size="small" pagination={false} />
-              </div>
-            );
-          }}
-          rowExpandable={(record: any) => record?.run_type === 'backfill' && !!record?.backfill_id}
-          onExpand={(expanded, record) => {
-            if (expanded && record?.backfill_id) loadBackfillDetail(record.backfill_id);
-          }}
-        />
-      </Modal>
-
-      {/* 新建 DAG Modal */}
-      <Modal title="新建 DAG" visible={createModal} onOk={handleCreate}
-        onCancel={() => { setCreateModal(false); setCreateForm({ dag_id: '', description: '', schedule: '', tasks_json: '[]' }); }} okText="创建" width={600}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div>
-            <div style={{ marginBottom: 4, fontWeight: 500, fontSize: 13 }}>DAG ID <span style={{ color: 'var(--color-loss)' }}>*</span></div>
-            <Input placeholder="如 daily_update" value={createForm.dag_id}
-              onChange={(v) => setCreateForm(prev => ({ ...prev, dag_id: v }))} />
-          </div>
-          <div>
-            <div style={{ marginBottom: 4, fontWeight: 500, fontSize: 13 }}>描述</div>
-            <Input placeholder="DAG 描述" value={createForm.description}
-              onChange={(v) => setCreateForm(prev => ({ ...prev, description: v }))} />
-          </div>
-          <div>
-            <div style={{ marginBottom: 4, fontWeight: 500, fontSize: 13 }}>调度 (Cron)</div>
-            <Input placeholder="如 0 2 * * * (留空为手动)" value={createForm.schedule}
-              onChange={(v) => setCreateForm(prev => ({ ...prev, schedule: v }))} />
-          </div>
-          <div>
-            <div style={{ marginBottom: 4, fontWeight: 500, fontSize: 13 }}>任务列表 (JSON)</div>
-            <TextArea rows={6} placeholder='[{"task_id": "sync", "action": "sync_all", "depends_on": []}]'
-              value={createForm.tasks_json}
-              onChange={(v) => setCreateForm(prev => ({ ...prev, tasks_json: v }))}
-              style={{ fontFamily: 'Fira Code, Courier New, monospace', fontSize: 12 }} />
-          </div>
-        </div>
-      </Modal>
-
-      {/* 编辑 DAG Modal */}
-      <Modal title={`编辑 DAG: ${editModal.dag?.dag_id || ''}`} visible={editModal.visible}
-        onOk={handleEdit} onCancel={() => setEditModal({ visible: false, dag: null })} okText="保存" width={600}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div>
-            <div style={{ marginBottom: 4, fontWeight: 500, fontSize: 13 }}>描述</div>
-            <Input value={editFormData.description}
-              onChange={(v) => setEditFormData(prev => ({ ...prev, description: v }))} />
-          </div>
-          <div>
-            <div style={{ marginBottom: 4, fontWeight: 500, fontSize: 13 }}>调度 (Cron)</div>
-            <Input placeholder="留空为手动" value={editFormData.schedule}
-              onChange={(v) => setEditFormData(prev => ({ ...prev, schedule: v }))} />
-          </div>
-          <div>
-            <div style={{ marginBottom: 4, fontWeight: 500, fontSize: 13 }}>任务列表 (JSON)</div>
-            <TextArea rows={8} value={editFormData.tasks_json}
-              onChange={(v) => setEditFormData(prev => ({ ...prev, tasks_json: v }))}
-              style={{ fontFamily: 'Fira Code, Courier New, monospace', fontSize: 12 }} />
-          </div>
-        </div>
-      </Modal>
-
-      {/* DAG 执行模态框 */}
-      <Modal title={`执行 DAG: ${runModal.dagId}`} visible={runModal.visible}
-        onOk={handleRunDag} onCancel={() => setRunModal({ visible: false, dagId: '' })}
-        okText="开始执行" width={480}>
-        <div style={{ marginBottom: 16 }}>
-          <RadioGroup type="button" value={runMode} onChange={e => setRunMode((e.target as any).value)}>
-            <Radio value="today">今天</Radio>
-            <Radio value="date">指定日期</Radio>
-            <Radio value="range">日期范围回溯</Radio>
-          </RadioGroup>
-        </div>
-        {runMode === 'date' && (
-          <DatePicker style={{ width: '100%' }} value={runDate as any}
-            onChange={(v) => setRunDate(v as Date)} placeholder="选择执行日期" />
-        )}
-        {runMode === 'range' && (
-          <DatePicker type="dateRange" style={{ width: '100%' }}
-            value={runRange as any}
-            onChange={(v) => {
-              if (Array.isArray(v) && v.length === 2) setRunRange([v[0] as Date, v[1] as Date]);
-              else setRunRange([null, null]);
-            }}
-            placeholder={['开始日期', '结束日期'] as any} />
-        )}
-        {runMode === 'range' && runRange[0] && runRange[1] && (
-          <div style={{ marginTop: 8, color: 'var(--text-secondary)', fontSize: 12 }}>
-            将按交易日逐日执行，共约 {Math.ceil(dayjs(runRange[1]).diff(dayjs(runRange[0]), 'day') * 5 / 7)} 个交易日
-          </div>
-        )}
-      </Modal>
-
-      {/* 回溯结果模态框 */}
-      <Modal title="回溯执行结果" visible={!!backfillProgress?.visible}
-        onCancel={() => setBackfillProgress(null)} footer={null} width={560}>
-        {backfillProgress?.data && (() => {
-          const d = backfillProgress.data;
-          const total = d.total_days || 0;
-          const success = d.success_days || 0;
-          const failed = d.failed_days || 0;
-          const pct = total > 0 ? Math.round((success / total) * 100) : 0;
-          return (
-            <div>
-              <div style={{ marginBottom: 12 }}>
-                <Tag color="blue">{d.start_date}</Tag> → <Tag color="blue">{d.end_date}</Tag>
-                <span style={{ marginLeft: 8, color: 'var(--text-secondary)' }}>共 {total} 天</span>
-              </div>
-              <Progress percent={pct} stroke={failed > 0 ? 'var(--color-loss)' : 'var(--color-gain)'}
-                format={(pct) => `${success}/${total} 成功`} />
-              <div style={{ marginTop: 12, display: 'flex', gap: 16 }}>
-                <Tag color="green">成功: {success}</Tag>
-                <Tag color="red">失败: {failed}</Tag>
-              </div>
-              {d.details && d.details.length > 0 && (
-                <div style={{ marginTop: 12, maxHeight: 300, overflow: 'auto' }}>
-                  <Table size="small" dataSource={d.details} rowKey="date" pagination={false}
-                    columns={[
-                      { title: '日期', dataIndex: 'date', key: 'date', width: 120 },
-                      { title: '状态', dataIndex: 'status', key: 'status', width: 80,
-                        render: (text: string) => <Tag color={text === 'success' ? 'green' : 'red'}>{text}</Tag> },
-                      { title: '详情', dataIndex: 'summary', key: 'summary', ellipsis: true },
-                    ]} />
-                </div>
-              )}
-            </div>
-          );
-        })()}
-      </Modal>
-    </div>
-  );
-};
-
 const DataCenter: React.FC = () => {
   const [stocks, setStocks] = useState<string[]>([]);
   const [selected, setSelected] = useState<string>('');
@@ -583,6 +92,7 @@ const DataCenter: React.FC = () => {
   const [queryColumns, setQueryColumns] = useState<string[]>([]);
   const [queryLoading, setQueryLoading] = useState(false);
   const [syncingTasks, setSyncingTasks] = useState<Set<string>>(new Set());
+  const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
 
   const [logFilters, setLogFilters] = useState({
     source: undefined as string | undefined,
@@ -597,16 +107,86 @@ const DataCenter: React.FC = () => {
   const [syncStartDate, setSyncStartDate] = useState<string>('');
   const [syncEndDate, setSyncEndDate] = useState<string>('');
 
+  const [batchSyncModalVisible, setBatchSyncModalVisible] = useState(false);
+  const [batchSyncStartDate, setBatchSyncStartDate] = useState<string>('');
+  const [batchSyncEndDate, setBatchSyncEndDate] = useState<string>('');
+
   const [configModalVisible, setConfigModalVisible] = useState(false);
   const [configModalTask, setConfigModalTask] = useState<any>(null);
   const [configJson, setConfigJson] = useState<string>('');
   const [isNewTask, setIsNewTask] = useState(false);
 
-  const [scheduleModalVisible, setScheduleModalVisible] = useState(false);
-  const [scheduleModalTask, setScheduleModalTask] = useState<SyncTask | null>(null);
-  const [scheduleType, setScheduleType] = useState<string>('daily');
-  const [cronExpression, setCronExpression] = useState<string>('');
   const [scheduleInfo, setScheduleInfo] = useState<Record<string, any>>({});
+
+  const [taskDrawerVisible, setTaskDrawerVisible] = useState(false);
+  const [taskDrawerTask, setTaskDrawerTask] = useState<SyncTask | null>(null);
+  const [taskDrawerJson, setTaskDrawerJson] = useState<string>('');
+  const [taskDrawerConfig, setTaskDrawerConfig] = useState<any>(null);
+  const [taskDrawerTab, setTaskDrawerTab] = useState<string>('visual');
+
+  // 解析 JSON 并更新配置对象
+  const parseTaskDrawerJson = (json: string) => {
+    try {
+      const config = JSON.parse(json);
+      setTaskDrawerConfig(config);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  // 更新配置字段并同步到 JSON
+  const updateTaskDrawerConfig = (key: string, value: any) => {
+    const newConfig = { ...taskDrawerConfig, [key]: value };
+    setTaskDrawerConfig(newConfig);
+    setTaskDrawerJson(JSON.stringify(newConfig, null, 2));
+  };
+
+  // 更新 schema 字段
+  const updateSchemaField = (fieldName: string, prop: string, value: any) => {
+    const newSchema = { ...taskDrawerConfig.schema };
+    if (!newSchema[fieldName]) newSchema[fieldName] = {};
+    newSchema[fieldName] = { ...newSchema[fieldName], [prop]: value };
+    updateTaskDrawerConfig('schema', newSchema);
+  };
+
+  // 更新 params 字段
+  const updateParamsField = (key: string, value: string) => {
+    const newParams = { ...taskDrawerConfig.params, [key]: value };
+    updateTaskDrawerConfig('params', newParams);
+  };
+
+  const openTaskDrawer = async (task: SyncTask) => {
+    setTaskDrawerTask(task);
+    setTaskDrawerTab('visual');
+    try {
+      const res = await dataApi.getTaskConfig(task.task_id);
+      const json = JSON.stringify(res.data.config, null, 2);
+      setTaskDrawerJson(json);
+      parseTaskDrawerJson(json);
+    } catch {
+      const json = JSON.stringify(task, null, 2);
+      setTaskDrawerJson(json);
+      parseTaskDrawerJson(json);
+    }
+    setTaskDrawerVisible(true);
+  };
+
+  const handleSaveTaskDrawer = async () => {
+    try {
+      const config = JSON.parse(taskDrawerJson);
+      await dataApi.updateTaskConfig(config.task_id, config);
+      Toast.success(`任务 ${config.task_id} 更新成功`);
+      setTaskDrawerVisible(false);
+      loadInitialData();
+    } catch (error: any) {
+      if (error instanceof SyntaxError) {
+        Toast.error('JSON 格式无效');
+      } else {
+        Toast.error(error.response?.data?.detail || '保存配置失败');
+      }
+    }
+  };
 
   useEffect(() => {
     loadInitialData();
@@ -716,29 +296,58 @@ const DataCenter: React.FC = () => {
     }
   };
 
-  const handleSyncAll = async () => {
-    try {
-      await dataApi.syncAllTasks();
-      Toast.success('所有任务已在后台开始同步');
-      setTimeout(() => {
-        syncTasks.forEach((task) => loadTaskStatus(task.task_id));
-        loadSyncLogs();
-      }, 3000);
-    } catch (error) {
-      Toast.error('启动同步失败');
+  const handleBatchSync = () => {
+    if (selectedTaskIds.length === 0) {
+      Toast.warning('请先选择要同步的任务');
+      return;
     }
+    const enabledTasks = selectedTaskIds.filter(id => {
+      const task = syncTasks.find(t => t.task_id === id);
+      return task?.enabled;
+    });
+    if (enabledTasks.length === 0) {
+      Toast.warning('所选任务均已禁用');
+      return;
+    }
+    setBatchSyncStartDate('');
+    setBatchSyncEndDate('');
+    setBatchSyncModalVisible(true);
   };
 
-  const handleEditTask = async (taskId: string) => {
-    try {
-      const res = await dataApi.getTaskConfig(taskId);
-      setConfigModalTask(res.data.config);
-      setConfigJson(JSON.stringify(res.data.config, null, 2));
-      setIsNewTask(false);
-      setConfigModalVisible(true);
-    } catch (error) {
-      Toast.error('加载任务配置失败');
+  const executeBatchSync = async () => {
+    const enabledTasks = selectedTaskIds.filter(id => {
+      const task = syncTasks.find(t => t.task_id === id);
+      return task?.enabled;
+    });
+    setBatchSyncModalVisible(false);
+    for (const taskId of enabledTasks) {
+      setSyncingTasks((prev) => new Set(prev).add(taskId));
     }
+    Toast.info(`开始同步 ${enabledTasks.length} 个任务`);
+    for (const taskId of enabledTasks) {
+      try {
+        await dataApi.syncTask(
+          taskId,
+          undefined,
+          batchSyncStartDate || undefined,
+          batchSyncEndDate || undefined
+        );
+      } catch (error) {
+        Toast.error(`任务 ${taskId} 同步失败`);
+      }
+    }
+    setTimeout(() => {
+      enabledTasks.forEach((taskId) => {
+        loadTaskStatus(taskId);
+        setSyncingTasks((prev) => {
+          const newSet = new Set(prev);
+          newSet.delete(taskId);
+          return newSet;
+        });
+      });
+      loadSyncLogs();
+      setSelectedTaskIds([]);
+    }, 2000);
   };
 
   const handleNewTask = () => {
@@ -843,39 +452,6 @@ const DataCenter: React.FC = () => {
     });
   };
 
-  const handleScheduleTask = (task: SyncTask) => {
-    setScheduleModalTask(task);
-    setScheduleType(task.schedule || 'daily');
-    setCronExpression('');
-    setScheduleModalVisible(true);
-  };
-
-  const handleEnableSchedule = async () => {
-    if (!scheduleModalTask) return;
-    try {
-      await dataApi.enableTaskSchedule(
-        scheduleModalTask.task_id,
-        scheduleType,
-        scheduleType === 'custom' ? cronExpression : undefined
-      );
-      Toast.success(`任务 ${scheduleModalTask.task_id} 调度已启用`);
-      setScheduleModalVisible(false);
-      loadTaskScheduleInfo(scheduleModalTask.task_id);
-    } catch (error: any) {
-      Toast.error(error.response?.data?.detail || '启用调度失败');
-    }
-  };
-
-  const handleDisableSchedule = async (taskId: string) => {
-    try {
-      await dataApi.disableTaskSchedule(taskId);
-      Toast.success(`任务 ${taskId} 调度已禁用`);
-      loadTaskScheduleInfo(taskId);
-    } catch (error: any) {
-      Toast.error(error.response?.data?.detail || '禁用调度失败');
-    }
-  };
-
   const dailyColumns = [
     { title: '日期', dataIndex: 'trade_date', key: 'trade_date', width: 100 },
     {
@@ -963,95 +539,45 @@ const DataCenter: React.FC = () => {
 
   return (
     <div style={{ padding: '16px', maxWidth: '1600px', margin: '0 auto' }}>
-      <div style={{
-        marginBottom: '16px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between'
-      }}>
-        <div>
-          <h1 style={{
-            color: 'var(--text-primary)',
-            fontSize: '24px',
-            fontWeight: 700,
-            margin: 0,
-            letterSpacing: '1px'
-          }}>
-            <IconServer style={{ marginRight: '8px' }} />
-            数据中心
-          </h1>
-          <p style={{
-            color: 'var(--text-secondary)',
-            margin: '4px 0 0 0',
-            fontSize: '12px'
-          }}>
-            实时行情数据管理与分析
-          </p>
-        </div>
-        <div style={{
-          background: 'var(--bg-card)',
-          padding: '8px 16px',
-          borderRadius: '6px',
-          border: '1px solid var(--border-color)'
+      <div style={{ marginBottom: '16px' }}>
+        <h1 style={{
+          color: 'var(--color-primary)',
+          fontSize: '24px',
+          fontWeight: 700,
+          margin: 0,
+          letterSpacing: '1px'
         }}>
-          <div style={{ color: 'var(--text-secondary)', fontSize: '11px' }}>数据表总数</div>
-          <div style={{
-            color: 'var(--color-primary)',
-            fontSize: '20px',
-            fontWeight: 700,
-          }}>
-            {tables.length}
-          </div>
-        </div>
+          <IconServer style={{ marginRight: '8px' }} />
+          数据
+        </h1>
+        <p style={{
+          color: 'var(--text-secondary)',
+          margin: '4px 0 0 0',
+          fontSize: '12px'
+        }}>
+          数据同步管理与 SQL 查询
+        </p>
       </div>
 
       <Tabs defaultActiveKey="1">
-        <TabPane tab="行情数据" itemKey="1">
-          <div className="content-card" style={{ padding: '12px', marginBottom: '12px' }}>
-            <div style={{ marginBottom: 12 }}>
-              <Select
-                filter
-                style={{ width: 250 }}
-                placeholder="选择股票代码"
-                optionList={stocks.map((s) => ({ label: s, value: s }))}
-                onChange={(v) => {
-                  setSelected(v as string);
-                  loadDaily(v as string);
-                }}
-              />
-            </div>
-
-            {dailyData.length > 0 && (
-              <div style={{
-                marginBottom: 12,
-                padding: '12px',
-                background: 'var(--bg-surface)',
-                borderRadius: '8px',
-                border: '1px solid var(--border-color)'
-              }}>
-                <TradingViewChart data={dailyData.slice().reverse()} />
-              </div>
-            )}
-
-            <Table
-              dataSource={dailyData}
-              columns={dailyColumns}
-              rowKey="trade_date"
-              loading={loading}
-              size="small"
-              pagination={{ pageSize: 20 }}
-              scroll={{ x: 800 }}
-            />
-          </div>
-        </TabPane>
-
-        <TabPane tab={<span><IconSync /> 同步任务</span>} itemKey="2">
+        <TabPane tab={<span><IconSync /> 同步任务</span>} itemKey="1">
           <Card
             className="content-card"
             style={{ marginBottom: '12px' }}
             title={<span style={{ color: 'var(--text-primary)', fontSize: '16px', fontWeight: 600 }}>同步任务管理</span>}
             headerExtraContent={
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                {selectedTaskIds.length > 0 && (
+                  <Button
+                    theme="solid"
+                    type="primary"
+                    icon={<IconSync />}
+                    onClick={handleBatchSync}
+                    size="small"
+                  >
+                    批量同步 ({selectedTaskIds.length})
+                  </Button>
+                )}
                 <Button
                   icon={<IconRefresh />}
                   onClick={() => {
@@ -1065,180 +591,72 @@ const DataCenter: React.FC = () => {
                 <Button onClick={handleNewTask} size="small">
                   新建任务
                 </Button>
-                <Button
-                  theme="solid"
-                  type="primary"
-                  icon={<IconSync />}
-                  onClick={handleSyncAll}
-                  size="small"
-                >
-                  全部同步
-                </Button>
               </div>
             }
           >
 
-            <Collapse accordion>
-              {syncTasks.map((task) => {
+            <Table
+              dataSource={syncTasks.map((task) => {
                 const status = taskStatuses[task.task_id];
                 const taskScheduleInfo = scheduleInfo[task.task_id];
-                const hasSchedule = taskScheduleInfo && taskScheduleInfo.next_run_time;
-                const isSyncing = syncingTasks.has(task.task_id);
-
-                return (
-                  <Collapse.Panel
-                    key={task.task_id}
-                    itemKey={task.task_id}
-                    header={
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-                        <div style={{ display: 'flex', gap: 12, alignItems: 'center', flex: 1 }}>
-                          <code style={{
-                            color: 'var(--color-primary)',
-                            background: 'var(--bg-surface)',
-                            padding: '4px 8px',
-                            borderRadius: '4px',
-                            fontWeight: 600,
-                            fontSize: '13px',
-                            minWidth: '120px',
-                            display: 'inline-block'
-                          }}>
-                            {task.task_id}
-                          </code>
-                          <span style={{ color: 'var(--text-secondary)', fontSize: '13px', flex: 1 }}>{task.description}</span>
-                        </div>
-                        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }} onClick={(e) => e.stopPropagation()}>
-                          <Tag color={task.enabled ? 'green' : 'red'} style={{ fontWeight: 500, fontSize: '11px' }}>
-                            {task.enabled ? '启用' : '禁用'}
-                          </Tag>
-                          {status?.last_sync_time && (
-                            <Tooltip content="上次同步时间（系统拉取数据的实际时间）">
-                              <div style={{ display: 'flex', gap: 4, alignItems: 'center', color: 'var(--text-secondary)', fontSize: '12px' }}>
-                                <IconClock />
-                                <span>{status.last_sync_time}</span>
-                              </div>
-                            </Tooltip>
-                          )}
-                          {status?.table_latest_date && (
-                            <Tooltip content="最新数据日期">
-                              <div style={{ display: 'flex', gap: 4, alignItems: 'center', color: 'var(--color-gain)', fontSize: '12px' }}>
-                                <IconCalendar />
-                                <span>{status.table_latest_date}</span>
-                              </div>
-                            </Tooltip>
-                          )}
-                        </div>
-                      </div>
-                    }
-                  >
-
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-                        <div style={{ flex: '0 0 auto' }}>
-                          <div style={{ color: 'var(--text-secondary)', fontSize: '12px', marginBottom: '4px' }}>类型</div>
-                          <Tag color={task.sync_type === 'incremental' ? 'blue' : 'green'}>
-                            {task.sync_type === 'incremental' ? '增量' : '全量'}
-                          </Tag>
-                        </div>
-                        <div style={{ flex: '0 0 auto' }}>
-                          <div style={{ color: 'var(--text-secondary)', fontSize: '12px', marginBottom: '4px' }}>调度</div>
-                          {taskScheduleInfo?.schedule_type ? (
-                            <Tag color="purple">{taskScheduleInfo.schedule_type}</Tag>
-                          ) : (
-                            <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>-</span>
-                          )}
-                        </div>
-                        <div style={{ flex: '0 0 auto' }}>
-                          <div style={{ color: 'var(--text-secondary)', fontSize: '12px', marginBottom: '4px' }}>调度状态</div>
-                          {hasSchedule && taskScheduleInfo.next_run_time ? (
-                            <Tag color="green" style={{ fontWeight: 500 }}>运行中</Tag>
-                          ) : (
-                            <Tag color="grey" style={{ fontWeight: 500 }}>未启用</Tag>
-                          )}
-                        </div>
-                        <div style={{ flex: '0 0 auto' }}>
-                          <div style={{ color: 'var(--text-secondary)', fontSize: '12px', marginBottom: '4px' }}>下次运行</div>
-                          <span style={{ color: 'var(--color-gain)', fontSize: '12px' }}>
-                            {hasSchedule && taskScheduleInfo.next_run_time
-                              ? new Date(taskScheduleInfo.next_run_time).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
-                              : '-'}
-                          </span>
-                        </div>
-                        <div style={{ flex: '0 0 auto' }}>
-                          <div style={{ color: 'var(--text-secondary)', fontSize: '12px', marginBottom: '4px' }}>上次运行</div>
-                          <span style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>
-                            {taskScheduleInfo?.last_run_time
-                              ? new Date(taskScheduleInfo.last_run_time).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
-                              : '-'}
-                          </span>
-                        </div>
-                        <div style={{ flex: '0 0 auto' }}>
-                          <div style={{ color: 'var(--text-secondary)', fontSize: '12px', marginBottom: '4px' }}>成功次数</div>
-                          <span style={{ color: 'var(--color-primary)', fontSize: '13px', fontWeight: 600 }}>
-                            {taskScheduleInfo?.success_count || 0}
-                          </span>
-                        </div>
-                      </div>
-
-                      <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '12px', marginTop: '4px' }}>
-                        <div style={{ color: 'var(--text-secondary)', fontSize: '12px', marginBottom: '8px' }}>数据表</div>
-                        <code style={{
-                          color: 'var(--color-gain)',
-                          background: 'var(--bg-surface)',
-                          padding: '4px 8px',
-                          borderRadius: '4px',
-                          fontSize: '12px'
-                        }}>
-                          {task.table_name}
-                        </code>
-                      </div>
-
-                      <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '12px' }}>
-                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                          <Button
-                            theme="solid"
-                            type="primary"
-                            size="small"
-                            icon={<IconEdit />}
-                            onClick={() => handleEditTask(task.task_id)}
-                          >
-                            编辑
-                          </Button>
-
-                          {!hasSchedule ? (
-                            <Button size="small" onClick={() => handleScheduleTask(task)}>
-                              启用调度
-                            </Button>
-                          ) : (
-                            <Button size="small" type="danger" onClick={() => handleDisableSchedule(task.task_id)}>
-                              禁用调度
-                            </Button>
-                          )}
-
-                          <Button
-                            size="small"
-                            icon={<IconSync style={isSyncing ? { animation: 'spin 1s linear infinite' } : undefined} />}
-                            onClick={() => handleSyncTask(task.task_id)}
-                            disabled={!task.enabled || isSyncing}
-                            loading={isSyncing}
-                          >
-                            同步
-                          </Button>
-
-                          <Button
-                            type="danger"
-                            size="small"
-                            icon={<IconDelete />}
-                            onClick={() => handleDeleteTask(task.task_id)}
-                          >
-                            删除
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  </Collapse.Panel>
-                );
+                return { ...task, status, taskScheduleInfo };
               })}
-            </Collapse>
+              rowKey="task_id"
+              size="small"
+              pagination={false}
+              rowSelection={{
+                selectedRowKeys: selectedTaskIds,
+                onChange: (selectedRowKeys) => setSelectedTaskIds(selectedRowKeys as string[]),
+                getCheckboxProps: (record: any) => ({
+                  disabled: !record.enabled,
+                }),
+              }}
+              scroll={{ x: 900 }}
+              columns={[
+                { title: '任务ID', dataIndex: 'task_id', key: 'task_id', width: 120, fixed: 'left' as const,
+                  render: (v: string, r: any) => (
+                    <span style={{ cursor: 'pointer' }} onClick={() => openTaskDrawer(r)}>
+                      <code style={{ color: 'var(--color-primary)', fontSize: '12px' }}>{v}</code>
+                    </span>
+                  )
+                },
+                { title: '描述', dataIndex: 'description', key: 'desc', width: 180, ellipsis: true },
+                { title: '状态', dataIndex: 'enabled', key: 'enabled', width: 60,
+                  render: (v: boolean) => <Tag color={v ? 'green' : 'red'} style={{ fontSize: '11px' }}>{v ? '启用' : '禁用'}</Tag>
+                },
+                { title: '类型', key: 'sync_type', width: 60,
+                  render: (_: any, r: any) => <Tag color={r.sync_type === 'incremental' ? 'blue' : 'green'}>{r.sync_type === 'incremental' ? '增量' : '全量'}</Tag>
+                },
+                { title: '数据表', dataIndex: 'table_name', key: 'table_name', width: 120,
+                  render: (v: string) => <code style={{ color: 'var(--color-gain)', fontSize: '12px' }}>{v}</code>
+                },
+                { title: '最新数据', key: 'latest', width: 100,
+                  render: (_: any, r: any) => r.status?.table_latest_date
+                    ? <span style={{ color: 'var(--color-gain)' }}>{r.status.table_latest_date}</span>
+                    : <span style={{ color: 'var(--text-muted)' }}>-</span>
+                },
+                { title: '上次同步', key: 'last_sync', width: 130,
+                  render: (_: any, r: any) => r.status?.last_sync_time
+                    ? <Tooltip content={r.status.last_sync_time}><span style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>{r.status.last_sync_time.slice(0, 16)}</span></Tooltip>
+                    : '-'
+                },
+                { title: '操作', key: 'action', width: 130, fixed: 'right' as const,
+                  render: (_: any, r: any) => {
+                    const isSyncing = syncingTasks.has(r.task_id);
+                    return (
+                      <div style={{ display: 'flex', gap: 4 }}>
+                        <Button size="small"
+                          icon={<IconSync style={isSyncing ? { animation: 'spin 1s linear infinite' } : undefined} />}
+                          onClick={() => handleSyncTask(r.task_id)}
+                          disabled={!r.enabled || isSyncing} loading={isSyncing}>同步</Button>
+                        <Button size="small" type="danger" icon={<IconDelete />}
+                          onClick={() => handleDeleteTask(r.task_id)} />
+                      </div>
+                    );
+                  }
+                },
+              ]}
+            />
           </Card>
 
           <Card
@@ -1309,7 +727,7 @@ const DataCenter: React.FC = () => {
           </Card>
         </TabPane>
 
-        <TabPane tab={<span><IconServer /> 数据表</span>} itemKey="3">
+        <TabPane tab={<span><IconServer /> 数据表</span>} itemKey="2">
           <Card
             className="content-card"
             title={<span style={{ color: 'var(--text-primary)', fontSize: '16px', fontWeight: 600 }}>数据库表</span>}
@@ -1329,10 +747,19 @@ const DataCenter: React.FC = () => {
           </Card>
         </TabPane>
 
-        <TabPane tab={<span><IconCode /> SQL 查询</span>} itemKey="4">
+        <TabPane tab={<span><IconCode /> SQL 查询</span>} itemKey="3">
           <Card
             className="content-card"
             title={<span style={{ color: 'var(--text-primary)', fontSize: '16px', fontWeight: 600 }}>SQL 查询</span>}
+            headerExtraContent={
+              <Button
+                icon={<IconExternalOpen />}
+                onClick={() => window.open('http://localhost:8848', '_blank')}
+                size="small"
+              >
+                数据库管理
+              </Button>
+            }
           >
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               <div>
@@ -1399,10 +826,6 @@ const DataCenter: React.FC = () => {
               )}
             </div>
           </Card>
-        </TabPane>
-
-        <TabPane tab={<span><IconFlowChartStroked /> DAG 管理</span>} itemKey="5">
-          <DAGManageSection />
         </TabPane>
       </Tabs>
 
@@ -1478,6 +901,56 @@ const DataCenter: React.FC = () => {
         </div>
       </Modal>
 
+      {/* Batch Sync Modal */}
+      <Modal
+        title={`批量同步 (${selectedTaskIds.length} 个任务)`}
+        visible={batchSyncModalVisible}
+        onOk={executeBatchSync}
+        onCancel={() => setBatchSyncModalVisible(false)}
+        okText="开始同步"
+        cancelText="取消"
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ padding: '12px', background: 'var(--bg-surface)', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
+            <div style={{ color: 'var(--text-secondary)', fontSize: '13px', marginBottom: 8 }}>已选择的任务：</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {selectedTaskIds.map(id => {
+                const task = syncTasks.find(t => t.task_id === id);
+                return (
+                  <Tag key={id} color={task?.enabled ? 'blue' : 'grey'} style={{ fontSize: '12px' }}>
+                    {id}
+                  </Tag>
+                );
+              })}
+            </div>
+          </div>
+
+          <div>
+            <div style={{ marginBottom: 6, fontWeight: 500, fontSize: '13px' }}>开始日期（可选）</div>
+            <Input
+              placeholder="YYYYMMDD（如 20240101）"
+              value={batchSyncStartDate}
+              onChange={(v) => setBatchSyncStartDate(v)}
+              maxLength={8}
+              size="small"
+            />
+          </div>
+          <div>
+            <div style={{ marginBottom: 6, fontWeight: 500, fontSize: '13px' }}>结束日期（可选）</div>
+            <Input
+              placeholder="YYYYMMDD（如 20240131）"
+              value={batchSyncEndDate}
+              onChange={(v) => setBatchSyncEndDate(v)}
+              maxLength={8}
+              size="small"
+            />
+            <div style={{ marginTop: 6, color: 'var(--text-muted)', fontSize: 11 }}>
+              指定日期范围进行同步，留空则只同步最新一天的数据。全量同步任务会忽略日期参数。
+            </div>
+          </div>
+        </div>
+      </Modal>
+
       {/* Config Editor Modal */}
       <Modal
         title={isNewTask ? '新建任务' : `编辑任务: ${configModalTask?.task_id || ''}`}
@@ -1507,64 +980,170 @@ const DataCenter: React.FC = () => {
         </div>
       </Modal>
 
-      {/* Schedule Management Modal */}
-      <Modal
-        title={`调度设置: ${scheduleModalTask?.task_id || ''}`}
-        visible={scheduleModalVisible}
-        onOk={handleEnableSchedule}
-        onCancel={() => setScheduleModalVisible(false)}
-        okText="启用调度"
-        cancelText="取消"
-        width={500}
+      {/* Task Detail SideSheet */}
+      <SideSheet
+        title={<span style={{ color: 'var(--color-primary)' }}>{taskDrawerTask?.task_id}</span>}
+        visible={taskDrawerVisible}
+        onCancel={() => setTaskDrawerVisible(false)}
+        width={720}
       >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div>
-            <div style={{ marginBottom: 8, fontWeight: 500, fontSize: '13px' }}>调度类型</div>
-            <Select
-              value={scheduleType}
-              onChange={(v) => setScheduleType(v as string)}
-              style={{ width: '100%' }}
-              optionList={[
-                { label: '每日 (凌晨 2:00)', value: 'daily' },
-                { label: '每周 (周一凌晨 3:00)', value: 'weekly' },
-                { label: '每月 (1号凌晨 4:00)', value: 'monthly' },
-                { label: '自定义 (Cron 表达式)', value: 'custom' },
-              ]}
-            />
-          </div>
-          {scheduleType === 'custom' && (
-            <div>
-              <div style={{ marginBottom: 8, fontWeight: 500, fontSize: '13px' }}>Cron 表达式</div>
-              <Input
-                value={cronExpression}
-                onChange={(v) => setCronExpression(v)}
-                placeholder="例如: 0 2 * * * (每天凌晨2点)"
-                style={{
-                  fontFamily: 'Fira Code, Courier New, monospace',
-                  fontSize: '12px',
-                }}
-              />
-              <div style={{ marginTop: 6, color: 'var(--text-muted)', fontSize: 11 }}>
-                Cron 格式: 分 时 日 月 周 (例如: 0 2 * * * 表示每天凌晨2点)
+        {taskDrawerTask && taskDrawerConfig && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {/* 状态信息栏 */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, padding: '12px', background: 'var(--bg-surface)', borderRadius: '6px' }}>
+              <div>
+                <div style={{ color: 'var(--text-secondary)', fontSize: '12px', marginBottom: 4 }}>最新数据</div>
+                <span style={{ color: 'var(--color-gain)', fontSize: '13px', fontWeight: 500 }}>
+                  {taskStatuses[taskDrawerTask.task_id]?.table_latest_date || '-'}
+                </span>
+              </div>
+              <div>
+                <div style={{ color: 'var(--text-secondary)', fontSize: '12px', marginBottom: 4 }}>上次同步</div>
+                <span style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>
+                  {taskStatuses[taskDrawerTask.task_id]?.last_sync_time || '-'}
+                </span>
               </div>
             </div>
-          )}
-          <div style={{ padding: '12px', background: 'var(--bg-surface)', borderRadius: '6px', fontSize: '12px' }}>
-            <div style={{ color: 'var(--color-primary)', fontWeight: 500, marginBottom: 4 }}>说明</div>
-            <div style={{ color: 'var(--text-secondary)' }}>
-              启用调度后，系统将按照设定的时间自动执行数据同步任务。
-              <br />
-              - 每日调度：适用于需要每天更新的数据（如日线行情）
-              <br />
-              - 每周调度：适用于更新频率较低的数据（如股票列表）
-              <br />
-              - 每月调度：适用于月度更新的数据
-              <br />
-              - 自定义调度：使用 Cron 表达式设置任意时间
+
+            <Tabs activeKey={taskDrawerTab} onChange={setTaskDrawerTab} size="small">
+              <TabPane tab="可视化编辑" itemKey="visual">
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingTop: 8 }}>
+                  {/* 基本信息 */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                    <div>
+                      <div style={{ marginBottom: 4, fontSize: '12px', color: 'var(--text-secondary)' }}>任务ID</div>
+                      <Input size="small" value={taskDrawerConfig.task_id || ''} disabled style={{ background: 'var(--bg-surface)' }} />
+                    </div>
+                    <div>
+                      <div style={{ marginBottom: 4, fontSize: '12px', color: 'var(--text-secondary)' }}>API名称</div>
+                      <Input size="small" value={taskDrawerConfig.api_name || ''} onChange={(v) => updateTaskDrawerConfig('api_name', v)} />
+                    </div>
+                    <div>
+                      <div style={{ marginBottom: 4, fontSize: '12px', color: 'var(--text-secondary)' }}>描述</div>
+                      <Input size="small" value={taskDrawerConfig.description || ''} onChange={(v) => updateTaskDrawerConfig('description', v)} />
+                    </div>
+                    <div>
+                      <div style={{ marginBottom: 4, fontSize: '12px', color: 'var(--text-secondary)' }}>数据表</div>
+                      <Input size="small" value={taskDrawerConfig.table_name || ''} onChange={(v) => updateTaskDrawerConfig('table_name', v)} />
+                    </div>
+                    <div>
+                      <div style={{ marginBottom: 4, fontSize: '12px', color: 'var(--text-secondary)' }}>同步类型</div>
+                      <Select size="small" value={taskDrawerConfig.sync_type} onChange={(v) => updateTaskDrawerConfig('sync_type', v)} style={{ width: '100%' }}>
+                        <Select.Option value="incremental">增量</Select.Option>
+                        <Select.Option value="full">全量</Select.Option>
+                      </Select>
+                    </div>
+                    <div>
+                      <div style={{ marginBottom: 4, fontSize: '12px', color: 'var(--text-secondary)' }}>调度周期</div>
+                      <Select size="small" value={taskDrawerConfig.schedule} onChange={(v) => updateTaskDrawerConfig('schedule', v)} style={{ width: '100%' }}>
+                        <Select.Option value="daily">每日</Select.Option>
+                        <Select.Option value="weekly">每周</Select.Option>
+                        <Select.Option value="monthly">每月</Select.Option>
+                      </Select>
+                    </div>
+                    <div>
+                      <div style={{ marginBottom: 4, fontSize: '12px', color: 'var(--text-secondary)' }}>日期字段</div>
+                      <Input size="small" value={taskDrawerConfig.date_field || ''} onChange={(v) => updateTaskDrawerConfig('date_field', v)} />
+                    </div>
+                    <div>
+                      <div style={{ marginBottom: 4, fontSize: '12px', color: 'var(--text-secondary)' }}>API限制</div>
+                      <Input size="small" type="number" value={taskDrawerConfig.api_limit || ''} onChange={(v) => updateTaskDrawerConfig('api_limit', parseInt(v) || 0)} />
+                    </div>
+                    <div>
+                      <div style={{ marginBottom: 4, fontSize: '12px', color: 'var(--text-secondary)' }}>主键</div>
+                      <Input size="small" value={taskDrawerConfig.primary_keys?.join(', ') || ''} onChange={(v) => updateTaskDrawerConfig('primary_keys', v.split(',').map((s: string) => s.trim()).filter(Boolean))} />
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>启用</div>
+                      <Switch checked={taskDrawerConfig.enabled} onChange={(v) => updateTaskDrawerConfig('enabled', v)} size="small" />
+                    </div>
+                  </div>
+
+                  {/* API 参数 */}
+                  {taskDrawerConfig.params && (
+                    <Collapse defaultActiveKey={['params']}>
+                      <Collapse.Panel header={<span style={{ fontSize: '13px', fontWeight: 500 }}>API 参数</span>} itemKey="params">
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                          {Object.entries(taskDrawerConfig.params).map(([key, value]) => (
+                            <div key={key}>
+                              <div style={{ marginBottom: 4, fontSize: '12px', color: 'var(--text-secondary)' }}>{key}</div>
+                              <Input size="small" value={String(value)} onChange={(v) => updateParamsField(key, v)} />
+                            </div>
+                          ))}
+                        </div>
+                      </Collapse.Panel>
+                    </Collapse>
+                  )}
+
+                  {/* Schema 字段表格 */}
+                  {taskDrawerConfig.schema && (
+                    <Collapse defaultActiveKey={['schema']}>
+                      <Collapse.Panel header={<span style={{ fontSize: '13px', fontWeight: 500 }}>字段定义 (Schema)</span>} itemKey="schema">
+                        <Table
+                          dataSource={Object.entries(taskDrawerConfig.schema).map(([name, props]: [string, any]) => ({
+                            name,
+                            type: props?.type || '',
+                            nullable: props?.nullable,
+                            comment: props?.comment || '',
+                          }))}
+                          rowKey="name"
+                          size="small"
+                          pagination={false}
+                          columns={[
+                            { title: '字段名', dataIndex: 'name', key: 'name', width: 120,
+                              render: (v: string) => <code style={{ fontSize: '12px', color: 'var(--color-primary)' }}>{v}</code>
+                            },
+                            { title: '类型', dataIndex: 'type', key: 'type', width: 100,
+                              render: (v: string, r: any) => (
+                                <Input size="small" value={v} onChange={(val) => updateSchemaField(r.name, 'type', val)} style={{ width: 90 }} />
+                              )
+                            },
+                            { title: '可空', dataIndex: 'nullable', key: 'nullable', width: 60,
+                              render: (v: boolean, r: any) => (
+                                <Switch size="small" checked={v} onChange={(val) => updateSchemaField(r.name, 'nullable', val)} />
+                              )
+                            },
+                            { title: '备注', dataIndex: 'comment', key: 'comment',
+                              render: (v: string, r: any) => (
+                                <Input size="small" value={v} onChange={(val) => updateSchemaField(r.name, 'comment', val)} />
+                              )
+                            },
+                          ]}
+                        />
+                      </Collapse.Panel>
+                    </Collapse>
+                  )}
+                </div>
+              </TabPane>
+
+              <TabPane tab="JSON 编辑" itemKey="json">
+                <div style={{ paddingTop: 8 }}>
+                  <TextArea
+                    value={taskDrawerJson}
+                    onChange={(v) => {
+                      setTaskDrawerJson(v);
+                      parseTaskDrawerJson(v);
+                    }}
+                    rows={20}
+                    style={{
+                      fontFamily: 'Fira Code, Courier New, monospace',
+                      fontSize: '12px',
+                    }}
+                  />
+                  <div style={{ marginTop: 6, color: 'var(--text-muted)', fontSize: 11 }}>
+                    直接编辑 JSON 配置，修改会同步到可视化编辑界面
+                  </div>
+                </div>
+              </TabPane>
+            </Tabs>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, borderTop: '1px solid var(--border-color)', paddingTop: 12 }}>
+              <Button onClick={() => setTaskDrawerVisible(false)}>取消</Button>
+              <Button theme="solid" type="primary" onClick={handleSaveTaskDrawer}>保存</Button>
             </div>
           </div>
-        </div>
-      </Modal>
+        )}
+      </SideSheet>
     </div>
   );
 };

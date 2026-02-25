@@ -58,9 +58,6 @@ class MLConfig(_BaseConfig):
 
 class SyncConfig(_BaseConfig):
     """数据同步配置"""
-    config_path: str = Field(
-        default=str(BASE_DIR / "backend" / "data_manager" / "sync_config.json")
-    )
     schedule_time: str = Field(default="18:00", pattern=r"^\d{2}:\d{2}$")
     enable_scheduler: bool = Field(default=True)
     default_start_date: str = Field(default="20100101", pattern=r"^\d{8}$")

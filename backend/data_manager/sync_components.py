@@ -22,39 +22,68 @@ from app.core.constants import DEFAULT_START_DATE
 
 
 class SyncConfigManager:
-    """同步配置管理器"""
+    """同步配置管理器 — 从 DolphinDB sync_task_config 表读取"""
 
     def __init__(self, config_path: Optional[str] = None):
-        self.config_path = config_path or settings.sync.config_path
-        self.config = self._load_config()
+        # config_path 保留签名兼容，但不再使用
+        from store.dolphindb_client import db_client
+        self._db = db_client
+        self._cache: Optional[List[Dict[str, Any]]] = None
 
-    def _load_config(self) -> Dict[str, Any]:
-        """加载配置文件"""
+    # ------ 内部 ------
+
+    def _load_tasks(self) -> List[Dict[str, Any]]:
+        """从数据库加载全部任务配置并缓存"""
+        if self._cache is not None:
+            return self._cache
         try:
-            with open(self.config_path, 'r', encoding='utf-8') as f:
-                config = json.load(f)
-            logger.info(f"Loaded sync config from {self.config_path}")
-            return config
-        except FileNotFoundError:
-            raise SyncConfigError(f"Config file not found: {self.config_path}")
-        except json.JSONDecodeError as e:
-            raise SyncConfigError(f"Invalid JSON in config file: {e}")
+            df = self._db.query("SELECT * FROM sync_task_config")
+            if df.is_empty():
+                self._cache = []
+                return self._cache
+            seen: Dict[str, Dict[str, Any]] = {}
+            for row in df.iter_rows(named=True):
+                task = {
+                    "task_id": row["task_id"],
+                    "api_name": row["api_name"],
+                    "description": row.get("description", ""),
+                    "sync_type": row["sync_type"],
+                    "params": json.loads(row["params_json"]) if row.get("params_json") else {},
+                    "date_field": row.get("date_field", ""),
+                    "primary_keys": json.loads(row["primary_keys_json"]) if row.get("primary_keys_json") else [],
+                    "table_name": row["table_name"],
+                    "schema": json.loads(row["schema_json"]) if row.get("schema_json") else {},
+                    "enabled": bool(row.get("enabled", True)),
+                    "api_limit": row.get("api_limit", 5000),
+                    "schedule": row.get("schedule", "daily"),
+                }
+                seen[task["task_id"]] = task
+            self._cache = list(seen.values())
+            logger.info(f"从数据库加载了 {len(self._cache)} 条同步任务配置")
+            return self._cache
+        except Exception as e:
+            raise SyncConfigError(f"从数据库加载同步任务配置失败: {e}")
+
+    def reload(self) -> None:
+        """清除缓存，下次访问时重新加载"""
+        self._cache = None
+
+    # ------ 公开接口（保持不变） ------
 
     def get_task(self, task_id: str) -> Dict[str, Any]:
         """获取任务配置"""
-        tasks = self.config.get("sync_tasks", [])
-        for task in tasks:
-            if task.get("task_id") == task_id:
+        for task in self._load_tasks():
+            if task["task_id"] == task_id:
                 return task
         raise SyncTaskNotFoundError(task_id)
 
     def get_all_tasks(self) -> List[Dict[str, Any]]:
         """获取所有任务"""
-        return self.config.get("sync_tasks", [])
+        return self._load_tasks()
 
     def get_enabled_tasks(self) -> List[Dict[str, Any]]:
         """获取所有启用的任务"""
-        return [t for t in self.get_all_tasks() if t.get("enabled", True)]
+        return [t for t in self._load_tasks() if t.get("enabled", True)]
 
     def get_tasks_by_schedule(self, schedule: str) -> List[Dict[str, Any]]:
         """按调度类型获取任务"""
@@ -64,8 +93,14 @@ class SyncConfigManager:
         ]
 
     def get_global_config(self) -> Dict[str, Any]:
-        """获取全局配置"""
-        return self.config.get("global_config", {})
+        """获取全局配置（现在从 settings 读取，不再依赖 JSON）"""
+        return {
+            "rate_limit": {
+                "calls_per_minute": settings.collector.calls_per_minute,
+                "retry_times": settings.collector.retry_times,
+                "retry_delay": settings.collector.retry_delay,
+            }
+        }
 
 
 class SyncLogManager:
@@ -176,16 +211,8 @@ class TableManager:
             return
 
         try:
-            # 使用 DolphinDB schema() 获取现有列
-            db_path = self.repository._resolve_db_path(table_name)
-            col_df = self.repository.execute(
-                f'schema(loadTable("{db_path}", "{table_name}")).colDefs'
-            )
-            existing_cols = set()
-            if col_df is not None and hasattr(col_df, 'name'):
-                existing_cols = set(col_df['name'].tolist())
-            elif col_df is not None and hasattr(col_df, 'to_list'):
-                existing_cols = set(col_df['name'].to_list())
+            # 使用专用方法获取现有列
+            existing_cols = self.repository.get_table_columns(table_name)
 
             # DolphinDB 类型映射
             type_map = {
@@ -197,6 +224,7 @@ class TableManager:
                 "TIMESTAMP": "TIMESTAMP", "DATETIME": "TIMESTAMP",
             }
 
+            db_path = self.repository._resolve_db_path(table_name)
             for col_name, col_def in schema.items():
                 if col_name not in existing_cols:
                     pg_type = col_def.get("type", "VARCHAR").upper()

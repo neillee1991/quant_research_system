@@ -69,7 +69,6 @@ def verify_tables():
         'index_daily', 'moneyflow', 'factor_values',
         'stock_basic', 'sync_log', 'sync_log_history',
         'factor_metadata', 'factor_analysis',
-        'dag_run_log', 'dag_task_log'
     ]
 
     existing = []

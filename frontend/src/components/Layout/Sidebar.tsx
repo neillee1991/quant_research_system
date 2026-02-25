@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
 import { Nav } from '@douyinfe/semi-ui';
-import { IconServer, IconTestScoreStroked, IconLineChartStroked, IconCalendarClock } from '@douyinfe/semi-icons';
+import { IconServer, IconTestScoreStroked, IconLineChartStroked, IconCalendarClock, IconCandlestickChartStroked } from '@douyinfe/semi-icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 
 const navItems = [
-  { itemKey: '/', text: '数据中心', icon: <IconServer /> },
-  { itemKey: '/factor', text: '因子中心', icon: <IconTestScoreStroked /> },
-  { itemKey: '/strategy', text: '策略中心', icon: <IconLineChartStroked /> },
-  { itemKey: '/scheduler', text: '调度中心', icon: <IconCalendarClock /> },
+  { itemKey: '/market', text: '行情', icon: <IconCandlestickChartStroked /> },
+  { itemKey: '/', text: '数据', icon: <IconServer /> },
+  { itemKey: '/factor', text: '因子', icon: <IconTestScoreStroked /> },
+  { itemKey: '/strategy', text: '策略', icon: <IconLineChartStroked /> },
+  { itemKey: '/scheduler', text: '调度', icon: <IconCalendarClock /> },
 ];
 
 const Sidebar: React.FC = () => {
@@ -17,8 +18,10 @@ const Sidebar: React.FC = () => {
 
   const selectedKey = () => {
     const path = location.pathname;
+    if (path === '/') return '/';
+    if (path.startsWith('/market')) return '/market';
     const match = navItems.find(
-      (item) => item.itemKey !== '/' && path.startsWith(item.itemKey)
+      (item) => item.itemKey !== '/' && item.itemKey !== '/market' && path.startsWith(item.itemKey)
     );
     return match ? match.itemKey : '/';
   };

@@ -8,8 +8,8 @@ import polars as pl
 from app.core.interfaces import IFactorEngine
 from app.core.exceptions import FactorComputationError, UnsupportedFactorError
 from app.core.logger import logger
-from engine.factors.technical import TechnicalFactors
-from engine.factors.financial import CrossSectionalFactors, FactorAnalyzer
+from engine.factors.technical import TechnicalFactors, CrossSectionalFactors
+from engine.factors.financial import FactorAnalyzer
 
 
 class FactorService:
@@ -33,35 +33,57 @@ class FactorService:
 
         try:
             result = data.clone()
+            tf = self.technical_factors
 
             for indicator in indicators:
                 indicator_lower = indicator.lower()
 
                 if indicator_lower == "ma":
                     window = params.get("ma_window", 20) if params else 20
-                    result = self.technical_factors.moving_average(result, window)
+                    result = result.with_columns(
+                        tf.sma(result["close"], window).alias(f"ma{window}")
+                    )
 
                 elif indicator_lower == "ema":
                     window = params.get("ema_window", 12) if params else 12
-                    result = self.technical_factors.exponential_ma(result, window)
+                    result = result.with_columns(
+                        tf.ema(result["close"], window).alias(f"ema{window}")
+                    )
 
                 elif indicator_lower == "rsi":
                     window = params.get("rsi_window", 14) if params else 14
-                    result = self.technical_factors.rsi(result, window)
+                    result = result.with_columns(
+                        tf.rsi(result["close"], window).alias("rsi")
+                    )
 
                 elif indicator_lower == "macd":
-                    result = self.technical_factors.macd(result)
+                    macd_line, signal_line, histogram = tf.macd(result["close"])
+                    result = result.with_columns([
+                        macd_line.alias("macd"),
+                        signal_line.alias("macd_signal"),
+                        histogram.alias("macd_hist"),
+                    ])
 
                 elif indicator_lower == "kdj":
-                    result = self.technical_factors.kdj(result)
+                    k, d, j = tf.kdj(result["high"], result["low"], result["close"])
+                    result = result.with_columns([
+                        k.alias("k"), d.alias("d"), j.alias("j"),
+                    ])
 
                 elif indicator_lower == "bollinger":
                     window = params.get("bollinger_window", 20) if params else 20
-                    result = self.technical_factors.bollinger_bands(result, window)
+                    upper, mid, lower = tf.bollinger_bands(result["close"], window)
+                    result = result.with_columns([
+                        upper.alias("bb_upper"),
+                        mid.alias("bb_mid"),
+                        lower.alias("bb_lower"),
+                    ])
 
                 elif indicator_lower == "atr":
                     window = params.get("atr_window", 14) if params else 14
-                    result = self.technical_factors.atr(result, window)
+                    result = result.with_columns(
+                        tf.atr(result["high"], result["low"], result["close"], window).alias("atr")
+                    )
 
                 else:
                     raise UnsupportedFactorError(indicator)
@@ -92,19 +114,15 @@ class FactorService:
                 factor_lower = factor.lower()
 
                 if factor_lower == "rank":
-                    result = self.cross_sectional_factors.rank_factor(
-                        result, "close", date_col
-                    )
+                    result = self.cross_sectional_factors.rank(result, "close")
 
                 elif factor_lower == "zscore":
-                    result = self.cross_sectional_factors.zscore_factor(
-                        result, "close", date_col
-                    )
+                    result = self.cross_sectional_factors.zscore(result, "close")
 
                 elif factor_lower == "industry_neutral":
                     if "industry" in result.columns:
-                        result = self.cross_sectional_factors.industry_neutral_factor(
-                            result, "close", "industry", date_col
+                        result = self.cross_sectional_factors.neutralize(
+                            result, "close", "industry"
                         )
                     else:
                         logger.warning("Industry column not found, skipping industry_neutral")
@@ -130,12 +148,12 @@ class FactorService:
     ) -> Dict[str, float]:
         """分析因子表现"""
         try:
-            ic = self.factor_analyzer.information_coefficient(
-                factor_data, factor_col, return_col
+            ic = self.factor_analyzer.ic(
+                factor_data[factor_col], factor_data[return_col]
             )
 
             rank_ic = self.factor_analyzer.rank_ic(
-                factor_data, factor_col, return_col
+                factor_data[factor_col], factor_data[return_col]
             )
 
             result = {
@@ -160,8 +178,8 @@ class FactorService:
     ) -> pl.DataFrame:
         """计算因子分层收益"""
         try:
-            result = self.factor_analyzer.factor_quantile_returns(
-                data, factor_col, n_quantiles
+            result = self.factor_analyzer.layered_returns(
+                data, factor_col, "return", n_quantiles
             )
 
             logger.info(f"Computed factor returns for {n_quantiles} quantiles")

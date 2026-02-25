@@ -6,13 +6,20 @@ from fastapi.middleware.gzip import GZipMiddleware
 from app.core.config import settings
 from app.core.logger import logger
 from app.core.exceptions import QuantException, quant_exception_handler, general_exception_handler
-from app.api.v1 import data_merged as data, factor, strategy, ml, production
+from app.api.v1 import data_merged as data, factor, strategy, ml, production, flows
+from store.dolphindb_client import db_client
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     logger.info("Starting application...")
+    # 动态创建缺失的 quant_meta 维度表（使用全局单例，避免重复连接）
+    try:
+        db_client.ensure_meta_tables()
+        db_client.seed_sync_task_config()
+    except Exception as e:
+        logger.error(f"维度表初始化失败: {e}")
     yield
     logger.info("Shutting down application...")
 
@@ -48,6 +55,7 @@ def create_app() -> FastAPI:
     app.include_router(strategy.router, prefix=settings.api_v1_prefix, tags=["strategy"])
     app.include_router(ml.router, prefix=settings.api_v1_prefix, tags=["ml"])
     app.include_router(production.router, prefix=settings.api_v1_prefix, tags=["production"])
+    app.include_router(flows.router, prefix=settings.api_v1_prefix, tags=["flows"])
 
     return app
 

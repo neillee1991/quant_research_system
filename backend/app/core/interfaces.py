@@ -71,6 +71,11 @@ class IDataRepository(ABC):
         """创建表"""
         pass
 
+    @abstractmethod
+    def get_table_columns(self, table: str) -> set:
+        """获取表的现有列名集合"""
+        pass
+
 
 class IFactorEngine(ABC):
     """因子计算引擎接口"""

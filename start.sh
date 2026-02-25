@@ -219,6 +219,8 @@ start_prefect_worker() {
     source "$VENV_DIR/bin/activate"
 
     export PREFECT_API_URL="http://localhost:$PREFECT_PORT/api"
+    export NO_PROXY="localhost,127.0.0.1"
+    export no_proxy="localhost,127.0.0.1"
 
     # 注册并启动 flows
     nohup $PYTHON_CMD flows/serve.py > "$PREFECT_WORKER_LOG" 2>&1 &
@@ -255,7 +257,7 @@ show_status() {
     echo -e "  前端界面:    ${GREEN}http://localhost:$FRONTEND_PORT${NC}"
     echo -e "  API 文档:    ${GREEN}http://localhost:$BACKEND_PORT/docs${NC}"
     echo -e "  Prefect UI:  ${GREEN}http://localhost:$PREFECT_PORT${NC}"
-    echo -e "  DolphinDB:   ${GREEN}http://localhost:8849${NC} (Web管理)"
+    echo -e "  DolphinDB:   ${GREEN}http://localhost:8848${NC} (Web管理)"
     echo ""
     echo -e "${BLUE}日志文件:${NC}"
     echo -e "  后端:          $BACKEND_LOG"

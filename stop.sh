@@ -42,7 +42,7 @@ fi
 
 # 询问是否停止 Docker 服务
 echo ""
-read -p "是否停止 Docker 服务 (PostgreSQL/Redis)? (y/n): " -n 1 -r
+read -p "是否停止 Docker 服务 (DolphinDB/Prefect)? (y/n): " -n 1 -r
 echo
 if [[ $REPLY =~ ^[Yy]$ ]]; then
     cd "$SCRIPT_DIR"

@@ -1,6 +1,5 @@
 """
 数据同步 Prefect Flow
-替代原 DAG 调度系统中的数据同步流水线
 """
 from datetime import datetime
 from typing import Optional

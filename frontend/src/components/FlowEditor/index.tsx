@@ -56,7 +56,16 @@ const FlowEditor: React.FC = () => {
   };
 
   return (
-    <div style={{ width: '100%', height: '70vh', border: '1px solid var(--border-color)', borderRadius: 8 }}>
+    <div style={{
+      width: '100%',
+      height: '70vh',
+      border: '1px solid var(--border-color)',
+      borderRadius: 12,
+      overflow: 'hidden',
+      position: 'relative',
+      boxShadow: 'var(--shadow-sm)',
+      transition: 'all 280ms cubic-bezier(0.4, 0, 0.2, 1)'
+    }}>
       <Toolbar onAddNode={(node) => setLocalNodes((ns) => [...ns, node])} />
       <ReactFlow
         nodes={localNodes}
@@ -66,13 +75,41 @@ const FlowEditor: React.FC = () => {
         onConnect={onConnect}
         nodeTypes={nodeTypes}
         fitView
+        style={{
+          background: 'var(--bg-surface)'
+        }}
       >
-        <Background />
+        <Background
+          color="var(--border-color)"
+          gap={16}
+          size={1}
+        />
         <Controls />
-        <MiniMap />
+        <MiniMap
+          style={{
+            background: 'var(--bg-card)',
+            border: '1px solid var(--border-color)'
+          } as React.CSSProperties}
+          maskColor="rgba(0, 0, 0, 0.1)"
+        />
       </ReactFlow>
-      <div style={{ padding: 8, textAlign: 'right' }}>
-        <Button theme="solid" onClick={handleRunBacktest}>
+      <div style={{
+        padding: 12,
+        textAlign: 'right',
+        background: 'var(--bg-card)',
+        borderTop: '1px solid var(--border-color)'
+      }}>
+        <Button
+          theme="solid"
+          onClick={handleRunBacktest}
+          style={{
+            background: 'var(--gradient-primary)',
+            border: 'none',
+            fontWeight: 500,
+            boxShadow: 'var(--shadow-sm)',
+            transition: 'all 200ms ease'
+          }}
+        >
           运行回测
         </Button>
       </div>

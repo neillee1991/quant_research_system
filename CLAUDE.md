@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Quant Research System is a full-stack quantitative trading platform with drag-and-drop strategy modeling, vectorized backtesting, and AutoML capabilities. The system uses PostgreSQL for data storage, Polars for data processing, and React Flow for visual strategy design.
+Quant Research System is a full-stack quantitative trading platform with drag-and-drop strategy modeling, vectorized backtesting, and AutoML capabilities. The system uses DolphinDB for time-series data storage, Polars for data processing, Prefect 3.x for orchestration, VectorBT for backtesting, and React Flow for visual strategy design.
 
 ## Development Commands
 
@@ -48,41 +48,32 @@ npm start  # Runs on http://localhost:3000
 
 Note: Frontend is in Chinese and uses Ant Design components.
 
-### Database (PostgreSQL via Docker)
+### Database (DolphinDB via Docker)
 
 ```bash
-# Start PostgreSQL and pgAdmin
+# Start DolphinDB and Prefect services
 docker-compose up -d
 
-# Connect to database
-docker exec -it quant_postgres psql -U quant_user -d quant_research
+# Initialize DolphinDB tables
+cd backend
+python database/init_dolphindb.py
 
-# View logs
-docker-compose logs -f postgres
-
-# Backup database
-docker exec quant_postgres pg_dump -U quant_user quant_research > backup.sql
-
-# Restore database
-docker exec -i quant_postgres psql -U quant_user quant_research < backup.sql
-
-# pgAdmin web interface
-# URL: http://localhost:5050
-# Email: admin@quant.com
-# Password: admin123
+# DolphinDB Web UI: http://localhost:8848
 ```
 
 ## Architecture & Key Concepts
 
-### Database Layer: PostgreSQL Migration
+### Database Layer: DolphinDB
 
-**Critical**: This project recently migrated from DuckDB to PostgreSQL. All SQL queries MUST use PostgreSQL syntax:
-- Use `%s` placeholders, NOT `?` (DuckDB style)
-- Pass parameters as tuples: `db_client.query(sql, tuple(params))`
-- Use `information_schema` for metadata queries, NOT `PRAGMA`
-- Connection pooling is managed via `psycopg2.pool.ThreadedConnectionPool`
+**Critical**: This project uses DolphinDB as the sole data store (replacing PostgreSQL/Redis/DuckDB).
 
-The database client is a singleton: `from store.postgres_client import db_client`
+- Two databases: `dfs://quant_ts` (TSDB partitioned tables) and `dfs://quant_meta` (dimension tables)
+- TSDB tables: `daily_data`, `daily_basic`, `adj_factor`, `index_daily`, `moneyflow`, `factor_values`
+- Dimension tables (created dynamically at startup): `sync_log`, `sync_log_history`, `stock_basic`, `factor_metadata`, `factor_analysis`, `dag_run_log`, `dag_task_log`, `production_task_run`, `trade_cal`, `sync_task_config`
+- Bare table names are auto-resolved to `loadTable()` calls in `_adapt_sql_syntax()`
+- SQL functions are auto-lowercased for DolphinDB compatibility
+
+The database client is a singleton: `from store.dolphindb_client import db_client`
 
 ### Configuration System (Pydantic-based)
 
@@ -92,20 +83,20 @@ Configuration uses nested Pydantic models with environment variable support:
 from app.core.config import settings
 
 # Access nested configs
-settings.database.postgres_host
+settings.dolphindb.host
 settings.collector.tushare_token
 settings.backtest.initial_capital
 ```
 
 Environment variables use double underscore for nesting:
-- `DATABASE__POSTGRES_HOST=localhost`
+- `DOLPHINDB__HOST=localhost`
 - `COLLECTOR__CALLS_PER_MINUTE=120`
 
-### Data Sync Engine (Config-Driven)
+### Data Sync Engine (Database-Driven)
 
-The sync system is JSON-configured (`backend/data_manager/sync_config.json`) with modular components:
+The sync system reads task definitions from the DolphinDB `sync_task_config` dimension table (seeded with 8 default tasks on first startup):
 
-- `SyncConfigManager`: Loads and validates sync task configurations
+- `SyncConfigManager`: Loads task configs from DolphinDB with in-memory cache
 - `SyncLogManager`: Tracks last sync dates for incremental syncs
 - `TableManager`: Auto-creates tables with schemas from config
 - `TushareAPIClient`: Rate-limited API calls with retry logic
@@ -175,8 +166,8 @@ React Flow JSON graphs are parsed into executable computation chains:
 
 ### Adding a New Sync Task
 
-1. Add task definition to `backend/data_manager/sync_config.json`
-2. Define schema with PostgreSQL types (use `DOUBLE PRECISION` not `DOUBLE`)
+1. Insert a row into `sync_task_config` table via API: `POST /api/v1/data/sync/tasks`
+2. Or add to `seed_sync_task_config()` in `dolphindb_client.py` for default tasks
 3. Set `sync_type` to `incremental` or `full`
 4. Specify `primary_keys` for upsert operations
 5. Task will auto-create table on first sync
@@ -184,7 +175,7 @@ React Flow JSON graphs are parsed into executable computation chains:
 ### Querying Data
 
 ```python
-from store.postgres_client import db_client
+from store.dolphindb_client import db_client
 
 # Query with parameters (use %s placeholders)
 df = db_client.query(
@@ -207,54 +198,55 @@ db_client.upsert("table_name", polars_df, ["primary", "keys"])
 ## Important Notes
 
 - **Python version**: Must use 3.11 (PyCaret compatibility requirement)
-- **Database**: PostgreSQL 16 via Docker (connection pooling enabled)
+- **Database**: DolphinDB via Docker (TSDB engine for time-series, dimension tables for metadata)
 - **Data processing**: Polars is preferred over Pandas for performance
 - **Frontend**: Chinese language UI using Ant Design, React Flow, and ECharts
 - **Frontend proxy**: React dev server proxies `/api` to `http://localhost:8000`
 - **Tushare token**: Required for data sync, set in `backend/.env`
 - **Rate limiting**: Tushare API calls are rate-limited (default 120/min)
-- **Scheduler**: APScheduler runs daily sync tasks at 18:00 (configured in backend)
+- **Scheduler**: Prefect 3.x orchestrates sync/compute/backtest flows (UI at http://localhost:4200)
 
 ## Troubleshooting
 
 ### SQL Syntax Errors
-If you see "syntax error at or near 'AND'" or similar, check for:
+If you see DolphinDB SQL errors, check for:
 - Using `?` instead of `%s` placeholders
 - Passing list instead of tuple for parameters
-- DuckDB-specific syntax (PRAGMA, etc.)
+- PostgreSQL-specific syntax (ON CONFLICT, information_schema, etc.) — use DolphinDB equivalents
+- Bare table names should be auto-resolved by `_adapt_sql_syntax()`; if not, use `loadTable("dfs://quant_ts", "table_name")`
 
 ### Connection Pool Exhausted
-- Check for unclosed connections (use context managers)
-- Increase pool size: `DATABASE__CONNECTION_POOL_SIZE=20`
+- DolphinDB uses a single persistent connection; check for session leaks
 - Review long-running queries
 
 ### Empty Tables
-- Check if sync task exists in `sync_config.json`
+- Check if sync task exists: `GET /api/v1/data/sync/tasks`
 - Verify task is `enabled: true`
 - Run sync: `POST /api/v1/data/sync/task/{task_id}`
 - Check logs in `backend/logs/app.log`
 
 ### Service Not Starting
 - Use `./check_status.sh` to diagnose issues
-- Check port availability (3000, 8000, 5432, 5050)
+- Check port availability (3000, 8000, 8848, 4200)
 - View logs: `tail -f /tmp/backend.log` or `tail -f /tmp/frontend.log`
-- Ensure Docker is running for PostgreSQL
+- Ensure Docker is running for DolphinDB and Prefect
 
 ### Database Connection Issues
-- Verify PostgreSQL is running: `docker ps | grep quant_postgres`
+- Verify DolphinDB is running: `docker ps | grep dolphindb`
 - Check connection settings in `.env` (project root)
-- Default credentials: user=quant_user, db=quant_research, password from `.env` POSTGRES_PASSWORD
+- Default credentials: user=admin, password from `.env` DOLPHINDB_PASSWORD
 
 ## File Locations
 
-- Config: `.env` (project root, environment) and `backend/data_manager/sync_config.json` (sync tasks)
+- Config: `.env` (project root, environment); sync tasks stored in DolphinDB `sync_task_config` table
 - Logs: `backend/logs/app.log` (or `/tmp/backend.log` and `/tmp/frontend.log` when using start.sh)
 - PID files: `.pids/backend.pid` and `.pids/frontend.pid` (when using start.sh)
-- Database client: `backend/store/postgres_client.py`
+- Database client: `backend/store/dolphindb_client.py`
+- Database init: `backend/database/init_dolphindb.py` and `init_dolphindb.dos`
 - API routes: `backend/app/api/v1/` (data_merged.py, factor.py, strategy.py, ml.py)
 - Services: `backend/app/services/` (data_service.py, factor_service.py, backtest_service.py)
 - Factor engine: `backend/engine/factors/`
 - Backtest engine: `backend/engine/backtester/`
 - ML module: `backend/ml_module/` (trainer.py, optimizer.py, pipeline.py)
 - Sync engine: `backend/data_manager/sync_components.py` and `refactored_sync_engine.py`
-- Utility scripts: `start.sh`, `stop.sh`, `check_status.sh`, `db_manager.py`, `migrate_data.py`
+- Utility scripts: `start.sh`, `stop.sh`, `check_status.sh`

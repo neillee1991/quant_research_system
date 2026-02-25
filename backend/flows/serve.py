@@ -19,6 +19,10 @@ load_dotenv(env_path)
 prefect_url = os.getenv("PREFECT_API_URL", "http://localhost:4200/api")
 os.environ["PREFECT_API_URL"] = prefect_url
 
+# 绕过系统代理，避免 httpx 连 localhost 走代理失败
+os.environ.setdefault("NO_PROXY", "localhost,127.0.0.1")
+os.environ.setdefault("no_proxy", "localhost,127.0.0.1")
+
 from flows.data_sync_flow import sync_daily_data, weekly_analysis
 
 

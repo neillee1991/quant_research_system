@@ -1,7 +1,7 @@
 """
 Tushare Schema 生成工具
 
-用于快速生成 sync_config.json 中的 schema 定义。
+用于快速生成 DolphinDB sync_task_config 表中的 schema 定义。
 从 Tushare API 采样数据推断列类型，输出 JSON 格式的 schema。
 
 使用方式：

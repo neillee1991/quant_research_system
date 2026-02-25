@@ -44,15 +44,15 @@ def compute_factors(req: FactorRequest):
         for factor in req.factors:
             if factor.startswith("sma"):
                 w = int(factor[3:]) if factor[3:].isdigit() else 20
-                df = df.with_columns(TechnicalFactors.sma(pl.col("close"), w).alias(factor))
+                df = df.with_columns(TechnicalFactors.sma(df["close"], w).alias(factor))
             elif factor.startswith("ema"):
                 w = int(factor[3:]) if factor[3:].isdigit() else 20
-                df = df.with_columns(TechnicalFactors.ema(pl.col("close"), w).alias(factor))
+                df = df.with_columns(TechnicalFactors.ema(df["close"], w).alias(factor))
             elif factor.startswith("rsi"):
                 w = int(factor[3:]) if factor[3:].isdigit() else 14
-                df = df.with_columns(TechnicalFactors.rsi(pl.col("close"), w).alias(factor))
+                df = df.with_columns(TechnicalFactors.rsi(df["close"], w).alias(factor))
             elif factor == "macd":
-                macd, sig, hist = TechnicalFactors.macd(pl.col("close"))
+                macd, sig, hist = TechnicalFactors.macd(df["close"])
                 df = df.with_columns([
                     macd.alias("macd"), sig.alias("macd_signal"), hist.alias("macd_hist")
                 ])
@@ -74,7 +74,7 @@ def compute_ic(req: FactorRequest):
             raise HTTPException(status_code=404, detail=f"No data for {req.ts_code}")
 
         factor_col = req.factors[0] if req.factors else "close"
-        df = df.with_columns(TechnicalFactors.sma(pl.col("close"), 20).alias(factor_col))
+        df = df.with_columns(TechnicalFactors.sma(df["close"], 20).alias(factor_col))
         df = df.with_columns(
             (pl.col("close").shift(-1) / pl.col("close") - 1).alias("fwd_return")
         ).drop_nulls(subset=["fwd_return"])
