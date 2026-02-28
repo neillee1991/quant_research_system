@@ -4,7 +4,7 @@ from engine.production.registry import factor
 @factor(
     "factor_volatility_10",
     description="10日波动率",
-    depends_on=["daily_data"],
+    depends_on=["sync_daily_data"],
     category="technical",
     params={"window": 10, "lookback_days": 30},
 )

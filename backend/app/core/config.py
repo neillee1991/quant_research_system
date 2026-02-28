@@ -34,8 +34,7 @@ class DolphinDBConfig(_BaseConfig):
     dolphindb_port: int = Field(default=8848, env="DOLPHINDB_PORT")
     dolphindb_user: str = Field(default="admin", env="DOLPHINDB_USER")
     dolphindb_password: str = Field(default="123456", env="DOLPHINDB_PASSWORD")
-    db_path: str = Field(default="dfs://quant_research", env="DOLPHINDB_DB_PATH")
-    meta_db_path: str = Field(default="dfs://quant_meta", env="DOLPHINDB_META_DB_PATH")
+    db_path: str = Field(default="dfs://quant", env="DOLPHINDB_DB_PATH")
 
 
 class BacktestConfig(_BaseConfig):
@@ -58,8 +57,6 @@ class MLConfig(_BaseConfig):
 
 class SyncConfig(_BaseConfig):
     """数据同步配置"""
-    schedule_time: str = Field(default="18:00", pattern=r"^\d{2}:\d{2}$")
-    enable_scheduler: bool = Field(default=True)
     default_start_date: str = Field(default="20100101", pattern=r"^\d{8}$")
 
 
@@ -70,6 +67,9 @@ class Settings(BaseSettings):
     environment: Literal["development", "testing", "production"] = Field(default="development")
     debug: bool = Field(default=False)
     api_v1_prefix: str = Field(default="/api/v1")
+
+    # CORS 配置
+    cors_origins: str = Field(default="*", env="CORS_ORIGINS")
 
     # 路径配置
     data_dir: Path = Field(default=BASE_DIR / "data")

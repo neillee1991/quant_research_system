@@ -255,7 +255,7 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
                 <div style={{ border: '1px solid var(--border-color)', borderRadius: 4, overflow: 'hidden' }}>
                   <Editor height="380px" language="python" theme={mode === 'dark' ? 'vs-dark' : 'vs-light'}
                     value={editedCode} onChange={(v) => { setEditedCode(v || ''); setCodeChanged(true); }}
-                    options={{ minimap: { enabled: false }, fontSize: 13, scrollBeyondLastLine: false, automaticLayout: true, tabSize: 4 }} />
+                    options={{ minimap: { enabled: false }, fontSize: 13, scrollBeyondLastLine: false, automaticLayout: true, tabSize: 4, wordWrap: 'on' }} />
                 </div>
                 <CodeTestPanel code={editedCode} />
               </div>
@@ -293,7 +293,7 @@ from engine.production.registry import factor
 @factor(
     "factor_custom_01",
     description="自定义因子",
-    depends_on=["daily_data"],
+    depends_on=["sync_daily_data"],
     category="custom",
     params={"window": 20, "lookback_days": 40},
 )
@@ -335,7 +335,7 @@ const CodeTestPanel: React.FC<{ code: string; dependsOn?: string[] }> = ({ code,
         code,
         start_date: dateRange[0],
         end_date: dateRange[1],
-        depends_on: dependsOn || ['daily_data'],
+        depends_on: dependsOn || ['sync_daily_data'],
       });
       const d = res.data;
       if (d.status === 'error') {
@@ -669,7 +669,7 @@ const FactorManageTab: React.FC = () => {
         <div style={{ display: 'flex', gap: 16, marginBottom: 12 }}>
           <div style={{ flex: 1 }}>
             <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>因子ID <span style={{ color: 'var(--color-loss)' }}>*</span></div>
-            <Input size="small" placeholder="如 factor_custom_01" value={createFactorId} onChange={setCreateFactorId} />
+            <Input size="small" prefix="factor_" placeholder="如 custom_01" value={(createFactorId || '').replace(/^factor_/, '')} onChange={(v) => setCreateFactorId(`factor_${v}`)} />
           </div>
           <div style={{ flex: 1 }}>
             <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>描述</div>
@@ -716,7 +716,7 @@ const FactorManageTab: React.FC = () => {
           <div style={{ border: '1px solid var(--border-color)', borderRadius: 4, overflow: 'hidden' }}>
             <Editor height="300px" language="python" theme={mode === 'dark' ? 'vs-dark' : 'vs-light'}
               value={createCode} onChange={(v) => setCreateCode(v || '')}
-              options={{ minimap: { enabled: false }, fontSize: 13, scrollBeyondLastLine: false, automaticLayout: true, tabSize: 4 }} />
+              options={{ minimap: { enabled: false }, fontSize: 13, scrollBeyondLastLine: false, automaticLayout: true, tabSize: 4, wordWrap: 'on' }} />
           </div>
           <CodeTestPanel code={createCode} />
         </div>

@@ -55,10 +55,30 @@ export const dataApi = {
   getTaskConfig: (taskId: string) => api.get(`/data/sync/task/${taskId}/config`),
   updateTaskConfig: (taskId: string, config: any) => api.put(`/data/sync/task/${taskId}/config`, config),
   createTask: (config: any) => api.post('/data/sync/tasks', config),
-  deleteTask: (taskId: string) => api.delete(`/data/sync/tasks/${taskId}`),
+  createSyncTaskTable: (taskId: string) => api.post(`/data/sync/task/${taskId}/create-table`),
+  deleteTask: (taskId: string, dropTable?: boolean) => api.delete(`/data/sync/tasks/${taskId}`, { params: { drop_table: dropTable } }),
+
+  // ETL 任务管理
+  listEtlTasks: () => api.get('/data/etl/tasks'),
+  createEtlTask: (config: any) => api.post('/data/etl/tasks', config),
+  updateEtlTask: (taskId: string, config: any) => api.put(`/data/etl/task/${taskId}`, config),
+  deleteEtlTask: (taskId: string, dropTable?: boolean) => api.delete(`/data/etl/task/${taskId}`, { params: { drop_table: dropTable } }),
+  getEtlTaskStatus: (taskId: string) => api.get(`/data/etl/task/${taskId}/status`),
+  getEtlTableSchema: (taskId: string) => api.get(`/data/etl/task/${taskId}/schema`),
+  runEtlTask: (taskId: string) => longRunningApi.post(`/data/etl/task/${taskId}/run`),
+  testEtlScript: (script: string, date?: string) => api.post('/data/etl/test', { script, date }),
+  backfillEtlTask: (taskId: string, startDate: string, endDate: string) =>
+    longRunningApi.post(`/data/etl/task/${taskId}/backfill`, null, {
+      params: { start_date: startDate, end_date: endDate }
+    }),
+  createEtlTable: (taskId: string, tableName: string, fields: any[]) =>
+    api.post(`/data/etl/task/${taskId}/create-table`, { table_name: tableName, fields }),
+  getEtlLogs: (taskId?: string, startDate?: string, endDate?: string, limit = 1000) =>
+    api.get('/data/etl/logs', { params: { task_id: taskId, start_date: startDate, end_date: endDate, limit } }),
 
   // 数据库管理
   listTables: () => api.get('/data/tables'),
+  getTableInfo: (tableName: string) => api.get(`/data/tables/${tableName}/info`),
   truncateTable: (tableName: string) => api.delete(`/data/tables/${tableName}`),
   executeQuery: (sql: string, limit = 1000) =>
     api.post('/data/query', null, { params: { sql, limit } }),

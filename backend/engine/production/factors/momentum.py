@@ -8,7 +8,7 @@ from engine.production.registry import factor
 @factor(
     "factor_ma_5",
     description="5日均线",
-    depends_on=["daily_data"],
+    depends_on=["sync_daily_data"],
     category="technical",
     params={"window": 5, "lookback_days": 20},
 )
@@ -27,7 +27,7 @@ def compute_ma_5(df: pl.DataFrame, params: dict) -> pl.DataFrame:
 @factor(
     "factor_ma_20",
     description="20日均线",
-    depends_on=["daily_data"],
+    depends_on=["sync_daily_data"],
     category="technical",
     params={"window": 20, "lookback_days": 40},
 )
@@ -46,7 +46,7 @@ def compute_ma_20(df: pl.DataFrame, params: dict) -> pl.DataFrame:
 @factor(
     "factor_rsi_14",
     description="14日RSI",
-    depends_on=["daily_data"],
+    depends_on=["sync_daily_data"],
     category="technical",
     compute_mode="full",
     params={"window": 14, "lookback_days": 30},
@@ -83,7 +83,7 @@ def compute_rsi_14(df: pl.DataFrame, params: dict) -> pl.DataFrame:
 @factor(
     "factor_momentum_20",
     description="20日动量（涨跌幅）",
-    depends_on=["daily_data"],
+    depends_on=["sync_daily_data"],
     category="momentum",
     params={"window": 20, "lookback_days": 40},
 )
@@ -104,7 +104,7 @@ def compute_momentum_20(df: pl.DataFrame, params: dict) -> pl.DataFrame:
 @factor(
     "factor_volatility_20",
     description="20日波动率",
-    depends_on=["daily_data"],
+    depends_on=["sync_daily_data"],
     category="technical",
     params={"window": 20, "lookback_days": 40},
 )

@@ -46,8 +46,8 @@ def factor(
         factor_id: 因子唯一标识
         description: 因子描述
         depends_on: 依赖的数据源列表（表名或因子ID）
-            - "daily_data": 从日线行情表加载
-            - "daily_basic": 从每日指标表加载
+            - "sync_daily_data": 从日线行情表加载
+            - "sync_daily_basic": 从每日指标表加载
             - "factor_xxx": 从已计算的因子加载
         category: 因子分类 ("momentum", "value", "technical", "custom")
         params: 因子参数（如窗口大小等）
@@ -61,7 +61,7 @@ def factor(
 
     Usage:
         @factor("factor_ma_20", description="20日均线",
-                depends_on=["daily_data"], category="technical")
+                depends_on=["sync_daily_data"], category="technical")
         def compute_ma_20(df, params):
             # df: 含 ts_code, trade_date, close 等列的 Polars DataFrame
             # 返回: 含 ts_code, trade_date, factor_value 的 DataFrame

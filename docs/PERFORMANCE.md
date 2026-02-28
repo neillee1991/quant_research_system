@@ -1,5 +1,9 @@
 # 性能优化完成报告
 
+> **注意**: 本文档编写于 PostgreSQL + Redis 架构时期。系统已迁移至 DolphinDB，
+> 文中涉及 `postgres_client.py`、`redis_client.py`、`cache_invalidator.py` 等文件的内容
+> 仅作为历史记录保留，不再适用于当前架构。DolphinDB TSDB 引擎自身已涵盖大部分优化。
+
 ## 执行时间
 2026-02-23 ~ 2026-02-24
 

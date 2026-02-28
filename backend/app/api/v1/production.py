@@ -470,7 +470,7 @@ async def get_production_history(factor_id: Optional[str] = None, limit: int = 2
         params.append(limit)
 
         df = db_client.query(f"""
-            SELECT * FROM production_task_run
+            SELECT * FROM factor_task_run
             {where}
             ORDER BY created_at DESC LIMIT %s
         """, tuple(params))
@@ -536,7 +536,7 @@ class FactorTestRequest(BaseModel):
     code: str                          # 因子计算代码
     start_date: str                    # 测试数据起始日期 YYYYMMDD
     end_date: str                      # 测试数据结束日期 YYYYMMDD
-    depends_on: List[str] = ["daily_data"]  # 依赖数据源
+    depends_on: List[str] = ["sync_daily_data"]  # 依赖数据源
     params: Dict[str, Any] = {}        # 因子参数
 
 
@@ -587,7 +587,7 @@ async def test_factor_code(req: FactorTestRequest):
         """拦截 @factor 装饰器，捕获函数定义"""
         def decorator(func):
             fid = args[0] if args else kwargs.get("factor_id", "unknown")
-            deps = kwargs.get("depends_on", ["daily_data"])
+            deps = kwargs.get("depends_on", ["sync_daily_data"])
             params = kwargs.get("params", {})
             captured_definitions.append({
                 "factor_id": fid, "func": func,
@@ -596,7 +596,7 @@ async def test_factor_code(req: FactorTestRequest):
             log("exec", f"注册因子: {fid} (depends_on={deps}, params={params})")
             return func
         if len(args) == 1 and callable(args[0]) and not kwargs:
-            captured_definitions.append({"factor_id": "unknown", "func": args[0], "depends_on": ["daily_data"], "params": {}})
+            captured_definitions.append({"factor_id": "unknown", "func": args[0], "depends_on": ["sync_daily_data"], "params": {}})
             return args[0]
         return decorator
 

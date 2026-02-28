@@ -67,10 +67,10 @@ def sync_daily_data(target_date: Optional[str] = None):
     logger.info(f"开始每日数据同步, 目标日期: {target_date}")
 
     # 第一层: 并行同步数据（无依赖）
-    daily_future = sync_task.submit("daily", target_date)
-    daily_basic_future = sync_task.submit("daily_basic", target_date)
-    adj_factor_future = sync_task.submit("adj_factor", target_date)
-    moneyflow_future = sync_task.submit("moneyflow", target_date)
+    daily_future = sync_task.submit("sync_daily", target_date)
+    daily_basic_future = sync_task.submit("sync_daily_basic", target_date)
+    adj_factor_future = sync_task.submit("sync_adj_factor", target_date)
+    moneyflow_future = sync_task.submit("sync_moneyflow", target_date)
 
     # 等待第一层完成
     daily_result = daily_future.result()
@@ -84,7 +84,7 @@ def sync_daily_data(target_date: Optional[str] = None):
         compute_factor.submit("factor_volatility_20", target_date)
         compute_factor.submit("factor_ma_20", target_date)
 
-    # 依赖 daily_basic 的因子计算
+    # 依赖 sync_daily_basic 的因子计算
     if daily_basic_result:
         compute_factor.submit("factor_pe_rank", target_date)
         compute_factor.submit("factor_pb_rank", target_date)
@@ -107,8 +107,8 @@ def weekly_analysis(target_date: Optional[str] = None):
     logger.info(f"开始每周分析, 目标日期: {target_date}")
 
     # 同步基础数据
-    stock_basic_future = sync_task.submit("stock_basic", target_date)
-    daily_future = sync_task.submit("daily", target_date)
+    stock_basic_future = sync_task.submit("sync_stock_basic", target_date)
+    daily_future = sync_task.submit("sync_daily", target_date)
 
     # 等待同步完成
     stock_basic_future.result()

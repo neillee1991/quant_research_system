@@ -17,10 +17,10 @@ from engine.production.registry import (
 
 # 数据表到查询列的映射
 TABLE_COLUMNS = {
-    "daily_data": ["ts_code", "trade_date", "open", "high", "low", "close", "vol", "amount", "pct_chg"],
-    "daily_basic": ["ts_code", "trade_date", "close", "turnover_rate", "volume_ratio", "pe", "pb"],
-    "adj_factor": ["ts_code", "trade_date", "adj_factor"],
-    "index_daily": ["ts_code", "trade_date", "open", "high", "low", "close", "vol", "amount", "pct_chg"],
+    "sync_daily_data": ["ts_code", "trade_date", "open", "high", "low", "close", "vol", "amount", "pct_chg"],
+    "sync_daily_basic": ["ts_code", "trade_date", "close", "turnover_rate", "volume_ratio", "pe", "pb"],
+    "sync_adj_factor": ["ts_code", "trade_date", "adj_factor"],
+    "sync_index_daily": ["ts_code", "trade_date", "open", "high", "low", "close", "vol", "amount", "pct_chg"],
 }
 
 # 增量计算时，需要额外加载的历史窗口天数（用于滚动计算）
@@ -115,7 +115,7 @@ class ProductionEngine:
                 )
 
             # 2.6 标记一字涨跌停（根据选项）
-            if opts["mark_limit"] and "daily_data" in definition.depends_on and "open" in df.columns:
+            if opts["mark_limit"] and "sync_daily_data" in definition.depends_on and "open" in df.columns:
                 df = DataProcessor.mark_limit_up_down(df)
 
             # 3. 执行因子计算
@@ -224,7 +224,7 @@ class ProductionEngine:
             adjust_price: 复权方式 "none"=不复权, "forward"=前复权, "backward"=后复权
         """
         frames = []
-        needs_adj = "daily_data" in definition.depends_on and adjust_price != "none"
+        needs_adj = "sync_daily_data" in definition.depends_on and adjust_price != "none"
 
         for dep in definition.depends_on:
             if dep.startswith("factor_"):
@@ -265,7 +265,7 @@ class ProductionEngine:
             adjust_type: "forward"=前复权, "backward"=后复权
         """
         try:
-            adj_df = self._load_table_data("adj_factor", start_date, end_date)
+            adj_df = self._load_table_data("sync_adj_factor", start_date, end_date)
             if adj_df is None or adj_df.is_empty():
                 logger.warning("adj_factor 数据为空，跳过复权处理")
                 return df
@@ -324,7 +324,7 @@ class ProductionEngine:
         """
         try:
             stock_info = self.db.query(
-                f'SELECT ts_code, name, list_date FROM loadTable("{self.db._meta_db_path}", "stock_basic")'
+                f'SELECT ts_code, name, list_date FROM loadTable("{self.db._db_path}", "sync_stock_basic")'
             )
             if stock_info.is_empty():
                 return df
@@ -508,7 +508,7 @@ class ProductionEngine:
                 "created_at": [now],
                 "updated_at": [now],
             })
-            meta_db = self.db._meta_db_path
+            meta_db = self.db._db_path
             with self.db._lock:
                 self.db._ensure_connected()
                 # delete + insert 实现 upsert
@@ -585,13 +585,13 @@ class ProductionEngine:
                 "error_message": [run_id],  # 借用 error_message 存 run_id 用于后续定位
                 "created_at": [now],
             })
-            meta_db = self.db._meta_db_path
+            meta_db = self.db._db_path
             with self.db._lock:
                 self.db._ensure_connected()
                 tmp = f"_run_{run_id}"
                 self.db._session.upload({tmp: pdf})
                 self.db._session.run(
-                    f'ptr = loadTable("{meta_db}", "production_task_run");'
+                    f'ptr = loadTable("{meta_db}", "factor_task_run");'
                     f'tableInsert(ptr, {tmp});'
                     f"undef('{tmp}')"
                 )
@@ -608,10 +608,10 @@ class ProductionEngine:
             return
         elapsed = (datetime.now() - started_at).total_seconds()
         try:
-            meta_db = self.db._meta_db_path
+            meta_db = self.db._db_path
             err = (error_msg or "").replace('"', '\\"') if error_msg else ""
             self.db.execute(
-                f'ptr = loadTable("{meta_db}", "production_task_run");'
+                f'ptr = loadTable("{meta_db}", "factor_task_run");'
                 f'update ptr set status = "{status}", rows_affected = {rows}, '
                 f'duration_seconds = {elapsed}, error_message = "{err}" '
                 f'where error_message = "{run_id}"'

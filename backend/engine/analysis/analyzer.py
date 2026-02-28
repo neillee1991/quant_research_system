@@ -123,7 +123,7 @@ class FactorAnalyzer:
 
         sql = """
             SELECT ts_code, trade_date, close, pct_chg
-            FROM daily_data
+            FROM sync_daily_data
             WHERE trade_date >= %s AND trade_date <= %s
             ORDER BY ts_code, trade_date
         """

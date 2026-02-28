@@ -3,6 +3,7 @@ DolphinDB 数据库客户端
 替代 PostgreSQL 客户端，提供相同的接口供系统其他模块调用
 使用 dolphindb Python API 连接 DolphinDB 分布式数据库
 """
+import json
 import re
 import threading
 from datetime import datetime, date
@@ -25,7 +26,6 @@ class DolphinDBClient:
         self._user = settings.database.dolphindb_user
         self._password = settings.database.dolphindb_password
         self._db_path = settings.database.db_path
-        self._meta_db_path = settings.database.meta_db_path
 
         # 会话与线程锁
         self._session: Optional[ddb.Session] = None
@@ -34,7 +34,7 @@ class DolphinDBClient:
         self._connect()
         logger.info(
             f"DolphinDB client initialized: {self._host}:{self._port}, "
-            f"db={self._db_path}, meta={self._meta_db_path}"
+            f"db={self._db_path}"
         )
 
     # ------------------------------------------------------------------
@@ -171,8 +171,6 @@ class DolphinDBClient:
         self,
         sql: str,
         params: Optional[tuple] = None,
-        stream: bool = False,
-        batch_size: int = 10000,
     ) -> pl.DataFrame:
         """
         执行查询并返回 Polars DataFrame
@@ -180,8 +178,6 @@ class DolphinDBClient:
         Args:
             sql: SQL 查询语句（支持 %s 占位符）
             params: 查询参数
-            stream: 是否分批返回（DolphinDB 中简化为一次性返回）
-            batch_size: 流式查询批次大小（保留参数兼容性）
 
         Returns:
             pl.DataFrame
@@ -234,23 +230,6 @@ class DolphinDBClient:
     #  表操作
     # ------------------------------------------------------------------
 
-    def get_table_columns(self, table_name: str) -> set:
-        """获取表的现有列名集合"""
-        db_path = self._resolve_db_path(table_name)
-        try:
-            with self._lock:
-                self._ensure_connected()
-                col_defs = self._session.run(
-                    f'schema(loadTable("{db_path}", "{table_name}")).colDefs'
-                )
-            # _session.run 返回 pandas DataFrame
-            if col_defs is not None and hasattr(col_defs, '__len__') and len(col_defs) > 0:
-                return set(col_defs['name'].tolist())
-            return set()
-        except Exception as e:
-            logger.error(f"获取表列信息失败 [{table_name}]: {e}")
-            return set()
-
     def table_exists(self, table_name: str) -> bool:
         """检查表是否存在"""
         db_path = self._resolve_db_path(table_name)
@@ -272,25 +251,63 @@ class DolphinDBClient:
         primary_keys: List[str],
     ) -> None:
         """
-        创建表（简化版）
-
-        DolphinDB 分布式表的创建比较复杂，需要指定分区方案。
-        生产环境中表应由初始化脚本预先创建。
-        此方法仅记录警告日志，不执行实际建表操作。
+        在数据库中创建维度表
 
         Args:
             table_name: 表名
             schema: 列定义字典 {列名: {type, nullable, comment}}
             primary_keys: 主键列表
         """
-        logger.warning(
-            f"DolphinDB 分布式表需要通过初始化脚本创建。"
-            f"跳过自动建表: {table_name}, 主键: {primary_keys}"
-        )
-        logger.info(
-            f"请确保表 {table_name} 已在 DolphinDB 中预先创建，"
-            f"schema 列数: {len(schema)}"
-        )
+        if not schema:
+            logger.warning(f"schema 为空，跳过建表: {table_name}")
+            return
+
+        # 先注册到 _META_TABLES，确保后续 _resolve_db_path 路由正确
+        self.register_meta_table(table_name)
+
+        db_path = self._db_path
+        try:
+            with self._lock:
+                self._ensure_connected()
+                exists = self._session.run(f"existsTable('{db_path}', '{table_name}')")
+            if exists:
+                logger.info(f"表 {table_name} 已存在，跳过建表")
+                return
+
+            # 构建列定义
+            col_defs = ",".join([
+                f"array({col_def.get('type', 'STRING')},0) as {col_name}"
+                for col_name, col_def in schema.items()
+            ])
+
+            # TSDB 引擎要求 primaryKey 最后一列为时间或整数类型
+            # 确定 sort key 列：优先用 primary_keys，末尾追加一个时间/整数列
+            _TEMPORAL_INT_TYPES = {"DATE", "DATETIME", "TIMESTAMP", "INT", "LONG", "SHORT"}
+            pk_list = list(primary_keys) if primary_keys else [list(schema.keys())[0]]
+            last_pk_type = schema.get(pk_list[-1], {}).get("type", "STRING").upper()
+            if last_pk_type not in _TEMPORAL_INT_TYPES:
+                # 找 schema 中可用的时间/整数列追加到末尾
+                for col_name, col_def in schema.items():
+                    if col_def.get("type", "STRING").upper() in _TEMPORAL_INT_TYPES and col_name not in pk_list:
+                        pk_list.append(col_name)
+                        break
+                else:
+                    # 没有合适的列，补一个 created_at TIMESTAMP 列
+                    col_defs += ",array(TIMESTAMP,0) as created_at"
+                    pk_list.append("created_at")
+            pk_str = "`" + "`".join(pk_list)
+            script = (
+                f"dbMeta = database('{db_path}');"
+                f"schema_{table_name} = table({col_defs});"
+                f"createTable(dbHandle=dbMeta, table=schema_{table_name}, tableName=`{table_name}, primaryKey={pk_str});"
+            )
+            with self._lock:
+                self._ensure_connected()
+                self._session.run(script)
+            logger.info(f"Created table {table_name} with {len(schema)} columns, primary_keys: {primary_keys}")
+        except Exception as e:
+            logger.error(f"建表失败 [{table_name}]: {e}")
+            raise
 
     # ------------------------------------------------------------------
     #  数据写入
@@ -360,20 +377,30 @@ class DolphinDBClient:
         except Exception as e:
             logger.error(f"获取表列信息失败 [{table_name}]: {e}")
             return []
+
+    def drop_table(self, table_name: str) -> None:
+        """删除指定表"""
+        db_path = self._resolve_db_path(table_name)
+        with self._lock:
+            self._ensure_connected()
+            self._session.run(f"dropTable(database('{db_path}'), '{table_name}')")
+        logger.info(f"Dropped table {table_name}")
     # ------------------------------------------------------------------
 
-    # 元数据库中的表名集合（维度表，存储在 quant_meta）
+    # 维度表名集合（不分区，使用 createTable 创建）
+    # 注意：sync_stock_basic / sync_trade_cal 不由 ensure_meta_tables 自动建表，
+    # 而是在首次同步任务时由 create_table 动态创建
     _META_TABLES = frozenset({
-        "sync_log", "sync_log_history", "stock_basic",
+        "sync_log", "sync_log_history", "sync_stock_basic",
         "factor_metadata", "factor_analysis",
-        "production_task_run", "trade_cal",
-        "sync_task_config",
+        "factor_task_run", "sync_trade_cal",
+        "sync_task_config", "etl_task_config",
     })
 
-    # 行情库中的表名集合（TSDB 分区表，存储在 quant_research）
+    # TSDB 分区表名集合（使用 createPartitionedTable 创建）
     _TSDB_TABLES = frozenset({
-        "daily_data", "daily_basic", "adj_factor",
-        "index_daily", "moneyflow", "factor_values",
+        "sync_daily_data", "sync_daily_basic", "sync_adj_factor",
+        "sync_index_daily", "sync_moneyflow", "factor_values",
     })
 
     # 所有已知表名
@@ -381,42 +408,27 @@ class DolphinDBClient:
 
     # 需要从字符串转换为 DATE 类型的列（表名 -> 列名列表）
     _DATE_COLUMNS: Dict[str, List[str]] = {
-        "daily_data": ["trade_date"],
-        "daily_basic": ["trade_date"],
-        "adj_factor": ["trade_date"],
-        "index_daily": ["trade_date"],
-        "moneyflow": ["trade_date"],
+        "sync_daily_data": ["trade_date"],
+        "sync_daily_basic": ["trade_date"],
+        "sync_adj_factor": ["trade_date"],
+        "sync_index_daily": ["trade_date"],
+        "sync_moneyflow": ["trade_date"],
         "factor_values": ["trade_date"],
     }
 
     # ------------------------------------------------------------------
     #  维度表 Schema 定义（用于动态建表）
-    #  格式: { "table_name": "DolphinDB table(...) 建表表达式" }
+    #  格式: { "table_name": ("DolphinDB table(...) 建表表达式", [primaryKey列]) }
+    #  TSDB 引擎要求 createTable 也必须指定 sortColumns 或 primaryKey
     # ------------------------------------------------------------------
-    _META_TABLE_SCHEMAS: Dict[str, str] = {
-        "trade_cal": (
-            "table("
-            "array(SYMBOL,0) as exchange,"
-            "array(STRING,0) as cal_date,"
-            "array(INT,0) as is_open,"
-            "array(STRING,0) as pretrade_date)"
-        ),
-        "stock_basic": (
-            "table("
-            "array(SYMBOL,0) as ts_code,"
-            "array(STRING,0) as symbol,"
-            "array(STRING,0) as name,"
-            "array(STRING,0) as area,"
-            "array(STRING,0) as industry,"
-            "array(STRING,0) as market,"
-            "array(STRING,0) as list_date)"
-        ),
+    _META_TABLE_SCHEMAS: Dict[str, tuple] = {
         "sync_log": (
             "table("
             "array(SYMBOL,0) as source,"
             "array(SYMBOL,0) as data_type,"
             "array(STRING,0) as last_date,"
-            "array(TIMESTAMP,0) as updated_at)"
+            "array(TIMESTAMP,0) as updated_at)",
+            ["source", "data_type", "updated_at"],
         ),
         "sync_log_history": (
             "table("
@@ -426,7 +438,10 @@ class DolphinDBClient:
             "array(STRING,0) as sync_date,"
             "array(INT,0) as rows_synced,"
             "array(SYMBOL,0) as status,"
-            "array(TIMESTAMP,0) as created_at)"
+            "array(STRING,0) as error_message,"
+            "array(STRING,0) as params,"
+            "array(TIMESTAMP,0) as created_at)",
+            ["source", "created_at"],
         ),
         "factor_metadata": (
             "table("
@@ -439,7 +454,8 @@ class DolphinDBClient:
             "array(STRING,0) as last_computed_date,"
             "array(TIMESTAMP,0) as last_computed_at,"
             "array(TIMESTAMP,0) as created_at,"
-            "array(TIMESTAMP,0) as updated_at)"
+            "array(TIMESTAMP,0) as updated_at)",
+            ["factor_id", "updated_at"],
         ),
         "factor_analysis": (
             "table("
@@ -454,9 +470,10 @@ class DolphinDBClient:
             "array(DOUBLE,0) as rank_ic_std,"
             "array(DOUBLE,0) as ic_ir,"
             "array(DOUBLE,0) as turnover_mean,"
-            "array(TIMESTAMP,0) as created_at)"
+            "array(TIMESTAMP,0) as created_at)",
+            ["factor_id", "analysis_date"],
         ),
-        "production_task_run": (
+        "factor_task_run": (
             "table("
             "array(SYMBOL,0) as factor_id,"
             "array(SYMBOL,0) as mode,"
@@ -466,7 +483,8 @@ class DolphinDBClient:
             "array(INT,0) as rows_affected,"
             "array(DOUBLE,0) as duration_seconds,"
             "array(STRING,0) as error_message,"
-            "array(TIMESTAMP,0) as created_at)"
+            "array(TIMESTAMP,0) as created_at)",
+            ["factor_id", "created_at"],
         ),
         "sync_task_config": (
             "table("
@@ -481,53 +499,90 @@ class DolphinDBClient:
             "array(STRING,0) as schema_json,"
             "array(BOOL,0) as enabled,"
             "array(INT,0) as api_limit,"
-            "array(SYMBOL,0) as schedule,"
             "array(TIMESTAMP,0) as created_at,"
-            "array(TIMESTAMP,0) as updated_at)"
+            "array(TIMESTAMP,0) as updated_at)",
+            ["task_id", "updated_at"],
+        ),
+        "etl_task_config": (
+            "table("
+            "array(SYMBOL,0) as task_id,"
+            "array(STRING,0) as description,"
+            "array(STRING,0) as script,"
+            "array(SYMBOL,0) as sync_type,"
+            "array(STRING,0) as date_field,"
+            "array(STRING,0) as primary_keys_json,"
+            "array(SYMBOL,0) as table_name,"
+            "array(BOOL,0) as enabled,"
+            "array(TIMESTAMP,0) as created_at,"
+            "array(TIMESTAMP,0) as updated_at)",
+            ["task_id", "updated_at"],
         ),
     }
 
     def ensure_meta_tables(self) -> None:
         """
-        检查并创建所有缺失的 quant_meta 维度表。
+        检查并创建所有缺失的维度表。
+        对已存在的表，补加代码定义里有但实际表缺少的列。
         应在应用首次启动时调用一次。
         """
-        db_path = self._meta_db_path
+        db_path = self._db_path
         created = []
+        altered = []
         with self._lock:
             self._ensure_connected()
-            for tbl, schema_expr in self._META_TABLE_SCHEMAS.items():
+            for tbl, (schema_expr, pk_cols) in self._META_TABLE_SCHEMAS.items():
                 try:
                     exists = self._session.run(
                         f"existsTable('{db_path}', '{tbl}')"
                     )
-                    if exists:
-                        continue
-                    script = (
-                        f"dbMeta = database('{db_path}');"
-                        f"schema_{tbl} = {schema_expr};"
-                        f"createTable(dbHandle=dbMeta, table=schema_{tbl}, tableName=`{tbl});"
-                    )
-                    self._session.run(script)
-                    created.append(tbl)
+                    if not exists:
+                        pk_str = "`" + "`".join(pk_cols)
+                        script = (
+                            f"dbMeta = database('{db_path}');"
+                            f"schema_{tbl} = {schema_expr};"
+                            f"createTable(dbHandle=dbMeta, table=schema_{tbl}, tableName=`{tbl}, primaryKey={pk_str});"
+                        )
+                        self._session.run(script)
+                        created.append(tbl)
+                    else:
+                        # 补加代码定义里有但实际表缺少的列
+                        schema_info = self._session.run(
+                            f"schema(loadTable('{db_path}', '{tbl}')).colDefs"
+                        )
+                        existing_cols = set(schema_info['name'].tolist()) if schema_info is not None else set()
+
+                        # 从 schema_expr 解析期望的列定义
+                        col_defs = re.findall(r'array\((\w+),0\)\s+as\s+(\w+)', schema_expr)
+                        # col_defs: [(type, name), ...]
+                        added = []
+                        for dfs_type, col_name in col_defs:
+                            if col_name not in existing_cols:
+                                try:
+                                    self._session.run(
+                                        f"tbl_handle = loadTable('{db_path}', '{tbl}');"
+                                        f"addColumn(tbl_handle, `{col_name}, {dfs_type})"
+                                    )
+                                    added.append(col_name)
+                                except Exception as add_err:
+                                    logger.warning(f"给表 [{tbl}] 加列 [{col_name}] 失败: {add_err}")
+                        if added:
+                            altered.append(f"{tbl}({', '.join(added)})")
                 except Exception as e:
-                    logger.error(f"动态创建维度表失败 [{tbl}]: {e}")
+                    logger.error(f"动态创建/更新维度表失败 [{tbl}]: {e}")
                     raise
         if created:
             logger.info(f"动态创建了 {len(created)} 张维度表: {', '.join(created)}")
-        else:
-            logger.info("所有维度表已存在，无需创建")
+        if altered:
+            logger.info(f"补加了缺失列: {'; '.join(altered)}")
+        if not created and not altered:
+            logger.info("所有维度表已存在且列完整，无需变更")
 
     def seed_sync_task_config(self) -> None:
         """
         如果 sync_task_config 表为空，则写入默认同步任务定义。
         仅在首次启动时生效，后续可通过 API 增删改。
         """
-        import json as _json
-        from datetime import datetime as _dt
-
         try:
-            tbl = self._load_table("sync_task_config")
             count = self.query("SELECT count(*) as cnt FROM sync_task_config")
             if not count.is_empty() and count["cnt"][0] > 0:
                 logger.info("sync_task_config 已有数据，跳过 seed")
@@ -535,78 +590,135 @@ class DolphinDBClient:
         except Exception:
             pass  # 表可能刚创建，继续 seed
 
-        now = _dt.now()
+        now = datetime.now()
+        # ---------------------------------------------------------------
+        # 默认同步任务定义（基于 Tushare Pro API）
+        # sync_type: "full"=全量同步  "incremental"=增量按日同步
+        # params 中 {date} 占位符会被 SyncTaskExecutor 替换为实际日期
+        # schema 类型对应 DolphinDB 表定义（init_dolphindb.dos）
+        # ---------------------------------------------------------------
         tasks = [
+            # ==================== 全量同步 ====================
             {
-                "task_id": "daily", "api_name": "daily", "description": "日线行情（OHLC完整数据）",
-                "sync_type": "incremental", "date_field": "trade_date", "table_name": "daily_data",
-                "params": {"trade_date": "{date}", "fields": "ts_code,trade_date,open,high,low,close,pre_close,change,pct_chg,vol,amount"},
-                "primary_keys": ["ts_code", "trade_date"], "enabled": True, "api_limit": 5000,
-                "schema": {"ts_code": {"type": "SYMBOL"}, "trade_date": {"type": "SYMBOL"},
-                           "open": {"type": "DOUBLE"}, "high": {"type": "DOUBLE"}, "low": {"type": "DOUBLE"},
-                           "close": {"type": "DOUBLE"}, "pre_close": {"type": "DOUBLE"},
-                           "change": {"type": "DOUBLE"}, "pct_chg": {"type": "DOUBLE"},
-                           "vol": {"type": "DOUBLE"}, "amount": {"type": "DOUBLE"}},
+                "task_id": "sync_stock_basic",
+                "api_name": "stock_basic",
+                "description": "股票基础信息（代码、名称、行业、上市日期等）",
+                "sync_type": "full",
+                "date_field": "",
+                "table_name": "sync_stock_basic",
+                "params": {
+                    "exchange": "",
+                    "list_status": "",
+                    "fields": "ts_code,symbol,name,area,industry,market,list_date",
+                },
+                "primary_keys": ["ts_code"],
+                "enabled": True,
+                "api_limit": 5000,
+                "schema": {
+                    "ts_code": {"type": "SYMBOL"},
+                    "symbol": {"type": "STRING"},
+                    "name": {"type": "STRING"},
+                    "area": {"type": "STRING"},
+                    "industry": {"type": "STRING"},
+                    "market": {"type": "STRING"},
+                    "list_date": {"type": "STRING"},
+                },
             },
             {
-                "task_id": "daily_basic", "api_name": "daily_basic", "description": "每日指标（市盈率、市净率等）",
-                "sync_type": "incremental", "date_field": "trade_date", "table_name": "daily_basic",
-                "params": {"trade_date": "{date}", "fields": "ts_code,trade_date,close,turnover_rate,volume_ratio,pe,pb"},
-                "primary_keys": ["ts_code", "trade_date"], "enabled": True, "api_limit": 5000,
-                "schema": {"ts_code": {"type": "SYMBOL"}, "trade_date": {"type": "SYMBOL"},
-                           "close": {"type": "DOUBLE"}, "turnover_rate": {"type": "DOUBLE"},
-                           "volume_ratio": {"type": "DOUBLE"}, "pe": {"type": "DOUBLE"}, "pb": {"type": "DOUBLE"}},
+                "task_id": "sync_trade_cal",
+                "api_name": "trade_cal",
+                "description": "交易日历（SSE/SZSE 开市日期、前一交易日）",
+                "sync_type": "full",
+                "date_field": "cal_date",
+                "table_name": "sync_trade_cal",
+                "params": {
+                    "exchange": "",
+                    "start_date": "",
+                    "end_date": "",
+                    "is_open": "",
+                },
+                "primary_keys": ["exchange", "cal_date"],
+                "enabled": True,
+                "api_limit": 5000,
+                "schema": {
+                    "exchange": {"type": "SYMBOL"},
+                    "cal_date": {"type": "STRING"},
+                    "is_open": {"type": "INT"},
+                    "pretrade_date": {"type": "STRING"},
+                },
+            },
+            # ==================== 增量同步 ====================
+            {
+                "task_id": "sync_daily",
+                "api_name": "daily",
+                "description": "A股日线行情（OHLCV、涨跌幅、成交量成交额）",
+                "sync_type": "incremental",
+                "date_field": "trade_date",
+                "table_name": "sync_daily_data",
+                "params": {
+                    "trade_date": "{date}",
+                    "fields": "ts_code,trade_date,open,high,low,close,pre_close,change,pct_chg,vol,amount",
+                },
+                "primary_keys": ["ts_code", "trade_date"],
+                "enabled": True,
+                "api_limit": 5000,
+                "schema": {
+                    "trade_date": {"type": "DATE"},
+                    "ts_code": {"type": "SYMBOL"},
+                    "open": {"type": "DOUBLE"},
+                    "high": {"type": "DOUBLE"},
+                    "low": {"type": "DOUBLE"},
+                    "close": {"type": "DOUBLE"},
+                    "pre_close": {"type": "DOUBLE"},
+                    "change": {"type": "DOUBLE"},
+                    "pct_chg": {"type": "DOUBLE"},
+                    "vol": {"type": "DOUBLE"},
+                    "amount": {"type": "DOUBLE"},
+                },
             },
             {
-                "task_id": "adj_factor", "api_name": "adj_factor", "description": "复权因子",
-                "sync_type": "incremental", "date_field": "trade_date", "table_name": "adj_factor",
-                "params": {"trade_date": "{date}", "fields": "ts_code,trade_date,adj_factor"},
-                "primary_keys": ["ts_code", "trade_date"], "enabled": True, "api_limit": 5000,
-                "schema": {"ts_code": {"type": "SYMBOL"}, "trade_date": {"type": "SYMBOL"}, "adj_factor": {"type": "DOUBLE"}},
+                "task_id": "sync_adj_factor",
+                "api_name": "adj_factor",
+                "description": "复权因子（用于计算前/后复权价格）",
+                "sync_type": "incremental",
+                "date_field": "trade_date",
+                "table_name": "sync_adj_factor",
+                "params": {
+                    "trade_date": "{date}",
+                    "fields": "ts_code,trade_date,adj_factor",
+                },
+                "primary_keys": ["ts_code", "trade_date"],
+                "enabled": True,
+                "api_limit": 5000,
+                "schema": {
+                    "ts_code": {"type": "SYMBOL"},
+                    "trade_date": {"type": "DATE"},
+                    "adj_factor": {"type": "DOUBLE"},
+                },
             },
             {
-                "task_id": "index_daily", "api_name": "index_daily", "description": "指数日线行情",
-                "sync_type": "incremental", "date_field": "trade_date", "table_name": "index_daily",
-                "params": {"trade_date": "{date}", "fields": "ts_code,trade_date,open,high,low,close,pre_close,change,pct_chg,vol,amount"},
-                "primary_keys": ["ts_code", "trade_date"], "enabled": False, "api_limit": 5000,
-                "schema": {"ts_code": {"type": "SYMBOL"}, "trade_date": {"type": "SYMBOL"},
-                           "open": {"type": "DOUBLE"}, "high": {"type": "DOUBLE"}, "low": {"type": "DOUBLE"},
-                           "close": {"type": "DOUBLE"}, "pre_close": {"type": "DOUBLE"},
-                           "change": {"type": "DOUBLE"}, "pct_chg": {"type": "DOUBLE"},
-                           "vol": {"type": "DOUBLE"}, "amount": {"type": "DOUBLE"}},
-            },
-            {
-                "task_id": "moneyflow", "api_name": "moneyflow", "description": "个股资金流向",
-                "sync_type": "incremental", "date_field": "trade_date", "table_name": "moneyflow",
-                "params": {"trade_date": "{date}", "fields": "ts_code,trade_date,buy_sm_vol,buy_sm_amount,sell_sm_vol,sell_sm_amount,buy_md_vol,buy_md_amount,sell_md_vol,sell_md_amount,buy_lg_vol,buy_lg_amount,sell_lg_vol,sell_lg_amount,buy_elg_vol,buy_elg_amount,sell_elg_vol,sell_elg_amount,net_mf_vol,net_mf_amount"},
-                "primary_keys": ["ts_code", "trade_date"], "enabled": True, "api_limit": 5000,
-                "schema": {"ts_code": {"type": "SYMBOL"}, "trade_date": {"type": "SYMBOL"},
-                           "buy_sm_vol": {"type": "DOUBLE"}, "buy_sm_amount": {"type": "DOUBLE"},
-                           "sell_sm_vol": {"type": "DOUBLE"}, "sell_sm_amount": {"type": "DOUBLE"},
-                           "buy_md_vol": {"type": "DOUBLE"}, "buy_md_amount": {"type": "DOUBLE"},
-                           "sell_md_vol": {"type": "DOUBLE"}, "sell_md_amount": {"type": "DOUBLE"},
-                           "buy_lg_vol": {"type": "DOUBLE"}, "buy_lg_amount": {"type": "DOUBLE"},
-                           "sell_lg_vol": {"type": "DOUBLE"}, "sell_lg_amount": {"type": "DOUBLE"},
-                           "buy_elg_vol": {"type": "DOUBLE"}, "buy_elg_amount": {"type": "DOUBLE"},
-                           "sell_elg_vol": {"type": "DOUBLE"}, "sell_elg_amount": {"type": "DOUBLE"},
-                           "net_mf_vol": {"type": "DOUBLE"}, "net_mf_amount": {"type": "DOUBLE"}},
-            },
-            {
-                "task_id": "stock_basic", "api_name": "stock_basic", "description": "股票列表（基础信息）",
-                "sync_type": "full", "date_field": "", "table_name": "stock_basic",
-                "params": {"exchange": "", "list_status": "", "fields": "ts_code,symbol,name,area,industry,market,list_date"},
-                "primary_keys": ["ts_code"], "enabled": True, "api_limit": 5000,
-                "schema": {"ts_code": {"type": "SYMBOL"}, "symbol": {"type": "SYMBOL"}, "name": {"type": "SYMBOL"},
-                           "area": {"type": "SYMBOL"}, "industry": {"type": "SYMBOL"}, "market": {"type": "SYMBOL"},
-                           "list_date": {"type": "SYMBOL"}},
-            },
-            {
-                "task_id": "trade_cal", "api_name": "trade_cal", "description": "交易日历",
-                "sync_type": "full", "date_field": "cal_date", "table_name": "trade_cal",
-                "params": {"exchange": "", "start_date": "", "end_date": "", "is_open": ""},
-                "primary_keys": ["exchange", "cal_date"], "enabled": True, "api_limit": 5000,
-                "schema": {"exchange": {"type": "SYMBOL"}, "cal_date": {"type": "SYMBOL"},
-                           "is_open": {"type": "INT"}, "pretrade_date": {"type": "SYMBOL"}},
+                "task_id": "sync_daily_basic",
+                "api_name": "daily_basic",
+                "description": "每日指标（换手率、量比、市盈率、市净率）",
+                "sync_type": "incremental",
+                "date_field": "trade_date",
+                "table_name": "sync_daily_basic",
+                "params": {
+                    "trade_date": "{date}",
+                    "fields": "ts_code,trade_date,close,turnover_rate,volume_ratio,pe,pb",
+                },
+                "primary_keys": ["ts_code", "trade_date"],
+                "enabled": True,
+                "api_limit": 5000,
+                "schema": {
+                    "ts_code": {"type": "SYMBOL"},
+                    "trade_date": {"type": "DATE"},
+                    "close": {"type": "DOUBLE"},
+                    "turnover_rate": {"type": "DOUBLE"},
+                    "volume_ratio": {"type": "DOUBLE"},
+                    "pe": {"type": "DOUBLE"},
+                    "pb": {"type": "DOUBLE"},
+                },
             },
         ]
         seed_df = pl.DataFrame({
@@ -614,14 +726,13 @@ class DolphinDBClient:
             "api_name": [t["api_name"] for t in tasks],
             "description": [t["description"] for t in tasks],
             "sync_type": [t["sync_type"] for t in tasks],
-            "params_json": [_json.dumps(t["params"], ensure_ascii=False) for t in tasks],
+            "params_json": [json.dumps(t["params"], ensure_ascii=False) for t in tasks],
             "date_field": [t.get("date_field", "") for t in tasks],
-            "primary_keys_json": [_json.dumps(t["primary_keys"]) for t in tasks],
+            "primary_keys_json": [json.dumps(t["primary_keys"]) for t in tasks],
             "table_name": [t["table_name"] for t in tasks],
-            "schema_json": [_json.dumps(t["schema"], ensure_ascii=False) for t in tasks],
+            "schema_json": [json.dumps(t["schema"], ensure_ascii=False) for t in tasks],
             "enabled": [t["enabled"] for t in tasks],
             "api_limit": [t.get("api_limit", 5000) for t in tasks],
-            "schedule": [t.get("schedule", "daily") for t in tasks],
             "created_at": [now] * len(tasks),
             "updated_at": [now] * len(tasks),
         })
@@ -630,26 +741,110 @@ class DolphinDBClient:
 
     def _resolve_db_path(self, table_name: str) -> str:
         """根据表名返回所属数据库路径"""
-        if table_name in self._META_TABLES:
-            return self._meta_db_path
         return self._db_path
+
+    def register_meta_table(self, table_name: str) -> None:
+        """将表名注册到元数据表集合（如果尚未注册）"""
+        if table_name not in self._META_TABLES:
+            self._META_TABLES = self._META_TABLES | frozenset({table_name})
+            self._ALL_TABLES = self._META_TABLES | self._TSDB_TABLES
+
+    def _prepare_upload_df(
+        self,
+        table_name: str,
+        df: pl.DataFrame,
+        db_path: str,
+        known_columns: Optional[List[str]],
+        var_prefix: str,
+        select_columns: Optional[List[str]] = None,
+    ) -> tuple:
+        """
+        通用的 DataFrame 写入准备逻辑：
+        1. 日期列格式转换（YYYYMMDD → date）
+        2. 转换为 Pandas
+        3. 获取表列顺序并对齐
+        4. 上传临时变量
+
+        必须在 self._lock 内调用。
+
+        Args:
+            table_name: 目标表名
+            df: Polars DataFrame
+            db_path: 数据库路径
+            known_columns: 已知列顺序（跳过 schema 查询）
+            var_prefix: 临时变量前缀
+            select_columns: 选择写入的列（默认全部）
+
+        Returns:
+            (ordered_cols, tmp_var) — 有序列名列表和上传到 DolphinDB 的临时变量名
+        """
+        # 转换日期列
+        date_cols = self._DATE_COLUMNS.get(table_name, [])
+        for col in date_cols:
+            if col in df.columns and df[col].dtype == pl.Utf8:
+                df = df.with_columns(
+                    pl.col(col).str.to_date("%Y%m%d").alias(col)
+                )
+
+        pdf = df.select(select_columns).to_pandas() if select_columns else df.to_pandas()
+
+        for col in date_cols:
+            if col in pdf.columns and pd.api.types.is_datetime64_any_dtype(pdf[col]):
+                pdf[col] = pdf[col].dt.date
+
+        # 获取表列顺序
+        if known_columns is not None:
+            table_cols = known_columns
+        else:
+            schema_info = self._session.run(
+                f"schema(loadTable('{db_path}', '{table_name}'))"
+            )
+            table_cols = []
+            if isinstance(schema_info, dict) and "colDefs" in schema_info:
+                col_defs_df = schema_info["colDefs"]
+                if isinstance(col_defs_df, pd.DataFrame) and "name" in col_defs_df.columns:
+                    table_cols = col_defs_df["name"].tolist()
+            if not table_cols:
+                logger.warning(
+                    f"无法从 schema 获取 {table_name} 列信息"
+                    f"（schema 类型={type(schema_info).__name__}），"
+                    f"回退使用 DataFrame 列写入"
+                )
+                table_cols = pdf.columns.tolist()
+
+        # 对齐列顺序
+        ordered_cols = [c for c in table_cols if c in pdf.columns]
+        if not ordered_cols:
+            raise RuntimeError(
+                f"写入 {table_name} 时列名无交集: "
+                f"表列={table_cols}, DataFrame列={pdf.columns.tolist()}"
+            )
+        pdf = pdf[ordered_cols]
+
+        # 上传临时变量
+        tmp_var = f"{var_prefix}_{table_name}_{threading.current_thread().ident}"
+        self._session.upload({tmp_var: pdf})
+
+        return ordered_cols, tmp_var
 
     def upsert(
         self,
         table_name: str,
         df: pl.DataFrame,
         key_columns: List[str],
+        known_columns: Optional[List[str]] = None,
     ) -> None:
         """
         插入或更新数据
 
-        行情库 (quant_research) 的 TSDB 表使用 keepDuplicates=LAST 自动去重。
-        元数据库 (quant_meta) 的维度表需要手动 delete + insert。
+        TSDB 分区表使用 keepDuplicates=LAST 自动去重。
+        维度表需要手动 delete + insert。
 
         Args:
             table_name: 表名
             df: Polars DataFrame
             key_columns: 主键列
+            known_columns: 已知列顺序（跳过 schema 查询，用于刚建表后首次写入）
         """
         if df.is_empty():
             logger.warning(f"空 DataFrame，跳过写入: {table_name}")
@@ -659,55 +854,33 @@ class DolphinDBClient:
         is_meta = table_name in self._META_TABLES
 
         try:
-            # 转换日期列：将 YYYYMMDD 字符串转换为 date 类型
-            date_cols = self._DATE_COLUMNS.get(table_name, [])
-            for col in date_cols:
-                if col in df.columns:
-                    # 检查列类型，如果是字符串则转换
-                    if df[col].dtype == pl.Utf8:
-                        df = df.with_columns(
-                            pl.col(col).str.to_date("%Y%m%d").alias(col)
-                        )
-
-            pdf = df.to_pandas()
-            # 将 datetime64 转换为 datetime.date 对象，DolphinDB 才能正确识别为 DATE 类型
-            for col in date_cols:
-                if col in pdf.columns and pd.api.types.is_datetime64_any_dtype(pdf[col]):
-                    pdf[col] = pdf[col].dt.date
-
             with self._lock:
                 self._ensure_connected()
-
-                # 获取表的列顺序，确保 DataFrame 列顺序与表一致
-                schema = self._session.run(f"schema(loadTable('{db_path}', '{table_name}'))")
-                table_cols = schema['colDefs']['name'].tolist()
-                # 只保留 DataFrame 中存在的列，并按表的顺序排列
-                ordered_cols = [c for c in table_cols if c in pdf.columns]
-                pdf = pdf[ordered_cols]
-
-                tmp_var = f"tmp_{table_name}_{threading.current_thread().ident}"
-                self._session.upload({tmp_var: pdf})
+                ordered_cols, tmp_var = self._prepare_upload_df(
+                    table_name, df, db_path, known_columns, "tmp"
+                )
+                col_select = ", ".join(ordered_cols)
 
                 if is_meta and key_columns:
                     # 维度表：先按主键删除旧行，再插入（模拟 upsert）
                     handle = f"{table_name}_handle"
-                    delete_conds = []
-                    for kc in key_columns:
-                        delete_conds.append(
-                            f'{handle}.{kc} in {tmp_var}.{kc}'
-                        )
-                    cond_str = ", ".join(delete_conds)
+                    delete_conds = [f'{kc} in {tmp_var}.{kc}' for kc in key_columns]
+                    cond_str = " and ".join(delete_conds)
                     self._session.run(
-                        f"{handle} = loadTable('{db_path}', '{table_name}');"
-                        f"try {{ delete from {handle} where {cond_str}; }} catch(ex) {{}};"
-                        f"tableInsert({handle}, {tmp_var});"
+                        f"{handle} = loadTable('{db_path}', '{table_name}')"
+                    )
+                    self._session.run(
+                        f"delete from {handle} where {cond_str}"
+                    )
+                    self._session.run(
+                        f"tableInsert({handle}, select {col_select} from {tmp_var});"
                         f"undef('{tmp_var}')"
                     )
                 else:
                     # TSDB 表：keepDuplicates=LAST 自动去重，直接插入
                     self._session.run(
                         f"{table_name}_handle = loadTable('{db_path}', '{table_name}');"
-                        f"tableInsert({table_name}_handle, {tmp_var});"
+                        f"tableInsert({table_name}_handle, select {col_select} from {tmp_var});"
                         f"undef('{tmp_var}')"
                     )
             logger.info(
@@ -720,13 +893,14 @@ class DolphinDBClient:
 
     def upsert_daily(self, df: pl.DataFrame) -> None:
         """插入或更新日线数据（兼容旧接口）"""
-        self.upsert("daily_data", df, ["trade_date", "ts_code"])
+        self.upsert("sync_daily_data", df, ["trade_date", "ts_code"])
 
     def bulk_copy(
         self,
         table_name: str,
         df: pl.DataFrame,
         columns: List[str] = None,
+        known_columns: Optional[List[str]] = None,
     ) -> int:
         """
         批量写入数据
@@ -735,6 +909,7 @@ class DolphinDBClient:
             table_name: 目标表名
             df: Polars DataFrame
             columns: 列名列表，默认使用 DataFrame 的列名
+            known_columns: 已知列顺序（跳过 schema 查询，用于刚建表后首次写入）
 
         Returns:
             写入的行数
@@ -747,35 +922,16 @@ class DolphinDBClient:
         rows = len(df)
 
         try:
-            # 转换日期列：将 YYYYMMDD 字符串转换为 date 类型
-            date_cols = self._DATE_COLUMNS.get(table_name, [])
-            for col in date_cols:
-                if col in df.columns:
-                    if df[col].dtype == pl.Utf8:
-                        df = df.with_columns(
-                            pl.col(col).str.to_date("%Y%m%d").alias(col)
-                        )
-
-            pdf = df.select(cols).to_pandas()
-            # 将 datetime64 转换为 datetime.date，确保 DolphinDB 正确识别为 DATE 类型
-            for col in date_cols:
-                if col in pdf.columns and pd.api.types.is_datetime64_any_dtype(pdf[col]):
-                    pdf[col] = pdf[col].dt.date
-
             with self._lock:
                 self._ensure_connected()
-
-                # 获取表的列顺序，确保 DataFrame 列顺序与表一致
-                schema = self._session.run(f"schema(loadTable('{db_path}', '{table_name}'))")
-                table_cols = schema['colDefs']['name'].tolist()
-                ordered_cols = [c for c in table_cols if c in pdf.columns]
-                pdf = pdf[ordered_cols]
-
-                tmp_var = f"bulk_{table_name}_{threading.current_thread().ident}"
-                self._session.upload({tmp_var: pdf})
+                ordered_cols, tmp_var = self._prepare_upload_df(
+                    table_name, df, db_path, known_columns, "bulk",
+                    select_columns=cols,
+                )
+                col_select = ", ".join(ordered_cols)
                 self._session.run(
                     f"{table_name}_handle = loadTable('{db_path}', '{table_name}');"
-                    f"tableInsert({table_name}_handle, {tmp_var});"
+                    f"tableInsert({table_name}_handle, select {col_select} from {tmp_var});"
                     f"undef('{tmp_var}')"
                 )
             logger.info(f"批量写入 {rows} 行到 {table_name}")
@@ -796,7 +952,7 @@ class DolphinDBClient:
         """
         try:
             sql = (
-                f'SELECT last_date FROM loadTable("{self._meta_db_path}", "sync_log") '
+                f'SELECT last_date FROM loadTable("{self._db_path}", "sync_log") '
                 f'WHERE source = "{source}" AND data_type = "{data_type}" LIMIT 1'
             )
             with self._lock:
@@ -837,14 +993,14 @@ class DolphinDBClient:
                 self._ensure_connected()
                 # 先删除旧记录
                 self._session.run(
-                    f'sync_log_handle = loadTable("{self._meta_db_path}", "sync_log");'
+                    f'sync_log_handle = loadTable("{self._db_path}", "sync_log");'
                     f'delete from sync_log_handle where source = "{source}" and data_type = "{data_type}"'
                 )
                 # 再插入新记录
                 tmp_var = f"sync_log_{threading.current_thread().ident}"
                 self._session.upload({tmp_var: pdf})
                 self._session.run(
-                    f'sync_log_handle = loadTable("{self._meta_db_path}", "sync_log");'
+                    f'sync_log_handle = loadTable("{self._db_path}", "sync_log");'
                     f"tableInsert(sync_log_handle, {tmp_var});"
                     f"undef('{tmp_var}')"
                 )

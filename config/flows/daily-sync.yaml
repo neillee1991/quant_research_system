@@ -5,17 +5,17 @@ tags:
   - daily
 enabled: true
 tasks:
-  - id: daily
+  - id: sync_daily
     type: sync
-  - id: daily_basic
+  - id: sync_daily_basic
     type: sync
-  - id: adj_factor
+  - id: sync_adj_factor
     type: sync
   - id: factor_ma_20
     type: factor
     depends_on:
-      - daily
+      - sync_daily
   - id: factor_pe_rank
     type: factor
     depends_on:
-      - daily_basic
+      - sync_daily_basic

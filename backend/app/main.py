@@ -14,7 +14,7 @@ from store.dolphindb_client import db_client
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     logger.info("Starting application...")
-    # 动态创建缺失的 quant_meta 维度表（使用全局单例，避免重复连接）
+    # 动态创建缺失的维度表（使用全局单例，避免重复连接）
     try:
         db_client.ensure_meta_tables()
         db_client.seed_sync_task_config()
@@ -37,9 +37,14 @@ def create_app() -> FastAPI:
     app.add_middleware(GZipMiddleware, minimum_size=1000)
 
     # CORS 中间件
+    origins = settings.cors_origins
+    if origins == "*":
+        allow_origins = ["*"]
+    else:
+        allow_origins = [o.strip() for o in origins.split(",") if o.strip()]
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=allow_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

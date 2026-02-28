@@ -65,9 +65,9 @@ def run_init_script():
 def verify_tables():
     """验证关键表是否存在"""
     key_tables = [
-        'daily_data', 'daily_basic', 'adj_factor',
-        'index_daily', 'moneyflow', 'factor_values',
-        'stock_basic', 'sync_log', 'sync_log_history',
+        'sync_daily_data', 'sync_daily_basic', 'sync_adj_factor',
+        'sync_index_daily', 'sync_moneyflow', 'factor_values',
+        'sync_stock_basic', 'sync_log', 'sync_log_history',
         'factor_metadata', 'factor_analysis',
     ]
 

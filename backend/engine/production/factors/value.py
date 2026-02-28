@@ -8,7 +8,7 @@ from engine.production.registry import factor
 @factor(
     "factor_pe_rank",
     description="PE行业内排名百分位",
-    depends_on=["daily_basic"],
+    depends_on=["sync_daily_basic"],
     category="value",
     params={"lookback_days": 5},
 )
@@ -30,7 +30,7 @@ def compute_pe_rank(df: pl.DataFrame, params: dict) -> pl.DataFrame:
 @factor(
     "factor_pb_rank",
     description="PB行业内排名百分位",
-    depends_on=["daily_basic"],
+    depends_on=["sync_daily_basic"],
     category="value",
     params={"lookback_days": 5},
 )
@@ -52,7 +52,7 @@ def compute_pb_rank(df: pl.DataFrame, params: dict) -> pl.DataFrame:
 @factor(
     "factor_turnover_rank",
     description="换手率排名百分位",
-    depends_on=["daily_basic"],
+    depends_on=["sync_daily_basic"],
     category="value",
     params={"lookback_days": 5},
 )

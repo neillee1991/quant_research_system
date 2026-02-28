@@ -28,7 +28,7 @@ def _load_stock_data(ts_code: str, start: str, end: str) -> pl.DataFrame:
         params.append(end)
     where = " AND ".join(conditions)
     return db_client.query(
-        f"SELECT * FROM daily_data WHERE {where} ORDER BY trade_date", params
+        f"SELECT * FROM sync_daily_data WHERE {where} ORDER BY trade_date", params
     )
 
 

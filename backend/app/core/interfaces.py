@@ -72,8 +72,8 @@ class IDataRepository(ABC):
         pass
 
     @abstractmethod
-    def get_table_columns(self, table: str) -> set:
-        """获取表的现有列名集合"""
+    def get_table_columns(self, table: str) -> list:
+        """获取表的列名列表"""
         pass
 
 

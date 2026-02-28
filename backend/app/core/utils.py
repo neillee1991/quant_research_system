@@ -163,7 +163,7 @@ class DateUtils:
 class TradingCalendar:
     """交易日历服务
 
-    基于 trade_cal 表提供交易日查询、偏移等能力。
+    基于 sync_trade_cal 表提供交易日查询、偏移等能力。
     初始化时一次性加载到内存，后续查询无 DB 开销。
     """
 
@@ -184,15 +184,15 @@ class TradingCalendar:
 
     # ---------- 加载 ----------
     def _load(self, db_client) -> None:
-        """从 trade_cal 表加载 SSE 交易日"""
+        """从 sync_trade_cal 表加载 SSE 交易日"""
         try:
             df = db_client.query(
-                "SELECT cal_date FROM trade_cal "
+                "SELECT cal_date FROM sync_trade_cal "
                 "WHERE exchange = 'SSE' AND is_open = 1 "
                 "ORDER BY cal_date"
             )
             if df.is_empty():
-                logger.warning("TradingCalendar: trade_cal 表为空，回退到自然日模式")
+                logger.warning("TradingCalendar: sync_trade_cal 表为空，回退到自然日模式")
                 return
             self._trading_days = df["cal_date"].to_list()
             self._trading_day_set = set(self._trading_days)

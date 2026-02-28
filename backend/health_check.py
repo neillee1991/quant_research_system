@@ -26,9 +26,9 @@ def check_database():
 
         # 检查关键表是否存在
         key_tables = [
-            'daily_data', 'daily_basic', 'adj_factor',
-            'index_daily', 'moneyflow', 'factor_values',
-            'stock_basic', 'sync_log', 'factor_metadata'
+            'sync_daily_data', 'sync_daily_basic', 'sync_adj_factor',
+            'sync_index_daily', 'sync_moneyflow', 'factor_values',
+            'sync_stock_basic', 'sync_log', 'factor_metadata'
         ]
 
         existing = 0
@@ -53,7 +53,6 @@ def check_config():
 
     print(f"✅ DolphinDB: {settings.database.dolphindb_host}:{settings.database.dolphindb_port}")
     print(f"✅ 数据库路径: {settings.database.db_path}")
-    print(f"✅ 元数据库路径: {settings.database.meta_db_path}")
     print(f"✅ Prefect API: {settings.prefect_api_url}")
     return True
 
@@ -75,7 +74,7 @@ def check_performance():
         # 测试数据查询
         start = time.time()
         df = db_client.query(
-            "SELECT * FROM daily_data WHERE ts_code=%s AND trade_date>=%s LIMIT 100",
+            "SELECT * FROM sync_daily_data WHERE ts_code=%s AND trade_date>=%s LIMIT 100",
             ('000001.SZ', '20240101')
         )
         query_time = (time.time() - start) * 1000

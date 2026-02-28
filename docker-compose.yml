@@ -5,7 +5,7 @@ services:
     ports:
       - "8848:8848"
     volumes:
-      - /Users/lisheng/Code/application/dolphin/data:/data/ddb/server/data
+      - ${DOLPHINDB_DATA_DIR:-./data/dolphindb}:/data/ddb/server/data
     environment:
       TZ: Asia/Shanghai
     ulimits:
@@ -37,7 +37,7 @@ services:
       PREFECT_API_DATABASE_CONNECTION_URL: "sqlite+aiosqlite:////data/prefect.db"
       TZ: Asia/Shanghai
     volumes:
-      - /Users/lisheng/Code/application/prefect:/data
+      - ${PREFECT_DATA_DIR:-./data/prefect}:/data
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "python -c 'import httpx; httpx.get(\"http://localhost:4200/api/health\")' || exit 1"]

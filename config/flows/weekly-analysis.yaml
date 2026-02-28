@@ -5,15 +5,15 @@ tags:
   - weekly
 enabled: true
 tasks:
-  - id: stock_basic
+  - id: sync_stock_basic
     type: sync
-  - id: daily
+  - id: sync_daily
     type: sync
   - id: factor_ma_5
     type: factor
     depends_on:
-      - daily
+      - sync_daily
   - id: factor_rsi_14
     type: factor
     depends_on:
-      - daily
+      - sync_daily

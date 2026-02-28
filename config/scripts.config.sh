@@ -56,8 +56,8 @@ VENV_DIR=".venv"
 
 # ==================== DolphinDB 配置 ====================
 
-# DolphinDB 数据目录（外部卷）
-DOLPHINDB_DATA_DIR="/Volumes/QuantData/dolphindb"
+# DolphinDB 数据目录（可通过 .env 中 DOLPHINDB_DATA_DIR 覆盖）
+DOLPHINDB_DATA_DIR="${DOLPHINDB_DATA_DIR:-$SCRIPT_DIR/data/dolphindb}"
 
 # DolphinDB 健康检查
 DB_INIT_WAIT=10

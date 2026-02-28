@@ -6,24 +6,25 @@
 // 登录（用户名密码由 init_dolphindb.py 通过 session.login 完成，此处做兜底）
 try { login("admin", "123456") } catch(ex) { /* 已通过 session 登录 */ }
 
-// ==================== 行情数据库 dfs://quant_research ====================
+// ==================== 数据库 dfs://quant ====================
 // COMPO 分区: VALUE(trade_date 按月) × HASH(ts_code, 50)
 // 引擎: TSDB
+// 维度表（不分区）也存储在此库中，由后端应用动态创建
 
-if (!existsDatabase("dfs://quant_research")) {
+if (!existsDatabase("dfs://quant")) {
     // 月份分区范围: 2010.01 ~ 2030.12
     monthRange = 2010.01M..2030.12M
     dbDate = database("", VALUE, monthRange)
     dbCode = database("", HASH, [SYMBOL, 50])
-    db = database("dfs://quant_research", COMPO, [dbDate, dbCode], engine="TSDB")
-    print("已创建数据库 dfs://quant_research")
+    db = database("dfs://quant", COMPO, [dbDate, dbCode], engine="TSDB")
+    print("已创建数据库 dfs://quant")
 } else {
-    db = database("dfs://quant_research")
-    print("数据库 dfs://quant_research 已存在，跳过创建")
+    db = database("dfs://quant")
+    print("数据库 dfs://quant 已存在，跳过创建")
 }
 
-// ---------- 1. daily_data 日线行情 ----------
-if (!existsTable("dfs://quant_research", "daily_data")) {
+// ---------- 1. sync_daily_data 日线行情 ----------
+if (!existsTable("dfs://quant", "sync_daily_data")) {
     schema_daily = table(
         array(DATE, 0) as trade_date,
         array(SYMBOL, 0) as ts_code,
@@ -38,18 +39,18 @@ if (!existsTable("dfs://quant_research", "daily_data")) {
         array(DOUBLE, 0) as amount
     )
     createPartitionedTable(
-        dbHandle=db, table=schema_daily, tableName="daily_data",
+        dbHandle=db, table=schema_daily, tableName="sync_daily_data",
         partitionColumns=["trade_date", "ts_code"],
         sortColumns=["ts_code", "trade_date"],
         keepDuplicates=LAST
     )
-    print("已创建表 daily_data (日线行情)")
+    print("已创建表 sync_daily_data (日线行情)")
 } else {
-    print("表 daily_data 已存在，跳过")
+    print("表 sync_daily_data 已存在，跳过")
 }
 
-// ---------- 2. daily_basic 每日指标 ----------
-if (!existsTable("dfs://quant_research", "daily_basic")) {
+// ---------- 2. sync_daily_basic 每日指标 ----------
+if (!existsTable("dfs://quant", "sync_daily_basic")) {
     schema_basic = table(
         array(SYMBOL, 0) as ts_code,
         array(DATE, 0) as trade_date,
@@ -60,36 +61,36 @@ if (!existsTable("dfs://quant_research", "daily_basic")) {
         array(DOUBLE, 0) as pb
     )
     createPartitionedTable(
-        dbHandle=db, table=schema_basic, tableName="daily_basic",
+        dbHandle=db, table=schema_basic, tableName="sync_daily_basic",
         partitionColumns=["trade_date", "ts_code"],
         sortColumns=["ts_code", "trade_date"],
         keepDuplicates=LAST
     )
-    print("已创建表 daily_basic (每日指标)")
+    print("已创建表 sync_daily_basic (每日指标)")
 } else {
-    print("表 daily_basic 已存在，跳过")
+    print("表 sync_daily_basic 已存在，跳过")
 }
 
-// ---------- 3. adj_factor 复权因子 ----------
-if (!existsTable("dfs://quant_research", "adj_factor")) {
+// ---------- 3. sync_adj_factor 复权因子 ----------
+if (!existsTable("dfs://quant", "sync_adj_factor")) {
     schema_adj = table(
         array(SYMBOL, 0) as ts_code,
         array(DATE, 0) as trade_date,
         array(DOUBLE, 0) as adj_factor
     )
     createPartitionedTable(
-        dbHandle=db, table=schema_adj, tableName="adj_factor",
+        dbHandle=db, table=schema_adj, tableName="sync_adj_factor",
         partitionColumns=["trade_date", "ts_code"],
         sortColumns=["ts_code", "trade_date"],
         keepDuplicates=LAST
     )
-    print("已创建表 adj_factor (复权因子)")
+    print("已创建表 sync_adj_factor (复权因子)")
 } else {
-    print("表 adj_factor 已存在，跳过")
+    print("表 sync_adj_factor 已存在，跳过")
 }
 
-// ---------- 4. index_daily 指数日线 ----------
-if (!existsTable("dfs://quant_research", "index_daily")) {
+// ---------- 4. sync_index_daily 指数日线 ----------
+if (!existsTable("dfs://quant", "sync_index_daily")) {
     schema_idx = table(
         array(SYMBOL, 0) as ts_code,
         array(DATE, 0) as trade_date,
@@ -104,55 +105,21 @@ if (!existsTable("dfs://quant_research", "index_daily")) {
         array(DOUBLE, 0) as amount
     )
     createPartitionedTable(
-        dbHandle=db, table=schema_idx, tableName="index_daily",
+        dbHandle=db, table=schema_idx, tableName="sync_index_daily",
         partitionColumns=["trade_date", "ts_code"],
         sortColumns=["ts_code", "trade_date"],
         keepDuplicates=LAST
     )
-    print("已创建表 index_daily (指数日线)")
+    print("已创建表 sync_index_daily (指数日线)")
 } else {
-    print("表 index_daily 已存在，跳过")
+    print("表 sync_index_daily 已存在，跳过")
 }
 
-// ---------- 5. moneyflow 资金流向 ----------
-if (!existsTable("dfs://quant_research", "moneyflow")) {
-    schema_mf = table(
-        array(SYMBOL, 0) as ts_code,
-        array(DATE, 0) as trade_date,
-        array(DOUBLE, 0) as buy_sm_vol,
-        array(DOUBLE, 0) as buy_sm_amount,
-        array(DOUBLE, 0) as sell_sm_vol,
-        array(DOUBLE, 0) as sell_sm_amount,
-        array(DOUBLE, 0) as buy_md_vol,
-        array(DOUBLE, 0) as buy_md_amount,
-        array(DOUBLE, 0) as sell_md_vol,
-        array(DOUBLE, 0) as sell_md_amount,
-        array(DOUBLE, 0) as buy_lg_vol,
-        array(DOUBLE, 0) as buy_lg_amount,
-        array(DOUBLE, 0) as sell_lg_vol,
-        array(DOUBLE, 0) as sell_lg_amount,
-        array(DOUBLE, 0) as buy_elg_vol,
-        array(DOUBLE, 0) as buy_elg_amount,
-        array(DOUBLE, 0) as sell_elg_vol,
-        array(DOUBLE, 0) as sell_elg_amount,
-        array(DOUBLE, 0) as net_mf_vol,
-        array(DOUBLE, 0) as net_mf_amount
-    )
-    createPartitionedTable(
-        dbHandle=db, table=schema_mf, tableName="moneyflow",
-        partitionColumns=["trade_date", "ts_code"],
-        sortColumns=["ts_code", "trade_date"],
-        keepDuplicates=LAST
-    )
-    print("已创建表 moneyflow (资金流向)")
-} else {
-    print("表 moneyflow 已存在，跳过")
-}
 
 // ---------- 6. factor_values 因子值 ----------
 // 注意: TSDB 引擎要求 sortColumns 最后一列必须是整数或时间类型
 // factor_id 为 SYMBOL，不能放在最后；trade_date (DATE) 放最后
-if (!existsTable("dfs://quant_research", "factor_values")) {
+if (!existsTable("dfs://quant", "factor_values")) {
     schema_fv = table(
         array(SYMBOL, 0) as ts_code,
         array(DATE, 0) as trade_date,
@@ -171,20 +138,11 @@ if (!existsTable("dfs://quant_research", "factor_values")) {
     print("表 factor_values 已存在，跳过")
 }
 
-// ==================== 元数据库 dfs://quant_meta ====================
-// 仅创建数据库；维度表由后端应用首次启动时动态创建
-// （stock_basic, trade_cal, sync_log, sync_log_history, factor_metadata,
-//   factor_analysis, production_task_run）
-
-if (!existsDatabase("dfs://quant_meta")) {
-    dbMeta = database("dfs://quant_meta", VALUE, 1..1)
-    print("已创建数据库 dfs://quant_meta")
-} else {
-    print("数据库 dfs://quant_meta 已存在，跳过创建")
-}
+// 维度表（sync_stock_basic, sync_trade_cal, sync_log, sync_log_history,
+//   factor_metadata, factor_analysis, factor_task_run, sync_task_config, etl_task_config）
+// 由后端应用首次启动时动态创建
 
 print("========================================")
 print("DolphinDB 数据库初始化完成!")
-print("  dfs://quant_research : 6 张行情/因子表 (TSDB)")
-print("  dfs://quant_meta     : 空库（维度表由后端动态创建）")
+print("  dfs://quant : 6 张 TSDB 分区表 + 维度表由后端动态创建")
 print("========================================")

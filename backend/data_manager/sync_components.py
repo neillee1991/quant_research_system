@@ -55,7 +55,6 @@ class SyncConfigManager:
                     "schema": json.loads(row["schema_json"]) if row.get("schema_json") else {},
                     "enabled": bool(row.get("enabled", True)),
                     "api_limit": row.get("api_limit", 5000),
-                    "schedule": row.get("schedule", "daily"),
                 }
                 seen[task["task_id"]] = task
             self._cache = list(seen.values())
@@ -84,13 +83,6 @@ class SyncConfigManager:
     def get_enabled_tasks(self) -> List[Dict[str, Any]]:
         """获取所有启用的任务"""
         return [t for t in self._load_tasks() if t.get("enabled", True)]
-
-    def get_tasks_by_schedule(self, schedule: str) -> List[Dict[str, Any]]:
-        """按调度类型获取任务"""
-        return [
-            t for t in self.get_enabled_tasks()
-            if t.get("schedule") == schedule
-        ]
 
     def get_global_config(self) -> Dict[str, Any]:
         """获取全局配置（现在从 settings 读取，不再依赖 JSON）"""
@@ -144,7 +136,7 @@ class SyncLogManager:
             logger.warning(f"Failed to get last sync info for {task_id}: {e}")
         return None
 
-    def update_sync_log(self, task_id: str, sync_date: str, rows_synced: int = 0) -> None:
+    def update_sync_log(self, task_id: str, sync_date: str, rows_synced: int = 0, status: str = "success", error_message: str = "", params: str = "") -> None:
         """更新同步日志（同时记录历史）"""
         try:
             # 1. 更新 sync_log 表（保留最新状态）
@@ -167,13 +159,15 @@ class SyncLogManager:
                 "last_date": [sync_date],
                 "sync_date": [sync_date],
                 "rows_synced": [rows_synced],
-                "status": ["success"],
+                "status": [status],
+                "error_message": [error_message],
+                "params": [params],
                 "created_at": [datetime.now()]
             })
             # 使用 bulk_copy 直接追加到历史表
             self.repository.bulk_copy("sync_log_history", history_data)
 
-            logger.debug(f"Updated sync log for {task_id}: {sync_date}, rows: {rows_synced}")
+            logger.debug(f"Updated sync log for {task_id}: {sync_date}, rows: {rows_synced}, status: {status}")
         except Exception as e:
             logger.error(f"Failed to update sync log: {e}")
 
@@ -189,6 +183,9 @@ class TableManager:
         table_name = task["table_name"]
         primary_keys = task["primary_keys"]
         schema = task.get("schema", {})
+
+        # 先注册到元数据表集合，确保 table_exists / _resolve_db_path 路由到正确的库
+        self.repository.register_meta_table(table_name)
 
         if self.repository.table_exists(table_name):
             logger.info(f"Table {table_name} already exists")
@@ -248,19 +245,15 @@ class TableManager:
         """创建基础表结构（DolphinDB）
         注意：DolphinDB 的分区表应在 init_dolphindb.dos 中预先创建。
         此方法仅作为 fallback，创建维度表。
+        调用方 ensure_table_exists() 已确认表不存在。
         """
         try:
             db_path = self.repository._resolve_db_path(table_name)
-            # 检查表是否已存在
-            exists = self.repository.table_exists(table_name)
-            if exists:
-                return
-
-            # 创建一个基础维度表
+            # 创建一个基础维度表（TSDB 引擎要求 primaryKey 最后一列为时间/整数类型）
             self.repository.execute(f"""
-                t = table(1:0, `ts_code`trade_date, [SYMBOL, STRING]);
+                t = table(1:0, `ts_code`trade_date`created_at, [SYMBOL, STRING, TIMESTAMP]);
                 db = database("{db_path}");
-                db.createTable(t, `{table_name})
+                createTable(dbHandle=db, table=t, tableName=`{table_name}, primaryKey=`ts_code`created_at)
             """)
             logger.info(f"Created basic dimension table {table_name}")
         except Exception as e:
@@ -347,6 +340,10 @@ class SyncTaskExecutor(ISyncTaskExecutor):
 
         except Exception as e:
             logger.error(f"Task {task_id} failed: {e}")
+            try:
+                self.log_manager.update_sync_log(task_id, DateUtils.today(), 0, "failed", str(e), params=f"type={sync_type}")
+            except Exception:
+                pass
             return False
 
     def _execute_full_sync(self, task: Dict[str, Any]) -> bool:
@@ -354,18 +351,24 @@ class SyncTaskExecutor(ISyncTaskExecutor):
         task_id = task["task_id"]
         api_name = task["api_name"]
         params = self._format_params(task["params"])
+        params_str = f"type=full, api={api_name}"
 
-        df = self.api_client.call_api(api_name, **params)
-        if df is None or df.is_empty():
-            logger.warning(f"No data for {task_id}")
-            self.log_manager.update_sync_log(task_id, DateUtils.today(), 0)
+        try:
+            df = self.api_client.call_api(api_name, **params)
+            if df is None or df.is_empty():
+                logger.warning(f"No data for {task_id}")
+                self.log_manager.update_sync_log(task_id, DateUtils.today(), 0, params=params_str)
+                return False
+
+            rows_count = len(df)
+            self.repository.upsert(task["table_name"], df, task["primary_keys"])
+            self.log_manager.update_sync_log(task_id, DateUtils.today(), rows_count, params=params_str)
+            logger.info(f"Full sync completed for {task_id}: {rows_count} rows")
+            return True
+        except Exception as e:
+            logger.error(f"Full sync failed for {task_id}: {e}")
+            self.log_manager.update_sync_log(task_id, DateUtils.today(), 0, "failed", str(e), params=params_str)
             return False
-
-        rows_count = len(df)
-        self.repository.upsert(task["table_name"], df, task["primary_keys"])
-        self.log_manager.update_sync_log(task_id, DateUtils.today(), rows_count)
-        logger.info(f"Full sync completed for {task_id}: {rows_count} rows")
-        return True
 
     def _execute_incremental_sync(
         self,
@@ -400,25 +403,35 @@ class SyncTaskExecutor(ISyncTaskExecutor):
             logger.info(f"Task {task_id} already up to date")
             return True
 
-        # 按日期循环同步
-        dates = DateUtils.get_date_range(start_date, target_date)
+        # 按日期循环同步（优先使用交易日历过滤非交易日）
+        from app.core.utils import TradingCalendar
+        cal = TradingCalendar.get_instance(self.repository)
+        if cal.is_loaded:
+            dates = cal.get_trading_days(start_date, target_date)
+        else:
+            dates = DateUtils.get_date_range(start_date, target_date)
         total_rows = 0
 
         for date_str in dates:
-            params = self._format_params(task["params"], date_str)
-            df = self.api_client.call_api(api_name, **params)
+            params_str = f"type=incremental, date={date_str}, range={start_date}~{target_date}"
+            try:
+                params = self._format_params(task["params"], date_str)
+                df = self.api_client.call_api(api_name, **params)
 
-            if df is not None and not df.is_empty():
-                self.repository.upsert(task["table_name"], df, task["primary_keys"])
-                rows_count = len(df)
-                total_rows += rows_count
-                logger.info(f"Synced {task_id} for {date_str}: {rows_count} rows")
+                if df is not None and not df.is_empty():
+                    self.repository.upsert(task["table_name"], df, task["primary_keys"])
+                    rows_count = len(df)
+                    total_rows += rows_count
+                    logger.info(f"Synced {task_id} for {date_str}: {rows_count} rows")
 
-                # 记录每次同步的历史
-                self.log_manager.update_sync_log(task_id, date_str, rows_count)
-            else:
-                # 即使没有数据也记录
-                self.log_manager.update_sync_log(task_id, date_str, 0)
+                    # 记录每次同步的历史
+                    self.log_manager.update_sync_log(task_id, date_str, rows_count, params=params_str)
+                else:
+                    # 即使没有数据也记录
+                    self.log_manager.update_sync_log(task_id, date_str, 0, params=params_str)
+            except Exception as e:
+                logger.error(f"Sync {task_id} for {date_str} failed: {e}")
+                self.log_manager.update_sync_log(task_id, date_str, 0, "failed", str(e), params=params_str)
 
         logger.info(f"Incremental sync completed for {task_id}: {total_rows} total rows")
         return True

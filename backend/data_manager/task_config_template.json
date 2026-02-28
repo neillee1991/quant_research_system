@@ -6,7 +6,6 @@
       "description": "按日期同步所有股票的数据",
       "sync_mode": "by_date",
       "sync_type": "incremental",
-      "schedule": "daily",
       "enabled": true,
       "params": {
         "trade_date": "{date}",
@@ -28,7 +27,6 @@
       "description": "按股票同步历史数据",
       "sync_mode": "by_stock",
       "sync_type": "incremental",
-      "schedule": "daily",
       "enabled": true,
       "params": {
         "ts_code": "{stock_code}",
@@ -65,7 +63,6 @@
       "description": "全量同步基础数据",
       "sync_mode": "full",
       "sync_type": "full",
-      "schedule": "weekly",
       "enabled": true,
       "params": {
         "exchange": "",
@@ -139,8 +136,7 @@
       "scenario": "每周更新股票基础信息",
       "use_template": "full_sync_template",
       "modifications": {
-        "task_id": "stock_basic",
-        "schedule": "weekly"
+        "task_id": "stock_basic"
       }
     }
   ]

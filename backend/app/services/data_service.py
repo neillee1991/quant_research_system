@@ -32,9 +32,9 @@ class DataService:
             filters["industry"] = industry
 
         try:
-            df = self.repository.query("stock_basic", filters=filters)
+            df = self.repository.query("sync_stock_basic", filters=filters)
             if df.is_empty():
-                raise DataNotFoundError("stock_basic", f"market={market}, industry={industry}")
+                raise DataNotFoundError("sync_stock_basic", f"market={market}, industry={industry}")
             return df
         except Exception as e:
             logger.error(f"Failed to get stock list: {e}")
@@ -67,14 +67,14 @@ class DataService:
 
         try:
             df = self.repository.query(
-                "daily_data",
+                "sync_daily_data",
                 filters=filters,
                 limit=min(limit or DEFAULT_QUERY_LIMIT, MAX_QUERY_LIMIT)
             )
 
             if df.is_empty():
                 raise DataNotFoundError(
-                    "daily_data",
+                    "sync_daily_data",
                     f"ts_code={ts_code}, start={start_date}, end={end_date}"
                 )
 
@@ -103,16 +103,16 @@ class DataService:
             self._validate_date(end_date)
 
         try:
-            # 从 daily_basic 表获取因子数据
+            # 从 sync_daily_basic 表获取因子数据
             df = self.repository.query(
-                "daily_basic",
+                "sync_daily_basic",
                 columns=factors if factors else None,
                 filters=filters
             )
 
             if df.is_empty():
                 raise DataNotFoundError(
-                    "daily_basic",
+                    "sync_daily_basic",
                     f"ts_code={ts_code}, factors={factors}"
                 )
 
@@ -146,8 +146,8 @@ class DataService:
                     b.pe,
                     b.pb,
                     b.turnover_rate
-                FROM daily_data d
-                LEFT JOIN daily_basic b
+                FROM sync_daily_data d
+                LEFT JOIN sync_daily_basic b
                     ON d.ts_code = b.ts_code AND d.trade_date = b.trade_date
                 WHERE d.ts_code = %s
                     AND d.trade_date >= %s

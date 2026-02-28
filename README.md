@@ -47,7 +47,7 @@ cp .env.example .env
 | **回测引擎** | 向量化回测 | VectorBT: Sharpe, MaxDD, WinRate, ProfitFactor |
 | **策略建模** | 可视化拖拽 | React Flow + DSL 解析器 |
 | **AutoML** | 模型训练优化 | PyCaret + Optuna 贝叶斯优化 |
-| **前端** | 交互界面 | React 18 + TypeScript + Ant Design + ECharts |
+| **前端** | 交互界面 | React 18 + TypeScript + Semi Design + ECharts |
 
 ## 项目架构
 
@@ -63,8 +63,7 @@ quant_research_system/
 │   │   └── sync_components.py # 同步组件
 │   ├── flows/                 # Prefect 流程定义
 │   │   ├── data_sync_flow.py  # 数据同步流
-│   │   ├── factor_compute_flow.py # 因子计算流
-│   │   ├── backtest_flow.py   # 回测流
+│   │   ├── dynamic_flow.py    # 动态流程
 │   │   └── serve.py           # 流程部署入口
 │   ├── engine/
 │   │   ├── analysis/          # 因子分析（IC/IR）

@@ -86,23 +86,6 @@ class RefactoredSyncEngine:
         logger.info(f"Sync completed. Results: {results}")
         return results
 
-    def sync_by_schedule(
-        self,
-        schedule: str,
-        target_date: Optional[str] = None
-    ) -> Dict[str, str]:
-        """按调度类型同步"""
-        tasks = self.config_manager.get_tasks_by_schedule(schedule)
-        logger.info(f"Syncing {len(tasks)} tasks with schedule={schedule}")
-
-        results = {}
-        for task in tasks:
-            task_id = task["task_id"]
-            success = self.task_executor.execute_task(task, target_date)
-            results[task_id] = "success" if success else "failed"
-
-        return results
-
     def get_all_tasks(self) -> List[Dict]:
         """获取所有任务配置"""
         return self.config_manager.get_all_tasks()
@@ -118,7 +101,6 @@ class RefactoredSyncEngine:
                 "description": task.get("description", ""),
                 "enabled": task.get("enabled", True),
                 "sync_type": task.get("sync_type", ""),
-                "schedule": task.get("schedule", ""),
                 "table_name": task.get("table_name", ""),
                 "date_field": task.get("date_field", "trade_date")
             }
