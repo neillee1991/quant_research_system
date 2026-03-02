@@ -18,6 +18,7 @@ async def lifespan(app: FastAPI):
     try:
         db_client.ensure_meta_tables()
         db_client.seed_sync_task_config()
+        db_client.seed_factor_data_config()
     except Exception as e:
         logger.error(f"维度表初始化失败: {e}")
     yield

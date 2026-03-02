@@ -14,6 +14,7 @@ from store.dolphindb_client import db_client
 from data_manager.refactored_sync_engine import sync_engine
 from app.core.config import settings
 from app.core.logger import logger
+from app.core.utils import DateUtils
 
 
 # Polars 类型名 -> DolphinDB 类型名（用于 ETL 自动建表和脚本测试）
@@ -1042,7 +1043,7 @@ def test_etl_script(payload: dict):
         test_date = payload.get("date", "")
         if test_date:
             try:
-                date_obj = datetime.strptime(test_date, "%Y%m%d")
+                date_obj = DateUtils.parse_date(test_date)
                 date_str = date_obj.strftime("%Y.%m.%d")
             except ValueError:
                 date_str = test_date
@@ -1095,8 +1096,8 @@ def backfill_etl_task(
         if not script_template or not script_template.strip():
             raise HTTPException(status_code=400, detail="ETL script is empty")
 
-        start = datetime.strptime(start_date, "%Y%m%d")
-        end = datetime.strptime(end_date, "%Y%m%d")
+        start = DateUtils.parse_date(start_date)
+        end = DateUtils.parse_date(end_date)
         if start > end:
             raise HTTPException(status_code=400, detail="start_date must be <= end_date")
 

@@ -2,8 +2,8 @@
 因子生产引擎
 负责数据加载、因子计算调度、结果存储
 """
-import pandas as pd
 import polars as pl
+from app.core.utils import DateUtils
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 
@@ -13,12 +13,13 @@ from data_manager.processor import DataProcessor
 from engine.production.registry import (
     FactorDefinition, StorageConfig, get_factor, get_registry, list_factors, discover_factors
 )
+from engine.production.data_config import DataConfigLoader
 
 
 # 数据表到查询列的映射
 TABLE_COLUMNS = {
     "sync_daily_data": ["ts_code", "trade_date", "open", "high", "low", "close", "vol", "amount", "pct_chg"],
-    "sync_daily_basic": ["ts_code", "trade_date", "close", "turnover_rate", "volume_ratio", "pe", "pb"],
+    "sync_daily_basic": ["ts_code", "trade_date", "close", "turnover_rate", "turnover_rate_f", "volume_ratio", "pe", "pe_ttm", "pb", "ps", "ps_ttm", "dv_ratio", "dv_ttm", "total_share", "float_share", "free_share", "total_mv", "circ_mv"],
     "sync_adj_factor": ["ts_code", "trade_date", "adj_factor"],
     "sync_index_daily": ["ts_code", "trade_date", "open", "high", "low", "close", "vol", "amount", "pct_chg"],
 }
@@ -36,6 +37,9 @@ class ProductionEngine:
     def __init__(self, db_client):
         self.db = db_client
         self.trading_cal = TradingCalendar.get_instance(db_client)
+        self.data_config = DataConfigLoader(db_client)
+        # 确保 data_config 中引用的表都已注册到 _ALL_TABLES（用于 SQL 语法适配）
+        self._register_config_tables()
 
     # 默认预处理选项
     DEFAULT_PREPROCESS = {
@@ -46,6 +50,24 @@ class ProductionEngine:
         "handle_suspension": True,
         "mark_limit": True,
     }
+
+    def _register_config_tables(self):
+        """将 data_config 中引用的表名注册到 db._ALL_TABLES，确保 SQL 语法适配能识别"""
+        try:
+            config = self.data_config.load()
+            for cfg in config.values():
+                table_name = cfg.get("table_name", "")
+                if table_name and table_name not in self.db._ALL_TABLES:
+                    self.db.register_meta_table(table_name)
+                # 也注册 extra_config 中引用的表（如 price_table）
+                extra = cfg.get("extra_config", {})
+                if isinstance(extra, dict):
+                    for key in ("price_table",):
+                        ref_table = extra.get(key, "")
+                        if ref_table and ref_table not in self.db._ALL_TABLES:
+                            self.db.register_meta_table(ref_table)
+        except Exception as e:
+            logger.debug(f"注册 data_config 表名失败: {e}")
 
     def run_task(
         self,
@@ -66,7 +88,7 @@ class ProductionEngine:
             mode: 强制指定计算模式 ("incremental" / "full")，覆盖因子定义
             preprocess: 预处理选项，None 时从因子 params.preprocess 读取，仍无则使用默认值
         """
-        discover_factors()  # 确保代码因子已注册
+        discover_factors(db_client=self.db)  # 确保因子已注册（优先从数据库加载）
         definition = get_factor(factor_id)
         if not definition:
             logger.error(f"Factor not found: {factor_id}")
@@ -79,7 +101,7 @@ class ProductionEngine:
 
         compute_mode = mode or definition.compute_mode
         started_at = datetime.now()
-        run_id = self._insert_run_record(factor_id, compute_mode, start_date, end_date)
+        run_id = self._insert_run_record(factor_id, compute_mode, start_date, end_date, opts)
 
         try:
             logger.info(f"Starting factor computation: {factor_id} (mode={compute_mode})")
@@ -105,18 +127,15 @@ class ProductionEngine:
 
             logger.info(f"Loaded {len(df)} rows for factor {factor_id}")
 
-            # 2.5 过滤特殊股票（根据选项）
-            if opts["filter_st"] or opts["filter_new_stock"]:
-                df = self._filter_special_stocks(
-                    df, data_start,
+            # 2.5 应用股票状态（ST、涨跌停、停牌）- 统一从 stock_daily_status 表 join
+            if opts["filter_st"] or opts["filter_new_stock"] or opts["mark_limit"]:
+                df = self._apply_stock_status(
+                    df, data_start, calc_end,
                     filter_st=opts["filter_st"],
                     filter_new_stock=opts["filter_new_stock"],
                     new_stock_days=opts["new_stock_days"],
+                    mark_limit=opts["mark_limit"],
                 )
-
-            # 2.6 标记一字涨跌停（根据选项）
-            if opts["mark_limit"] and "sync_daily_data" in definition.depends_on and "open" in df.columns:
-                df = DataProcessor.mark_limit_up_down(df)
 
             # 3. 执行因子计算
             result = definition.func(df, definition.params)
@@ -125,14 +144,10 @@ class ProductionEngine:
                 self._finish_run_record(run_id, "success", 0, started_at, "empty result")
                 return False
 
-            # 3.5 停牌复牌处理（根据选项）
-            if opts["handle_suspension"] and "factor_value" in result.columns and self.trading_cal.is_loaded:
+            # 3.5 停牌处理（基于 stock_daily_status.is_suspend）
+            if opts["handle_suspension"] and "factor_value" in result.columns:
                 window = definition.params.get("window", 20)
-                trading_days = self.trading_cal.get_trading_days(data_start, calc_end)
-                result = result.sort(["ts_code", "trade_date"])
-                result = DataProcessor.mark_suspension_gaps(result, trading_days)
-                result = DataProcessor.nullify_post_suspension(result, window)
-                result = result.drop_nulls(subset=["factor_value"])
+                result = self._handle_suspension_from_status(result, data_start, calc_end, window)
 
             # 4. 过滤到目标日期范围（增量模式下去掉 lookback 窗口的数据）
             if "trade_date" in result.columns:
@@ -199,7 +214,7 @@ class ProductionEngine:
             # 从上次计算日期的下一天开始
             last_date = self._get_last_computed_date(factor_id)
             if last_date:
-                calc_start = self._add_days(last_date, 1)
+                calc_start = DateUtils.add_days(last_date, 1)
             else:
                 calc_start = today
             calc_end = today
@@ -265,7 +280,11 @@ class ProductionEngine:
             adjust_type: "forward"=前复权, "backward"=后复权
         """
         try:
-            adj_df = self._load_table_data("sync_adj_factor", start_date, end_date)
+            cfg = self.data_config.get("adj_factor")
+            adj_table = cfg["table_name"] or "sync_adj_factor"
+            adj_column = cfg["column_name"] or "adj_factor"
+
+            adj_df = self._load_table_data(adj_table, start_date, end_date)
             if adj_df is None or adj_df.is_empty():
                 logger.warning("adj_factor 数据为空，跳过复权处理")
                 return df
@@ -273,23 +292,21 @@ class ProductionEngine:
             # 合并复权因子
             df = df.join(adj_df, on=["ts_code", "trade_date"], how="left")
 
-            if "adj_factor" not in df.columns:
+            if adj_column not in df.columns:
                 return df
 
             # 计算基准复权因子
             if adjust_type == "forward":
-                # 前复权：以最新日期的 adj_factor 为基准
                 base_adj = (
                     df.sort(["ts_code", "trade_date"])
                     .group_by("ts_code")
-                    .agg(pl.col("adj_factor").last().alias("_base_adj"))
+                    .agg(pl.col(adj_column).last().alias("_base_adj"))
                 )
             else:
-                # 后复权：以最早日期的 adj_factor 为基准
                 base_adj = (
                     df.sort(["ts_code", "trade_date"])
                     .group_by("ts_code")
-                    .agg(pl.col("adj_factor").first().alias("_base_adj"))
+                    .agg(pl.col(adj_column).first().alias("_base_adj"))
                 )
 
             df = df.join(base_adj, on="ts_code", how="left")
@@ -297,80 +314,260 @@ class ProductionEngine:
             # 复权公式：adjusted_price = price * adj_factor / base_adj
             price_cols = [c for c in ["open", "high", "low", "close"] if c in df.columns]
             df = df.with_columns([
-                (pl.col(c) * pl.col("adj_factor") / pl.col("_base_adj")).alias(c)
+                (pl.col(c) * pl.col(adj_column) / pl.col("_base_adj")).alias(c)
                 for c in price_cols
             ])
 
             # 清理临时列
-            df = df.drop(["adj_factor", "_base_adj"])
+            df = df.drop([adj_column, "_base_adj"])
             logger.debug(f"{'前' if adjust_type == 'forward' else '后'}复权处理完成")
             return df
         except Exception as e:
             logger.warning(f"复权处理失败 ({e})，使用未复权价格")
             return df
 
-    def _filter_special_stocks(self, df: pl.DataFrame, data_start: str,
-                               filter_st: bool = True,
-                               filter_new_stock: bool = True,
-                               new_stock_days: int = IPO_EXCLUDE_DAYS) -> pl.DataFrame:
-        """过滤特殊股票。
+    def _apply_stock_status(self, df: pl.DataFrame,
+                            start_date: str, end_date: str,
+                            filter_st: bool = True,
+                            filter_new_stock: bool = True,
+                            new_stock_days: int = IPO_EXCLUDE_DAYS,
+                            mark_limit: bool = True) -> pl.DataFrame:
+        """根据 data_config 配置加载股票状态并应用过滤/标记。
 
-        Args:
-            df: 含 ts_code, trade_date 的 DataFrame
-            data_start: 数据加载起始日期，用于判断新股
-            filter_st: 是否过滤 ST/*ST 股票
-            filter_new_stock: 是否过滤新股
-            new_stock_days: 新股排除天数
+        完全从 factor_data_config 表读取配置，支持用户配置的任意数据源。
+        如果未配置，则跳过对应过滤。
         """
         try:
-            stock_info = self.db.query(
-                f'SELECT ts_code, name, list_date FROM loadTable("{self.db._db_path}", "sync_stock_basic")'
-            )
+            # 获取每个字段的配置
+            fields = ["is_st", "is_suspend", "is_limit"]
+            field_configs = {}
+            missing_configs = []
+
+            for fk in fields:
+                cfg = self.data_config.get(fk)
+                tbl = cfg.get("table_name", "")
+                col = cfg.get("column_name", "")
+                if tbl and col:
+                    field_configs[fk] = {"table": tbl, "column": col}
+                else:
+                    missing_configs.append(fk)
+
+            # 如果有字段未配置，提示用户（但继续处理其他已配置的字段）
+            if missing_configs:
+                logger.info(
+                    f"股票状态字段 {missing_configs} 未在'因子-数据配置'中配置，"
+                    f"对应过滤/标记功能将跳过。请在配置界面设置数据源（table_name + column_name）"
+                )
+
+            if not field_configs:
+                logger.info("股票状态配置为空，跳过所有状态过滤")
+                # 仍然需要处理新股过滤（不依赖 stock_daily_status 表）
+                if filter_new_stock:
+                    df = self._filter_new_stock(df, start_date, new_stock_days)
+                return df
+
+            # 收集所有需要的表及其字段
+            tables: Dict[str, List[str]] = {}  # table_name -> [columns]
+            for fk, cfg in field_configs.items():
+                tbl = cfg["table"]
+                col = cfg["column"]
+                if tbl not in tables:
+                    tables[tbl] = []
+                if col not in tables[tbl]:
+                    tables[tbl].append(col)
+
+            # 为每张表加载数据并合并
+            status_dfs = []
+            for tbl, cols in tables.items():
+                if not self.db.table_exists(tbl):
+                    logger.warning(f"配置的数据表 {tbl} 不存在，跳过状态过滤")
+                    return df
+
+                select_cols = ["ts_code", "trade_date"] + cols
+                col_str = ", ".join(select_cols)
+                # 将日期转为 DolphinDB DATE 字面量格式 (YYYY.MM.DD)，不加引号
+                # 这样可兼容 DATE 类型的列
+                ddb_start = f"{start_date[:4]}.{start_date[4:6]}.{start_date[6:]}"
+                ddb_end = f"{end_date[:4]}.{end_date[4:6]}.{end_date[6:]}"
+                status_df = self.db.query(
+                    f"SELECT {col_str} FROM {tbl}"
+                    f" WHERE trade_date >= {ddb_start} AND trade_date <= {ddb_end}"
+                )
+                if not status_df.is_empty():
+                    # 重命名列：column_name -> field_key (is_st, is_suspend, is_limit)
+                    rename_map = {}
+                    for fk, cfg in field_configs.items():
+                        if cfg["table"] == tbl:
+                            rename_map[cfg["column"]] = fk
+                    if rename_map:
+                        status_df = status_df.rename(rename_map)
+                    status_dfs.append(status_df)
+
+            if not status_dfs:
+                logger.warning("股票状态数据为空，跳过过滤")
+                return df
+
+            # 合并多个状态表
+            status_df = status_dfs[0]
+            for sdf in status_dfs[1:]:
+                # 只取右表不重复的列
+                right_cols = [c for c in sdf.columns if c not in status_df.columns or c in ["ts_code", "trade_date"]]
+                status_df = status_df.join(sdf.select(right_cols), on=["ts_code", "trade_date"], how="left")
+
+            # Join 到主数据
+            before = len(df)
+            df = df.join(status_df, on=["ts_code", "trade_date"], how="left")
+
+            # 填充缺失值（没有状态记录的默认为正常）
+            df = df.with_columns([
+                pl.col(fk).fill_null(0) for fk in fields if fk in df.columns
+            ])
+
+            # 2. 过滤 ST（仅当 is_st 配置存在时）
+            if filter_st and "is_st" in df.columns:
+                before_st = len(df)
+                df = df.filter(pl.col("is_st") == 0)
+                st_dropped = before_st - len(df)
+                if st_dropped > 0:
+                    logger.info(f"ST 过滤: 移除 {st_dropped} 行")
+
+            # 3. 标记涨跌停（仅当 is_limit 配置存在时）
+            if mark_limit and "is_limit" in df.columns:
+                df = df.with_columns(pl.col("is_limit").alias("_limit_up_down"))
+                marked = df.filter(pl.col("_limit_up_down") != 0).height
+                if marked > 0:
+                    logger.info(f"涨跌停标记: {marked} 行")
+
+            # 清理临时列（保留 is_suspend 用于后续停牌处理）
+            df = df.drop([c for c in ["is_st", "is_limit"] if c in df.columns])
+
+            total_dropped = before - len(df)
+            if total_dropped > 0:
+                logger.info(f"股票状态过滤: 总计移除 {total_dropped} 行")
+
+            # 4. 过滤新股（仍需单独处理，因为需要交易日历计算）
+            if filter_new_stock:
+                df = self._filter_new_stock(df, start_date, new_stock_days)
+
+            return df
+        except Exception as e:
+            logger.warning(f"应用股票状态失败 ({e})，跳过")
+            return df
+
+    def _filter_new_stock(self, df: pl.DataFrame, data_start: str, new_stock_days: int) -> pl.DataFrame:
+        """过滤新股（上市未满 N 个交易日）"""
+        try:
+            ld_cfg = self.data_config.get("list_date")
+            ld_table = ld_cfg["table_name"] or "sync_stock_basic"
+            ld_column = ld_cfg["column_name"] or "list_date"
+
+            stock_info = self.db.query(f'SELECT ts_code, {ld_column} FROM {ld_table}')
             if stock_info.is_empty():
                 return df
 
             before = len(df)
-            exclude_codes: set = set()
-            st_count = 0
-            new_count = 0
-
-            # 1. 过滤 ST / *ST 股票
-            if filter_st:
-                st_codes = stock_info.filter(
-                    pl.col("name").str.contains("ST")
-                )["ts_code"].to_list()
-                exclude_codes.update(st_codes)
-                st_count = len(st_codes)
-
-            # 2. 过滤新股
-            if filter_new_stock:
-                if self.trading_cal.is_loaded:
-                    ipo_cutoff = self.trading_cal.offset_trading_days(data_start, -new_stock_days)
-                else:
-                    from datetime import timedelta
-                    dt = datetime.strptime(data_start, "%Y%m%d")
-                    ipo_cutoff = (dt - timedelta(days=int(new_stock_days * 1.5))).strftime("%Y%m%d")
-
-                new_stock_codes = stock_info.filter(
-                    pl.col("list_date").is_not_null() & (pl.col("list_date") > ipo_cutoff)
-                )["ts_code"].to_list()
-                exclude_codes.update(new_stock_codes)
-                new_count = len(new_stock_codes)
-
-            if exclude_codes:
-                df = df.filter(~pl.col("ts_code").is_in(list(exclude_codes)))
-                dropped = before - len(df)
-                if dropped > 0:
-                    logger.info(
-                        f"特殊股票过滤: 排除 {len(exclude_codes)} 只股票 "
-                        f"(ST: {st_count}, 新股: {new_count})，"
-                        f"移除 {dropped} 行数据"
+            if self.trading_cal.is_loaded:
+                # 用交易日历精确计算每只股票的 cutoff
+                cutoff_map = {}
+                for row in stock_info.to_dicts():
+                    ld = row.get(ld_column)
+                    if ld:
+                        cutoff_map[row["ts_code"]] = self.trading_cal.offset_trading_days(ld, new_stock_days)
+                if cutoff_map:
+                    cutoff_df = pl.DataFrame({
+                        "ts_code": list(cutoff_map.keys()),
+                        "_ipo_cutoff": list(cutoff_map.values()),
+                    })
+                    df = df.join(cutoff_df, on="ts_code", how="left")
+                    df = df.filter(
+                        pl.col("_ipo_cutoff").is_null() | (pl.col("trade_date") >= pl.col("_ipo_cutoff"))
                     )
+                    df = df.drop("_ipo_cutoff")
+            else:
+                # 无交易日历：静态排除
+                from datetime import timedelta
+                dt = DateUtils.parse_date(data_start)
+                ipo_cutoff = (dt - timedelta(days=int(new_stock_days * 1.5))).strftime("%Y%m%d")
+                new_codes = stock_info.filter(
+                    pl.col(ld_column).is_not_null() & (pl.col(ld_column) > ipo_cutoff)
+                )["ts_code"].to_list()
+                if new_codes:
+                    df = df.filter(~pl.col("ts_code").is_in(new_codes))
 
+            dropped = before - len(df)
+            if dropped > 0:
+                logger.info(f"新股过滤: 移除 {dropped} 行")
             return df
         except Exception as e:
-            logger.warning(f"特殊股票过滤失败 ({e})，跳过过滤")
+            logger.warning(f"新股过滤失败 ({e})，跳过")
             return df
+
+    def _handle_suspension_from_status(self, result: pl.DataFrame,
+                                       start_date: str, end_date: str,
+                                       window: int) -> pl.DataFrame:
+        """基于 data_config 配置的 is_suspend 字段处理停牌。
+
+        将 is_suspend > 0 的行及其后 window 行的 factor_value 置空。
+        完全依赖 factor_data_config 配置，支持用户配置的任意数据源。
+        """
+        try:
+            status_cfg = self.data_config.get("is_suspend")
+            status_table = status_cfg.get("table_name", "")
+            status_column = status_cfg.get("column_name", "is_suspend")
+
+            if status_table and self.db.table_exists(status_table):
+                # 将日期转为 DolphinDB DATE 字面量格式 (YYYY.MM.DD)，不加引号
+                ddb_start = f"{start_date[:4]}.{start_date[4:6]}.{start_date[6:]}"
+                ddb_end = f"{end_date[:4]}.{end_date[4:6]}.{end_date[6:]}"
+                status_df = self.db.query(
+                    f"SELECT ts_code, trade_date, {status_column} FROM {status_table}"
+                    f" WHERE trade_date >= {ddb_start} AND trade_date <= {ddb_end}"
+                )
+
+                if not status_df.is_empty():
+                    # 重命名配置的列名为 is_suspend（后续逻辑统一使用）
+                    if status_column != "is_suspend":
+                        status_df = status_df.rename({status_column: "is_suspend"})
+
+                    result = result.sort(["ts_code", "trade_date"])
+                    result = result.join(status_df, on=["ts_code", "trade_date"], how="left")
+                    result = result.with_columns(pl.col("is_suspend").fill_null(0))
+
+                    # 用 rolling_sum 向后扩散：停牌日及其后 window 行内置空
+                    result = result.with_columns(
+                        pl.col("is_suspend")
+                        .rolling_sum(window_size=window, min_periods=1)
+                        .over("ts_code")
+                        .alias("_near_susp")
+                    )
+
+                    nullified = result.filter(pl.col("_near_susp") > 0).height
+                    if nullified > 0:
+                        logger.info(f"停牌处理: {nullified} 行 factor_value 被置空")
+
+                    result = result.with_columns(
+                        pl.when(pl.col("_near_susp") > 0)
+                        .then(pl.lit(None, dtype=pl.Float64))
+                        .otherwise(pl.col("factor_value"))
+                        .alias("factor_value")
+                    )
+                    result = result.drop(["is_suspend", "_near_susp"])
+                    result = result.drop_nulls(subset=["factor_value"])
+                    return result
+
+            # 无配置数据源，回退到交易日 gap 推断
+            logger.info("is_suspend 未配置，回退到交易日 gap 推断停牌")
+            if self.trading_cal.is_loaded:
+                trading_days = self.trading_cal.get_trading_days(start_date, end_date)
+                result = result.sort(["ts_code", "trade_date"])
+                result = DataProcessor.mark_suspension_gaps(result, trading_days)
+                result = DataProcessor.nullify_post_suspension(result, window)
+                result = result.drop_nulls(subset=["factor_value"])
+
+            return result
+        except Exception as e:
+            logger.warning(f"停牌处理失败 ({e})，跳过")
+            return result
 
     def _load_table_data(self, table_name: str, start_date: str,
                          end_date: str) -> Optional[pl.DataFrame]:
@@ -446,8 +643,6 @@ class ProductionEngine:
 
     def _save_to_unified_table(self, factor_id: str, df: pl.DataFrame) -> int:
         """保存到统一因子表"""
-        # DolphinDB 自动管理分区，无需手动确保
-
         # 构造写入数据：ts_code, trade_date, factor_id, factor_value, quality_flag
         select_cols = [
             pl.col("ts_code"),
@@ -460,9 +655,28 @@ class ProductionEngine:
 
         write_df = df.select(select_cols)
 
+        # 先删除旧数据再插入，确保被剔除的股票（如 ST 变更）不会留有残余值
+        trade_dates = write_df["trade_date"].unique().to_list()
+        if trade_dates:
+            self._delete_factor_dates(factor_id, trade_dates)
+
         self.db.upsert("factor_values", write_df,
                        ["ts_code", "trade_date", "factor_id"])
         return len(write_df)
+
+    def _delete_factor_dates(self, factor_id: str, trade_dates: list) -> None:
+        """删除 factor_values 中指定因子在指定日期的所有旧数据"""
+        try:
+            db_path = self.db._db_path
+            ddb_dates = [self.db._escape_value(d) for d in trade_dates]
+            dates_vec = "[" + ", ".join(ddb_dates) + "]"
+            self.db.execute(
+                f'pt = loadTable("{db_path}", "factor_values");'
+                f'delete from pt where factor_id = "{factor_id}" and trade_date in {dates_vec}'
+            )
+            logger.debug(f"已删除 {factor_id} 在 {len(trade_dates)} 个日期的旧数据")
+        except Exception as e:
+            logger.warning(f"删除 {factor_id} 旧数据失败: {e}")
 
     def _save_to_custom_table(self, df: pl.DataFrame,
                               storage: StorageConfig) -> int:
@@ -486,9 +700,20 @@ class ProductionEngine:
 
     def _update_metadata(self, factor_id: str, definition: FactorDefinition,
                          last_date: str, rows: int):
-        """更新因子元数据（保留用户设置的 preprocess 配置）"""
+        """更新因子元数据（保留 code/depends_on/preprocess 配置）"""
         import json
         try:
+            # 先读取现有记录，保留 code / depends_on / created_at
+            existing = {}
+            try:
+                df_existing = self.db.query(
+                    "SELECT * FROM factor_metadata WHERE factor_id = %s", (factor_id,)
+                )
+                if not df_existing.is_empty():
+                    existing = df_existing.to_dicts()[0]
+            except Exception:
+                pass
+
             # 合并 params：保留 DB 中用户设置的 preprocess，其余用代码定义覆盖
             db_pp = self._get_factor_preprocess(factor_id)
             merged_params = dict(definition.params) if definition.params else {}
@@ -496,33 +721,36 @@ class ProductionEngine:
                 merged_params["preprocess"] = db_pp
 
             now = datetime.now()
-            pdf = pd.DataFrame({
-                "factor_id": [factor_id],
-                "description": [definition.description or ""],
-                "category": [definition.category or "custom"],
-                "compute_mode": [definition.compute_mode or "incremental"],
-                "storage_target": [definition.storage.target or "factor_values"],
-                "params": [json.dumps(merged_params)],
-                "last_computed_date": [last_date],
-                "last_computed_at": [now],
-                "created_at": [now],
-                "updated_at": [now],
+            row = {
+                "factor_id": factor_id,
+                "description": definition.description or "",
+                "category": definition.category or "custom",
+                "compute_mode": definition.compute_mode or "incremental",
+                "storage_target": definition.storage.target or "factor_values",
+                "depends_on": existing.get("depends_on") or json.dumps(definition.depends_on or []),
+                "params": json.dumps(merged_params),
+                "code": existing.get("code") or "",
+                "last_computed_date": last_date,
+                "last_computed_at": now,
+                "created_at": existing.get("created_at") or now,
+                "updated_at": now,
+            }
+
+            update_df = pl.DataFrame([row], schema={
+                "factor_id": pl.Utf8,
+                "description": pl.Utf8,
+                "category": pl.Utf8,
+                "compute_mode": pl.Utf8,
+                "storage_target": pl.Utf8,
+                "depends_on": pl.Utf8,
+                "params": pl.Utf8,
+                "code": pl.Utf8,
+                "last_computed_date": pl.Utf8,
+                "last_computed_at": pl.Datetime("ns"),
+                "created_at": pl.Datetime("ns"),
+                "updated_at": pl.Datetime("ns"),
             })
-            meta_db = self.db._db_path
-            with self.db._lock:
-                self.db._ensure_connected()
-                # delete + insert 实现 upsert
-                self.db._session.run(
-                    f'fm = loadTable("{meta_db}", "factor_metadata");'
-                    f'delete from fm where factor_id = "{factor_id}"'
-                )
-                tmp = f"_meta_upd_{factor_id}"
-                self.db._session.upload({tmp: pdf})
-                self.db._session.run(
-                    f'fm = loadTable("{meta_db}", "factor_metadata");'
-                    f'tableInsert(fm, {tmp});'
-                    f"undef('{tmp}')"
-                )
+            self.db.upsert("factor_metadata", update_df, ["factor_id"])
         except Exception as e:
             logger.warning(f"Failed to update factor metadata: {e}")
 
@@ -558,48 +786,67 @@ class ProductionEngine:
 
     # ==================== 工具方法 ====================
 
-    @staticmethod
-    def _add_days(date_str: str, days: int) -> str:
-        """日期加减天数"""
-        from datetime import timedelta
-        dt = datetime.strptime(date_str, "%Y%m%d")
-        result = dt + timedelta(days=days)
-        return result.strftime("%Y%m%d")
-
     # ==================== 运行记录 ====================
 
     def _insert_run_record(self, factor_id: str, mode: str,
-                           start_date: Optional[str], end_date: Optional[str]) -> Optional[str]:
+                           start_date: Optional[str], end_date: Optional[str],
+                           opts: Optional[Dict[str, Any]] = None) -> Optional[str]:
         """插入运行记录，返回 run_id (时间戳字符串)"""
+        import json
         try:
             now = datetime.now()
             run_id = now.strftime("%Y%m%d%H%M%S%f")
-            pdf = pd.DataFrame({
-                "factor_id": [factor_id],
-                "mode": [mode or ""],
-                "status": ["running"],
-                "start_date": [start_date or ""],
-                "end_date": [end_date or ""],
-                "rows_affected": [0],
-                "duration_seconds": [0.0],
-                "error_message": [run_id],  # 借用 error_message 存 run_id 用于后续定位
-                "created_at": [now],
-            })
+
+            # 格式化 timestamp 为 DolphinDB TIMESTAMP 格式（含毫秒）
+            now_ts = now.strftime("%Y.%m.%dT%H:%M:%S.") + f"{now.microsecond // 1000:03d}"
+            opts = opts or {}
+            opts_str = json.dumps(opts).replace('"', '\\"')  # 转义双引号
+
+            # 提取预处理参数
+            filter_st = "true" if opts.get("filter_st", True) else "false"
+            filter_new_stock = "true" if opts.get("filter_new_stock", True) else "false"
+            new_stock_days = opts.get("new_stock_days", 60)
+            handle_suspension = "true" if opts.get("handle_suspension", True) else "false"
+            mark_limit = "true" if opts.get("mark_limit", True) else "false"
+            adjust_price = opts.get("adjust_price", "none")
+
+            # 列顺序必须与 factor_task_run 表定义一致：
+            # factor_id, mode, status, start_date, end_date, rows_affected,
+            # duration_seconds, filter_st, filter_new_stock, new_stock_days,
+            # handle_suspension, mark_limit, adjust_price, preprocess, error_message, created_at
             meta_db = self.db._db_path
             with self.db._lock:
                 self.db._ensure_connected()
-                tmp = f"_run_{run_id}"
-                self.db._session.upload({tmp: pdf})
                 self.db._session.run(
+                    f'ts_val = array(TIMESTAMP, 0).append!({now_ts});'
+                    f'tmpRun = table('
+                    f'["{factor_id}"] as factor_id, '
+                    f'["{mode or ""}"] as mode, '
+                    f'["running"] as status, '
+                    f'["{start_date or ""}"] as start_date, '
+                    f'["{end_date or ""}"] as end_date, '
+                    f'[0] as rows_affected, '
+                    f'[0.0] as duration_seconds, '
+                    f'[{filter_st}] as filter_st, '
+                    f'[{filter_new_stock}] as filter_new_stock, '
+                    f'[{new_stock_days}] as new_stock_days, '
+                    f'[{handle_suspension}] as handle_suspension, '
+                    f'[{mark_limit}] as mark_limit, '
+                    f'["{adjust_price}"] as adjust_price, '
+                    f'["{opts_str}"] as preprocess, '
+                    f'["{run_id}"] as error_message, '
+                    f'ts_val as created_at'
+                    f');'
                     f'ptr = loadTable("{meta_db}", "factor_task_run");'
-                    f'tableInsert(ptr, {tmp});'
-                    f"undef('{tmp}')"
+                    f'ptr.append!(tmpRun);'
                 )
             return run_id
         except Exception as e:
-            logger.debug(f"Failed to insert run record: {e}")
+            import traceback
+            logger.error(f"Failed to insert run record for {factor_id}: {e}\n{traceback.format_exc()}")
             return None
 
+    
     def _finish_run_record(self, run_id: Optional[str], status: str,
                            rows: int, started_at: datetime,
                            error_msg: str = None):
@@ -609,7 +856,7 @@ class ProductionEngine:
         elapsed = (datetime.now() - started_at).total_seconds()
         try:
             meta_db = self.db._db_path
-            err = (error_msg or "").replace('"', '\\"') if error_msg else ""
+            err = (error_msg or "").replace("\\", "\\\\").replace('"', '\\"')[:500] if error_msg else ""
             self.db.execute(
                 f'ptr = loadTable("{meta_db}", "factor_task_run");'
                 f'update ptr set status = "{status}", rows_affected = {rows}, '
@@ -617,4 +864,5 @@ class ProductionEngine:
                 f'where error_message = "{run_id}"'
             )
         except Exception as e:
-            logger.debug(f"Failed to update run record: {e}")
+            import traceback
+            logger.error(f"Failed to update run record {run_id}: {e}\n{traceback.format_exc()}")

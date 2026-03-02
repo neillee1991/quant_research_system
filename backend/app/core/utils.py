@@ -160,6 +160,29 @@ class DateUtils:
         raise ValueError(f"Unrecognized date format: {date_str}")
 
 
+def safe_json_parse(raw: any, default: any = None) -> any:
+    """安全解析 JSON 字符串、字典或 None
+
+    Args:
+        raw: 输入值，可以是 str/dict/None
+        default: 解析失败时的默认值，默认为 {}
+
+    Returns:
+        解析后的值或默认值
+    """
+    import json
+    if raw is None:
+        return default if default is not None else {}
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str):
+        try:
+            return json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            return default if default is not None else {}
+    return default if default is not None else {}
+
+
 class TradingCalendar:
     """交易日历服务
 
@@ -171,7 +194,6 @@ class TradingCalendar:
 
     def __init__(self, db_client=None):
         self._trading_days: list[str] = []
-        self._trading_day_set: set[str] = set()
         if db_client is not None:
             self._load(db_client)
 
@@ -195,7 +217,6 @@ class TradingCalendar:
                 logger.warning("TradingCalendar: sync_trade_cal 表为空，回退到自然日模式")
                 return
             self._trading_days = df["cal_date"].to_list()
-            self._trading_day_set = set(self._trading_days)
             logger.info(f"TradingCalendar loaded {len(self._trading_days)} trading days "
                         f"({self._trading_days[0]} ~ {self._trading_days[-1]})")
         except Exception as e:
@@ -207,7 +228,10 @@ class TradingCalendar:
         return len(self._trading_days) > 0
 
     def is_trading_day(self, date_str: str) -> bool:
-        return date_str in self._trading_day_set
+        """检查是否为交易日，使用二分查找 O(log n)"""
+        import bisect
+        idx = bisect.bisect_left(self._trading_days, date_str)
+        return idx < len(self._trading_days) and self._trading_days[idx] == date_str
 
     def get_trading_days(self, start: str, end: str) -> list[str]:
         """返回 [start, end] 范围内的交易日列表"""

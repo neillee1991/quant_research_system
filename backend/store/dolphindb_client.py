@@ -9,6 +9,7 @@ import threading
 from datetime import datetime, date
 from typing import Any, Dict, List, Optional
 
+import numpy as np
 import pandas as pd
 import polars as pl
 import dolphindb as ddb
@@ -100,7 +101,7 @@ class DolphinDBClient:
         s = str(value)
         if re.match(r"^\d{8}$", s):
             converted = DolphinDBClient._convert_date_format(s)
-            return f'"{converted}"'
+            return converted
         # 普通字符串，转义双引号
         s = s.replace("\\", "\\\\").replace('"', '\\"')
         return f'"{s}"'
@@ -202,7 +203,16 @@ class DolphinDBClient:
         if result is None:
             return pl.DataFrame()
         if isinstance(result, pd.DataFrame):
-            return pl.from_pandas(result)
+            df = pl.from_pandas(result)
+            # DolphinDB DATE 列经 pandas 转为 datetime[ns]，统一转为 YYYYMMDD 字符串
+            for col_name in df.columns:
+                if col_name.endswith("_date") or col_name == "date":
+                    dtype_str = str(df[col_name].dtype)
+                    if dtype_str == "Date" or dtype_str.startswith("Datetime"):
+                        df = df.with_columns(
+                            pl.col(col_name).dt.strftime("%Y%m%d").alias(col_name)
+                        )
+            return df
         if isinstance(result, (list, tuple)):
             # 单列结果
             return pl.DataFrame({"value": result})
@@ -314,17 +324,37 @@ class DolphinDBClient:
 
     def list_tables(self) -> List[Dict[str, Any]]:
         """
-        列出两个数据库中所有已存在的表及其行数和列信息
+        列出数据库中所有已存在的表及其行数和列信息
+        动态查询数据库，不依赖硬编码的表名列表
 
         Returns:
             [{"table_name": str, "row_count": int, "columns": [str], "column_count": int}, ...]
         """
         results = []
-        for table_name in sorted(self._ALL_TABLES):
-            if not self.table_exists(table_name):
-                continue
+        db_path = self._db_path
+
+        try:
+            with self._lock:
+                self._ensure_connected()
+                # 使用 getTables() 函数获取数据库中的所有表
+                tables_result = self._session.run(
+                    f"getTables(database('{db_path}'))"
+                )
+
+            table_names = []
+            if tables_result is not None:
+                if isinstance(tables_result, np.ndarray):
+                    # getTables() 返回 numpy 数组
+                    table_names = tables_result.tolist()
+                elif isinstance(tables_result, list):
+                    table_names = tables_result
+        except Exception as e:
+            logger.error(f"查询数据库 {db_path} 的表列表失败: {e}")
+            return []
+
+        # 获取每个表的详细信息
+        for table_name in sorted(table_names):
             try:
-                db_path = self._resolve_db_path(table_name)
                 with self._lock:
                     self._ensure_connected()
                     schema_info = self._session.run(
@@ -352,12 +382,9 @@ class DolphinDBClient:
                 })
             except Exception as e:
                 logger.warning(f"获取表信息失败 [{table_name}]: {e}")
-                results.append({
-                    "table_name": table_name,
-                    "row_count": 0,
-                    "columns": [],
-                    "column_count": 0,
-                })
+                # 跳过无法获取信息的表
+                continue
+
         return results
 
     def get_table_columns(self, table_name: str) -> List[str]:
@@ -395,6 +422,7 @@ class DolphinDBClient:
         "factor_metadata", "factor_analysis",
         "factor_task_run", "sync_trade_cal",
         "sync_task_config", "etl_task_config",
+        "factor_data_config",
     })
 
     # TSDB 分区表名集合（使用 createPartitionedTable 创建）
@@ -406,13 +434,8 @@ class DolphinDBClient:
     # 所有已知表名
     _ALL_TABLES = _META_TABLES | _TSDB_TABLES
 
-    # 需要从字符串转换为 DATE 类型的列（表名 -> 列名列表）
-    _DATE_COLUMNS: Dict[str, List[str]] = {
-        "sync_daily_data": ["trade_date"],
-        "sync_daily_basic": ["trade_date"],
-        "sync_adj_factor": ["trade_date"],
-        "sync_index_daily": ["trade_date"],
-        "sync_moneyflow": ["trade_date"],
+    # factor_values 等非 sync 任务表仍需硬编码（无 sync task schema 可查）
+    _EXTRA_DATE_COLUMNS: Dict[str, List[str]] = {
         "factor_values": ["trade_date"],
     }
 
@@ -450,7 +473,9 @@ class DolphinDBClient:
             "array(STRING,0) as category,"
             "array(STRING,0) as compute_mode,"
             "array(STRING,0) as storage_target,"
+            "array(STRING,0) as depends_on,"
             "array(STRING,0) as params,"
+            "array(STRING,0) as code,"
             "array(STRING,0) as last_computed_date,"
             "array(TIMESTAMP,0) as last_computed_at,"
             "array(TIMESTAMP,0) as created_at,"
@@ -482,6 +507,13 @@ class DolphinDBClient:
             "array(STRING,0) as end_date,"
             "array(INT,0) as rows_affected,"
             "array(DOUBLE,0) as duration_seconds,"
+            "array(BOOL,0) as filter_st,"
+            "array(BOOL,0) as filter_new_stock,"
+            "array(INT,0) as new_stock_days,"
+            "array(BOOL,0) as handle_suspension,"
+            "array(BOOL,0) as mark_limit,"
+            "array(STRING,0) as adjust_price,"
+            "array(STRING,0) as preprocess,"
             "array(STRING,0) as error_message,"
             "array(TIMESTAMP,0) as created_at)",
             ["factor_id", "created_at"],
@@ -516,6 +548,16 @@ class DolphinDBClient:
             "array(TIMESTAMP,0) as created_at,"
             "array(TIMESTAMP,0) as updated_at)",
             ["task_id", "updated_at"],
+        ),
+        "factor_data_config": (
+            "table("
+            "array(SYMBOL,0) as field_key,"
+            "array(STRING,0) as description,"
+            "array(SYMBOL,0) as table_name,"
+            "array(SYMBOL,0) as column_name,"
+            "array(STRING,0) as extra_config,"
+            "array(TIMESTAMP,0) as updated_at)",
+            ["field_key", "updated_at"],
         ),
     }
 
@@ -647,6 +689,118 @@ class DolphinDBClient:
                     "pretrade_date": {"type": "STRING"},
                 },
             },
+            {
+                "task_id": "sync_sw_index_member_Y",
+                "api_name": "index_member_all",
+                "description": "申万行业成分构成（三级分类，含纳入/剔除日期）",
+                "sync_type": "full",
+                "date_field": "",
+                "table_name": "sync_sw_index_member_Y",
+                "params": {
+                    "is_new": "Y",
+                    "fields": "l1_code,l1_name,l2_code,l2_name,l3_code,l3_name,ts_code,name,in_date,out_date,is_new",
+                },
+                "primary_keys": [],
+                "enabled": True,
+                "api_limit": 2000,
+                "schema": {
+                    "l1_code": {"type": "SYMBOL"},
+                    "l1_name": {"type": "STRING"},
+                    "l2_code": {"type": "SYMBOL"},
+                    "l2_name": {"type": "STRING"},
+                    "l3_code": {"type": "SYMBOL"},
+                    "l3_name": {"type": "STRING"},
+                    "ts_code": {"type": "SYMBOL"},
+                    "name": {"type": "STRING"},
+                    "in_date": {"type": "STRING"},
+                    "out_date": {"type": "STRING"},
+                    "is_new": {"type": "STRING"},
+                },
+            },
+            {
+                "task_id": "sync_sw_index_member_N",
+                "api_name": "index_member_all",
+                "description": "申万行业成分构成（三级分类，含纳入/剔除日期）",
+                "sync_type": "full",
+                "date_field": "",
+                "table_name": "sync_sw_index_member_N",
+                "params": {
+                    "is_new": "N",
+                    "fields": "l1_code,l1_name,l2_code,l2_name,l3_code,l3_name,ts_code,name,in_date,out_date,is_new",
+                },
+                "primary_keys": [],
+                "enabled": True,
+                "api_limit": 2000,
+                "schema": {
+                    "l1_code": {"type": "SYMBOL"},
+                    "l1_name": {"type": "STRING"},
+                    "l2_code": {"type": "SYMBOL"},
+                    "l2_name": {"type": "STRING"},
+                    "l3_code": {"type": "SYMBOL"},
+                    "l3_name": {"type": "STRING"},
+                    "ts_code": {"type": "SYMBOL"},
+                    "name": {"type": "STRING"},
+                    "in_date": {"type": "STRING"},
+                    "out_date": {"type": "STRING"},
+                    "is_new": {"type": "STRING"},
+                },
+            },
+            {
+                "task_id": "sync_ci_index_member_Y",
+                "api_name": "ci_index_member",
+                "description": "中信行业成分构成（三级分类，含纳入/剔除日期）",
+                "sync_type": "full",
+                "date_field": "",
+                "table_name": "sync_ci_index_member_Y",
+                "params": {
+                    "is_new": "Y",
+                    "fields": "l1_code,l1_name,l2_code,l2_name,l3_code,l3_name,ts_code,name,in_date,out_date,is_new",
+                },
+                "primary_keys": [],
+                "enabled": True,
+                "api_limit": 2000,
+                "schema": {
+                    "l1_code": {"type": "SYMBOL"},
+                    "l1_name": {"type": "STRING"},
+                    "l2_code": {"type": "SYMBOL"},
+                    "l2_name": {"type": "STRING"},
+                    "l3_code": {"type": "SYMBOL"},
+                    "l3_name": {"type": "STRING"},
+                    "ts_code": {"type": "SYMBOL"},
+                    "name": {"type": "STRING"},
+                    "in_date": {"type": "STRING"},
+                    "out_date": {"type": "STRING"},
+                    "is_new": {"type": "STRING"},
+                },
+            },
+            {
+                "task_id": "sync_ci_index_member_N",
+                "api_name": "ci_index_member",
+                "description": "中信行业成分构成（三级分类，含纳入/剔除日期）",
+                "sync_type": "full",
+                "date_field": "",
+                "table_name": "sync_ci_index_member_N",
+                "params": {
+                    "is_new": "N",
+                    "fields": "l1_code,l1_name,l2_code,l2_name,l3_code,l3_name,ts_code,name,in_date,out_date,is_new",
+                },
+                "primary_keys": [],
+                "enabled": True,
+                "api_limit": 2000,
+                "schema": {
+                    "l1_code": {"type": "SYMBOL"},
+                    "l1_name": {"type": "STRING"},
+                    "l2_code": {"type": "SYMBOL"},
+                    "l2_name": {"type": "STRING"},
+                    "l3_code": {"type": "SYMBOL"},
+                    "l3_name": {"type": "STRING"},
+                    "ts_code": {"type": "SYMBOL"},
+                    "name": {"type": "STRING"},
+                    "in_date": {"type": "STRING"},
+                    "out_date": {"type": "STRING"},
+                    "is_new": {"type": "STRING"},
+                },
+            },
             # ==================== 增量同步 ====================
             {
                 "task_id": "sync_daily",
@@ -699,13 +853,48 @@ class DolphinDBClient:
             {
                 "task_id": "sync_daily_basic",
                 "api_name": "daily_basic",
-                "description": "每日指标（换手率、量比、市盈率、市净率）",
+                "description": "每日指标（换手率、量比、市盈率、市净率、市值等）",
                 "sync_type": "incremental",
                 "date_field": "trade_date",
                 "table_name": "sync_daily_basic",
                 "params": {
                     "trade_date": "{date}",
-                    "fields": "ts_code,trade_date,close,turnover_rate,volume_ratio,pe,pb",
+                    "fields": "ts_code,trade_date,close,turnover_rate,turnover_rate_f,volume_ratio,pe,pe_ttm,pb,ps,ps_ttm,dv_ratio,dv_ttm,total_share,float_share,free_share,total_mv,circ_mv",
+                },
+                "primary_keys": ["ts_code", "trade_date"],
+                "enabled": True,
+                "api_limit": 6000,
+                "schema": {
+                    "ts_code": {"type": "SYMBOL"},
+                    "trade_date": {"type": "DATE"},
+                    "close": {"type": "DOUBLE"},
+                    "turnover_rate": {"type": "DOUBLE"},
+                    "turnover_rate_f": {"type": "DOUBLE"},
+                    "volume_ratio": {"type": "DOUBLE"},
+                    "pe": {"type": "DOUBLE"},
+                    "pe_ttm": {"type": "DOUBLE"},
+                    "pb": {"type": "DOUBLE"},
+                    "ps": {"type": "DOUBLE"},
+                    "ps_ttm": {"type": "DOUBLE"},
+                    "dv_ratio": {"type": "DOUBLE"},
+                    "dv_ttm": {"type": "DOUBLE"},
+                    "total_share": {"type": "DOUBLE"},
+                    "float_share": {"type": "DOUBLE"},
+                    "free_share": {"type": "DOUBLE"},
+                    "total_mv": {"type": "DOUBLE"},
+                    "circ_mv": {"type": "DOUBLE"},
+                },
+            },
+            {
+                "task_id": "sync_stk_limit",
+                "api_name": "stk_limit",
+                "description": "每日涨跌停价格（涨停价、跌停价、昨日收盘价）",
+                "sync_type": "incremental",
+                "date_field": "trade_date",
+                "table_name": "sync_stk_limit",
+                "params": {
+                    "trade_date": "{date}",
+                    "fields": "ts_code,trade_date,pre_close,up_limit,down_limit",
                 },
                 "primary_keys": ["ts_code", "trade_date"],
                 "enabled": True,
@@ -713,11 +902,52 @@ class DolphinDBClient:
                 "schema": {
                     "ts_code": {"type": "SYMBOL"},
                     "trade_date": {"type": "DATE"},
-                    "close": {"type": "DOUBLE"},
-                    "turnover_rate": {"type": "DOUBLE"},
-                    "volume_ratio": {"type": "DOUBLE"},
-                    "pe": {"type": "DOUBLE"},
-                    "pb": {"type": "DOUBLE"},
+                    "pre_close": {"type": "DOUBLE"},
+                    "up_limit": {"type": "DOUBLE"},
+                    "down_limit": {"type": "DOUBLE"},
+                },
+            },
+            {
+                "task_id": "sync_suspend_d",
+                "api_name": "suspend_d",
+                "description": "每日停复牌信息（停牌/复牌类型、日内停牌时间段）",
+                "sync_type": "incremental",
+                "date_field": "trade_date",
+                "table_name": "sync_suspend_d",
+                "params": {
+                    "trade_date": "{date}",
+                    "fields": "ts_code,trade_date,suspend_timing,suspend_type",
+                },
+                "primary_keys": ["ts_code", "trade_date", "suspend_type"],
+                "enabled": True,
+                "api_limit": 5000,
+                "schema": {
+                    "ts_code": {"type": "SYMBOL"},
+                    "trade_date": {"type": "DATE"},
+                    "suspend_timing": {"type": "STRING"},
+                    "suspend_type": {"type": "STRING"},
+                },
+            },
+            {
+                "task_id": "sync_stock_st",
+                "api_name": "stock_st",
+                "description": "ST股票列表（每日ST/退市风险警示股票）",
+                "sync_type": "incremental",
+                "date_field": "trade_date",
+                "table_name": "sync_stock_st",
+                "params": {
+                    "trade_date": "{date}",
+                    "fields": "ts_code,name,trade_date,type,type_name",
+                },
+                "primary_keys": ["ts_code", "trade_date"],
+                "enabled": True,
+                "api_limit": 1000,
+                "schema": {
+                    "ts_code": {"type": "SYMBOL"},
+                    "name": {"type": "STRING"},
+                    "trade_date": {"type": "DATE"},
+                    "type": {"type": "STRING"},
+                    "type_name": {"type": "STRING"},
                 },
             },
         ]
@@ -738,6 +968,59 @@ class DolphinDBClient:
         })
         self.upsert("sync_task_config", seed_df, ["task_id"])
         logger.info(f"已写入 {len(tasks)} 条默认同步任务配置")
+
+    def seed_factor_data_config(self) -> None:
+        """
+        如果 factor_data_config 表为空，则写入默认字段映射。
+        仅在首次启动时生效，后续可通过 API 修改。
+        """
+        try:
+            count = self.query("SELECT count(*) as cnt FROM factor_data_config")
+            if not count.is_empty() and count["cnt"][0] > 0:
+                logger.info("factor_data_config 已有数据，跳过 seed")
+                return
+        except Exception:
+            pass
+
+        now = datetime.now()
+        mappings = [
+            {"field_key": "adj_factor", "description": "复权因子", "table_name": "sync_adj_factor", "column_name": "adj_factor", "extra_config": "{}"},
+            {"field_key": "list_date", "description": "股票上市日期", "table_name": "sync_stock_basic", "column_name": "list_date", "extra_config": "{}"},
+            {
+                "field_key": "is_st",
+                "description": "是否ST（0=正常, 1=ST/*ST/退市风险警示）。来源: sync_stock_st 表，当日有记录则为1",
+                "table_name": "sync_stock_st",
+                "column_name": "ts_code",
+                "extra_config": '{"mode":"exists_in_table","values":{"0":"正常","1":"ST/*ST/退市风险警示"}}',
+            },
+            {
+                "field_key": "is_suspend",
+                "description": "是否停牌（0=正常交易, 1=全天停牌, 2=盘中临时停牌）。来源: sync_suspend_d 表",
+                "table_name": "sync_suspend_d",
+                "column_name": "suspend_type",
+                "extra_config": '{"mode":"exists_in_table","filter":{"suspend_type":"S"},"values":{"0":"正常交易","1":"全天停牌(suspend_timing为空)","2":"盘中临时停牌(suspend_timing非空)"}}',
+            },
+            {
+                "field_key": "is_limit",
+                "description": "涨跌停状态（0=未涨跌停, 1=涨停, -1=跌停）。来源: sync_stk_limit + sync_daily_data，收盘价触及涨跌停价",
+                "table_name": "sync_stk_limit",
+                "column_name": "up_limit,down_limit",
+                "extra_config": '{"mode":"compare_with_price","price_table":"sync_daily_data","price_column":"close","values":{"0":"未涨跌停","1":"涨停(close>=up_limit)","-1":"跌停(close<=down_limit)"}}',
+            },
+            {"field_key": "industry_l1", "description": "股票一级行业", "table_name": "sync_stock_basic", "column_name": "industry", "extra_config": "{}"},
+            {"field_key": "industry_l2", "description": "股票二级行业", "table_name": "", "column_name": "", "extra_config": "{}"},
+            {"field_key": "market_cap", "description": "股票总市值（万元）", "table_name": "sync_daily_basic", "column_name": "total_mv", "extra_config": "{}"},
+        ]
+        seed_df = pl.DataFrame({
+            "field_key": [m["field_key"] for m in mappings],
+            "description": [m["description"] for m in mappings],
+            "table_name": [m["table_name"] for m in mappings],
+            "column_name": [m["column_name"] for m in mappings],
+            "extra_config": [m["extra_config"] for m in mappings],
+            "updated_at": [now] * len(mappings),
+        })
+        self.upsert("factor_data_config", seed_df, ["field_key"])
+        logger.info(f"已写入 {len(mappings)} 条默认因子数据配置")
 
     def _resolve_db_path(self, table_name: str) -> str:
         """根据表名返回所属数据库路径"""
@@ -778,8 +1061,40 @@ class DolphinDBClient:
         Returns:
             (ordered_cols, tmp_var) — 有序列名列表和上传到 DolphinDB 的临时变量名
         """
-        # 转换日期列
-        date_cols = self._DATE_COLUMNS.get(table_name, [])
+        # 获取表列顺序 & 自动检测 DATE 列
+        date_cols: List[str] = []
+        if known_columns is not None:
+            table_cols = known_columns
+            # known_columns 场景无法从 schema 检测，回退到额外配置
+            date_cols = self._EXTRA_DATE_COLUMNS.get(table_name, [])
+        else:
+            schema_info = self._session.run(
+                f"schema(loadTable('{db_path}', '{table_name}'))"
+            )
+            table_cols = []
+            if isinstance(schema_info, dict) and "colDefs" in schema_info:
+                col_defs_df = schema_info["colDefs"]
+                if isinstance(col_defs_df, pd.DataFrame) and "name" in col_defs_df.columns:
+                    table_cols = col_defs_df["name"].tolist()
+                    # 自动从 schema 中提取 DATE 类型列
+                    if "typeString" in col_defs_df.columns:
+                        date_cols = col_defs_df.loc[
+                            col_defs_df["typeString"] == "DATE", "name"
+                        ].tolist()
+            if not table_cols:
+                logger.warning(
+                    f"无法从 schema 获取 {table_name} 列信息"
+                    f"（schema 类型={type(schema_info).__name__}），"
+                    f"回退使用 DataFrame 列写入"
+                )
+                table_cols = df.columns if select_columns is None else select_columns
+
+        # 合并额外配置的日期列（如 factor_values）
+        extra = self._EXTRA_DATE_COLUMNS.get(table_name, [])
+        if extra:
+            date_cols = list(set(date_cols) | set(extra))
+
+        # 转换日期列：YYYYMMDD 字符串 → date
         for col in date_cols:
             if col in df.columns and df[col].dtype == pl.Utf8:
                 df = df.with_columns(
@@ -791,26 +1106,6 @@ class DolphinDBClient:
         for col in date_cols:
             if col in pdf.columns and pd.api.types.is_datetime64_any_dtype(pdf[col]):
                 pdf[col] = pdf[col].dt.date
-
-        # 获取表列顺序
-        if known_columns is not None:
-            table_cols = known_columns
-        else:
-            schema_info = self._session.run(
-                f"schema(loadTable('{db_path}', '{table_name}'))"
-            )
-            table_cols = []
-            if isinstance(schema_info, dict) and "colDefs" in schema_info:
-                col_defs_df = schema_info["colDefs"]
-                if isinstance(col_defs_df, pd.DataFrame) and "name" in col_defs_df.columns:
-                    table_cols = col_defs_df["name"].tolist()
-            if not table_cols:
-                logger.warning(
-                    f"无法从 schema 获取 {table_name} 列信息"
-                    f"（schema 类型={type(schema_info).__name__}），"
-                    f"回退使用 DataFrame 列写入"
-                )
-                table_cols = pdf.columns.tolist()
 
         # 对齐列顺序
         ordered_cols = [c for c in table_cols if c in pdf.columns]

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import Editor from '@monaco-editor/react';
 import {
   Table,
@@ -40,6 +40,7 @@ import dayjs from 'dayjs';
 import { dataApi, productionApi } from '../api';
 import { useThemeStore } from '../store';
 import TradingViewChart from '../components/Charts/TradingViewChart';
+import { formatCode } from '../utils/codeFormatter';
 
 interface SyncTask {
   task_id: string;
@@ -156,6 +157,46 @@ const DataCenter: React.FC = () => {
   const [etlDrawerTab, setEtlDrawerTab] = useState('config');
   const [etlTaskHistory, setEtlTaskHistory] = useState<SyncLog[]>([]);
   const [etlSavedSchema, setEtlSavedSchema] = useState<{ name: string; type: string }[]>([]);
+  const [etlFieldTypes, setEtlFieldTypes] = useState<{ name: string; type: string }[]>([]);
+
+  // 编辑器引用
+  const sqlEditorRef = useRef<any>(null);
+  const jsonEditorRef = useRef<any>(null);
+  const etlEditorRef = useRef<any>(null);
+
+  // 格式化函数
+  const handleFormatSql = async () => {
+    try {
+      const formatted = await formatCode(sqlQuery, 'sql');
+      setSqlQuery(formatted);
+      Toast.success('SQL 格式化成功');
+    } catch (error: any) {
+      Toast.error(error.message || '格式化失败');
+    }
+  };
+
+  const handleFormatJson = async () => {
+    try {
+      const formatted = await formatCode(taskDrawerJson, 'json');
+      setTaskDrawerJson(formatted);
+      parseTaskDrawerJson(formatted);
+      Toast.success('JSON 格式化成功');
+    } catch (error: any) {
+      Toast.error(error.message || '格式化失败');
+    }
+  };
+
+  const handleFormatEtlScript = async () => {
+    try {
+      const formatted = await formatCode(etlDrawerConfig.script, 'sql');
+      setEtlDrawerConfig({ ...etlDrawerConfig, script: formatted });
+      setEtlTestResult(null);
+      Toast.success('SQL 格式化成功');
+    } catch (error: any) {
+      Toast.error(error.message || '格式化失败');
+    }
+  };
+
   // 解析 JSON 并更新配置对象
   const parseTaskDrawerJson = (json: string) => {
     try {
@@ -259,6 +300,7 @@ const DataCenter: React.FC = () => {
     }
 
     loadSyncLogs();
+    loadEtlLogs();
   };
 
   const loadSyncLogs = async () => {
@@ -303,6 +345,7 @@ const DataCenter: React.FC = () => {
     setEtlTaskHistory([]);
     setEtlTaskStatus(null);
     setEtlSavedSchema([]);
+    setEtlFieldTypes([]);
     setEtlDrawerVisible(true);
   };
 
@@ -316,9 +359,14 @@ const DataCenter: React.FC = () => {
     setEtlDrawerTab('config');
     setEtlTaskHistory([]);
     setEtlSavedSchema([]);
+    setEtlFieldTypes([]);
     dataApi.getEtlTaskStatus(task.task_id).then((res) => setEtlTaskStatus(res.data)).catch(() => {});
     dataApi.getEtlLogs(task.task_id, undefined, undefined, 100).then((res) => setEtlTaskHistory(res.data.logs || [])).catch(() => {});
-    dataApi.getEtlTableSchema(task.task_id).then((res) => setEtlSavedSchema(res.data.fields || [])).catch(() => {});
+    dataApi.getEtlTableSchema(task.task_id).then((res) => {
+      const fields = res.data.fields || [];
+      setEtlSavedSchema(fields);
+      setEtlFieldTypes(fields);
+    }).catch(() => {});
     setEtlDrawerVisible(true);
   };
 
@@ -329,6 +377,7 @@ const DataCenter: React.FC = () => {
     setEtlTestResult(null);
     setEtlSelectedPrimaryKeys(pks);
     setEtlSavedSchema([]);
+    setEtlFieldTypes([]);
     setEtlDrawerVisible(true);
   };
 
@@ -350,10 +399,10 @@ const DataCenter: React.FC = () => {
         await dataApi.updateEtlTask(config.task_id, config);
         Toast.success(`ETL 任务 ${config.task_id} 更新成功`);
       }
-      // 如果有测试结果的字段类型，自动建表
-      if (etlTestResult?.field_types?.length > 0) {
+      // 如果有字段类型定义，自动建表
+      if (etlFieldTypes.length > 0) {
         try {
-          await dataApi.createEtlTable(config.task_id, config.table_name || config.task_id, etlTestResult.field_types);
+          await dataApi.createEtlTable(config.task_id, config.table_name || config.task_id, etlFieldTypes);
           Toast.success(`目标表 ${config.table_name || config.task_id} 已创建`);
         } catch (e: any) {
           if (!e.response?.data?.detail?.includes('已存在')) {
@@ -383,8 +432,15 @@ const DataCenter: React.FC = () => {
     try {
       const res = await dataApi.testEtlScript(etlDrawerConfig.script, etlTestDate || undefined);
       setEtlTestResult(res.data);
-      // 自动设置主键选择
+      // 用测试结果刷新字段列表：对已存在的字段保留用户手动修改的类型，新字段使用自动推断类型
       if (res.data.field_types) {
+        const inferredMap = Object.fromEntries((res.data.field_types as {name:string,type:string}[]).map(f => [f.name, f.type]));
+        const currentMap = Object.fromEntries(etlFieldTypes.map(f => [f.name, f.type]));
+        const merged = (res.data.field_types as {name:string,type:string}[]).map(f => ({
+          name: f.name,
+          type: currentMap[f.name] ?? inferredMap[f.name],
+        }));
+        setEtlFieldTypes(merged);
         setEtlSelectedPrimaryKeys(etlDrawerConfig.primary_keys || []);
       }
     } catch (error: any) {
@@ -853,7 +909,11 @@ const DataCenter: React.FC = () => {
         </p>
       </div>
 
-      <Tabs defaultActiveKey="1">
+      <Tabs defaultActiveKey="1" onChange={(activeKey) => {
+        if (activeKey === '1.5') {
+          loadEtlLogs();
+        }
+      }}>
         <TabPane tab={<span><IconSync /> 同步任务</span>} itemKey="1">
           <Card
             className="content-card"
@@ -909,40 +969,60 @@ const DataCenter: React.FC = () => {
               columns={[
                 { title: '任务ID', dataIndex: 'task_id', key: 'task_id', width: 120, fixed: 'left' as const,
                   render: (v: string, r: any) => (
-                    <span style={{ cursor: 'pointer' }} onClick={() => openTaskDrawer(r)}>
-                      <code style={{ color: 'var(--color-primary)', fontSize: '12px' }}>{v}</code>
-                    </span>
+                    <Tooltip content={v}>
+                      <span style={{ cursor: 'pointer', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} onClick={() => openTaskDrawer(r)}>
+                        <code style={{ color: 'var(--color-primary)', fontSize: '12px' }}>{v}</code>
+                      </span>
+                    </Tooltip>
                   )
                 },
-                { title: '描述', dataIndex: 'description', key: 'desc', width: 180, ellipsis: true },
-                { title: '来源', dataIndex: 'source', key: 'source', width: 100,
-                  render: (v: string) => <Tag color="cyan" style={{ fontSize: '11px' }}>{v || 'tushare'}</Tag>
+                { title: '描述', dataIndex: 'description', key: 'desc', width: 180,
+                  render: (v: string) => (
+                    <Tooltip content={v}>
+                      <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v}</div>
+                    </Tooltip>
+                  )
                 },
                 { title: '类型', key: 'sync_type', width: 60,
-                  render: (_: any, r: any) => <Tag color={r.sync_type === 'incremental' ? 'blue' : 'green'}>{r.sync_type === 'incremental' ? '增量' : '全量'}</Tag>
+                  render: (_: any, r: any) => <Tag size="small" color={r.sync_type === 'incremental' ? 'blue' : 'green'}>{r.sync_type === 'incremental' ? '增量' : '全量'}</Tag>
                 },
                 { title: '数据表', dataIndex: 'table_name', key: 'table_name', width: 120,
-                  render: (v: string) => <code style={{ color: 'var(--color-gain)', fontSize: '12px' }}>{v}</code>
+                  render: (v: string) => (
+                    <Tooltip content={v}>
+                      <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        <code style={{ color: 'var(--color-gain)', fontSize: '12px' }}>{v}</code>
+                      </div>
+                    </Tooltip>
+                  )
                 },
-                { title: '最新数据', key: 'latest', width: 100,
+                { title: '最新数据', key: 'latest', width: 90,
                   render: (_: any, r: any) => {
                     const dateStr = r.status?.table_latest_date;
                     if (!dateStr) return <span style={{ color: 'var(--text-muted)' }}>-</span>;
-                    // 格式化日期显示 YYYYMMDD -> YYYY-MM-DD
                     const formatted = typeof dateStr === 'string' && dateStr.length === 8
                       ? `${dateStr.slice(0, 4)}-${dateStr.slice(4, 6)}-${dateStr.slice(6, 8)}`
                       : String(dateStr).slice(0, 10);
-                    return <span style={{ color: 'var(--color-gain)' }}>{formatted}</span>;
+                    return (
+                      <Tooltip content={formatted}>
+                        <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--color-gain)' }}>{formatted}</div>
+                      </Tooltip>
+                    );
                   }
                 },
-                { title: '上次同步', key: 'last_sync', width: 140,
+                { title: '上次同步', key: 'last_sync', width: 130,
                   render: (_: any, r: any) => {
                     const syncTime = r.status?.last_sync_time;
                     if (!syncTime) return '-';
-                    return <Tooltip content={syncTime}><span style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>{syncTime.slice(0, 16)}</span></Tooltip>;
+                    return (
+                      <Tooltip content={syncTime}>
+                        <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-secondary)', fontSize: '12px' }}>
+                          {syncTime.slice(0, 16)}
+                        </div>
+                      </Tooltip>
+                    );
                   }
                 },
-                { title: '操作', key: 'action', width: 180, fixed: 'right' as const,
+                { title: '操作', key: 'action', width: 160, fixed: 'right' as const,
                   render: (_: any, r: any) => {
                     const isSyncing = syncingTasks.has(r.task_id);
                     return (
@@ -976,14 +1056,6 @@ const DataCenter: React.FC = () => {
           >
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12, alignItems: 'center' }}>
               <Select
-                placeholder="按来源筛选"
-                style={{ width: 150 }}
-                showClear
-                size="small"
-                optionList={[{ label: 'tushare_config', value: 'tushare_config' }]}
-                onChange={(value) => setLogFilters({ ...logFilters, source: value as string | undefined })}
-              />
-              <Select
                 placeholder="按任务筛选"
                 style={{ width: 150 }}
                 showClear
@@ -996,6 +1068,7 @@ const DataCenter: React.FC = () => {
                 placeholder={['开始日期', '结束日期']}
                 style={{ width: 280 }}
                 size="small"
+                defaultPickerValue={dayjs().subtract(1, 'month').toDate()}
                 value={(logFilters.startDate && logFilters.endDate) ? [dayjs(logFilters.startDate, 'YYYYMMDD').toDate(), dayjs(logFilters.endDate, 'YYYYMMDD').toDate()] : undefined}
                 onChange={(date, dateStr) => {
                   const strs = dateStr as unknown as string[];
@@ -1012,30 +1085,62 @@ const DataCenter: React.FC = () => {
               dataSource={syncLogs}
               columns={[
                 { title: '任务ID', dataIndex: 'data_type', key: 'data_type', width: 150,
-                  render: (v: string) => <code style={{ color: 'var(--color-primary)', fontSize: '12px' }}>{v}</code>
+                  render: (v: string) => (
+                    <Tooltip content={v}>
+                      <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        <code style={{ color: 'var(--color-primary)', fontSize: '12px' }}>{v}</code>
+                      </div>
+                    </Tooltip>
+                  )
                 },
-                { title: '来源', dataIndex: 'source', key: 'source', width: 120 },
-                { title: '同步日期', dataIndex: 'sync_date', key: 'sync_date', width: 120 },
+                { title: '同步日期', dataIndex: 'sync_date', key: 'sync_date', width: 100,
+                  render: (v: string) => (
+                    <Tooltip content={v}>
+                      <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v}</div>
+                    </Tooltip>
+                  )
+                },
                 {
                   title: '参数', dataIndex: 'params', key: 'params', width: 200,
-                  render: (v: string) => v ? <code style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{v}</code> : '-'
+                  render: (v: string) => v ? (
+                    <Tooltip content={v}>
+                      <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        <code style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{v}</code>
+                      </div>
+                    </Tooltip>
+                  ) : '-'
                 },
                 {
-                  title: '同步行数', dataIndex: 'rows_synced', key: 'rows_synced', width: 100,
-                  render: (text: number) => text.toLocaleString()
+                  title: '同步行数', dataIndex: 'rows_synced', key: 'rows_synced', width: 90,
+                  render: (text: number) => (
+                    <Tooltip content={text.toLocaleString()}>
+                      <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {text.toLocaleString()}
+                      </div>
+                    </Tooltip>
+                  )
                 },
                 {
                   title: '状态', dataIndex: 'status', key: 'status', width: 80,
                   render: (text: string, record: any) => {
-                    const tag = <Tag color={text === 'success' ? 'green' : 'red'}>{text}</Tag>;
+                    const tag = <Tag size="small" color={text === 'success' ? 'green' : 'red'}>{text}</Tag>;
                     return (text !== 'success' && record.error_message)
                       ? <Tooltip content={record.error_message}>{tag}</Tooltip>
                       : tag;
                   }
                 },
                 {
-                  title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 160,
-                  render: (text: string) => new Date(text).toLocaleString()
+                  title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 150,
+                  render: (text: string) => {
+                    const formatted = new Date(text).toLocaleString();
+                    return (
+                      <Tooltip content={formatted}>
+                        <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {formatted}
+                        </div>
+                      </Tooltip>
+                    );
+                  }
                 },
               ]}
               rowKey={(record: any) => `${record.data_type}-${record.sync_date}-${record.created_at}`}
@@ -1081,34 +1186,58 @@ const DataCenter: React.FC = () => {
               columns={[
                 { title: '任务ID', dataIndex: 'task_id', key: 'task_id', width: 120, fixed: 'left' as const,
                   render: (v: string, r: any) => (
-                    <span style={{ cursor: 'pointer' }} onClick={() => handleEditEtlTask(r)}>
-                      <code style={{ color: 'var(--color-primary)', fontSize: '12px' }}>{v}</code>
-                    </span>
+                    <Tooltip content={v}>
+                      <span style={{ cursor: 'pointer', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} onClick={() => handleEditEtlTask(r)}>
+                        <code style={{ color: 'var(--color-primary)', fontSize: '12px' }}>{v}</code>
+                      </span>
+                    </Tooltip>
                   )
                 },
-                { title: '描述', dataIndex: 'description', key: 'desc', width: 180, ellipsis: true },
+                { title: '描述', dataIndex: 'description', key: 'desc', width: 180,
+                  render: (v: string) => (
+                    <Tooltip content={v}>
+                      <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v}</div>
+                    </Tooltip>
+                  )
+                },
                 { title: '类型', dataIndex: 'sync_type', key: 'sync_type', width: 60,
-                  render: (v: string) => <Tag color={v === 'incremental' ? 'blue' : 'green'}>{v === 'incremental' ? '增量' : '全量'}</Tag>
+                  render: (v: string) => <Tag size="small" color={v === 'incremental' ? 'blue' : 'green'}>{v === 'incremental' ? '增量' : '全量'}</Tag>
                 },
                 { title: '数据表', dataIndex: 'table_name', key: 'table_name', width: 120,
-                  render: (v: string) => <code style={{ color: 'var(--color-gain)', fontSize: '12px' }}>{v || '-'}</code>
+                  render: (v: string) => (
+                    <Tooltip content={v || '-'}>
+                      <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        <code style={{ color: 'var(--color-gain)', fontSize: '12px' }}>{v || '-'}</code>
+                      </div>
+                    </Tooltip>
+                  )
                 },
-                { title: '最新数据', dataIndex: 'last_date', key: 'last_date', width: 100,
+                { title: '最新数据', dataIndex: 'last_date', key: 'last_date', width: 90,
                   render: (v: string) => {
                     if (!v) return <span style={{ color: 'var(--text-muted)' }}>-</span>;
                     const formatted = typeof v === 'string' && v.length === 8
                       ? `${v.slice(0, 4)}-${v.slice(4, 6)}-${v.slice(6, 8)}`
                       : String(v).slice(0, 10);
-                    return <span style={{ color: 'var(--color-gain)' }}>{formatted}</span>;
+                    return (
+                      <Tooltip content={formatted}>
+                        <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--color-gain)' }}>{formatted}</div>
+                      </Tooltip>
+                    );
                   }
                 },
-                { title: '上次同步', dataIndex: 'last_sync_time', key: 'last_sync_time', width: 140,
+                { title: '上次同步', dataIndex: 'last_sync_time', key: 'last_sync_time', width: 130,
                   render: (v: string) => {
-                    if (!v) return <span style={{ color: 'var(--text-muted)' }}>-</span>;
-                    return <Tooltip content={v}><span style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>{v.slice(0, 16)}</span></Tooltip>;
+                    if (!v) return '-';
+                    return (
+                      <Tooltip content={v}>
+                        <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-secondary)', fontSize: '12px' }}>
+                          {v.slice(0, 16)}
+                        </div>
+                      </Tooltip>
+                    );
                   }
                 },
-                { title: '操作', key: 'action', width: 180, fixed: 'right' as const,
+                { title: '操作', key: 'action', width: 160, fixed: 'right' as const,
                   render: (_: any, r: any) => {
                     return (
                       <div style={{ display: 'flex', gap: 4 }}>
@@ -1149,6 +1278,7 @@ const DataCenter: React.FC = () => {
                 placeholder={['开始日期', '结束日期']}
                 style={{ width: 280 }}
                 size="small"
+                defaultPickerValue={dayjs().subtract(1, 'month').toDate()}
                 onChange={(date: any, dateStr: any) => {
                   const strs = dateStr as unknown as string[];
                   if (strs && Array.isArray(strs) && strs[0] && strs[1]) {
@@ -1164,25 +1294,61 @@ const DataCenter: React.FC = () => {
               dataSource={etlLogs}
               columns={[
                 { title: '任务ID', dataIndex: 'data_type', key: 'data_type', width: 150,
-                  render: (v: string) => <code style={{ color: 'var(--color-primary)', fontSize: '12px' }}>{v}</code>
+                  render: (v: string) => (
+                    <Tooltip content={v}>
+                      <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        <code style={{ color: 'var(--color-primary)', fontSize: '12px' }}>{v}</code>
+                      </div>
+                    </Tooltip>
+                  )
                 },
-                { title: '同步日期', dataIndex: 'sync_date', key: 'sync_date', width: 120 },
+                { title: '同步日期', dataIndex: 'sync_date', key: 'sync_date', width: 100,
+                  render: (v: string) => (
+                    <Tooltip content={v}>
+                      <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v}</div>
+                    </Tooltip>
+                  )
+                },
                 { title: '参数', dataIndex: 'params', key: 'params', width: 200,
-                  render: (v: string) => v ? <code style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{v}</code> : '-'
+                  render: (v: string) => v ? (
+                    <Tooltip content={v}>
+                      <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        <code style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{v}</code>
+                      </div>
+                    </Tooltip>
+                  ) : '-'
                 },
-                { title: '同步行数', dataIndex: 'rows_synced', key: 'rows_synced', width: 100,
-                  render: (text: number) => text?.toLocaleString() || '0'
+                { title: '同步行数', dataIndex: 'rows_synced', key: 'rows_synced', width: 90,
+                  render: (text: number) => {
+                    const formatted = text?.toLocaleString() || '0';
+                    return (
+                      <Tooltip content={formatted}>
+                        <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {formatted}
+                        </div>
+                      </Tooltip>
+                    );
+                  }
                 },
                 { title: '状态', dataIndex: 'status', key: 'status', width: 80,
                   render: (text: string, record: any) => {
-                    const tag = <Tag color={text === 'success' ? 'green' : 'red'}>{text}</Tag>;
+                    const tag = <Tag size="small" color={text === 'success' ? 'green' : 'red'}>{text}</Tag>;
                     return (text !== 'success' && record.error_message)
                       ? <Tooltip content={record.error_message}>{tag}</Tooltip>
                       : tag;
                   }
                 },
-                { title: '执行时间', dataIndex: 'created_at', key: 'created_at', width: 160,
-                  render: (text: string) => text ? new Date(text).toLocaleString() : '-'
+                { title: '执行时间', dataIndex: 'created_at', key: 'created_at', width: 150,
+                  render: (text: string) => {
+                    const formatted = text ? new Date(text).toLocaleString() : '-';
+                    return (
+                      <Tooltip content={formatted}>
+                        <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {formatted}
+                        </div>
+                      </Tooltip>
+                    );
+                  }
                 },
               ]}
               rowKey={(record: any) => `${record.data_type}-${record.sync_date}-${record.created_at}`}
@@ -1204,11 +1370,12 @@ const DataCenter: React.FC = () => {
             }
           >
             <Table
-              dataSource={tables}
+              dataSource={[...tables].sort((a, b) => a.table_name.localeCompare(b.table_name))}
               columns={tableColumns}
               rowKey="table_name"
               size="small"
-              pagination={{ pageSize: 20 }}
+              pagination={{ pageSize: 20, showSizeChanger: true }}
+              empty={<div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)' }}>暂无数据表</div>}
             />
           </Card>
         </TabPane>
@@ -1231,11 +1398,18 @@ const DataCenter: React.FC = () => {
               <div>
                 <div style={{
                   marginBottom: 8,
-                  color: 'var(--text-secondary)',
-                  fontSize: '13px',
-                  fontWeight: 500
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center'
                 }}>
-                  SQL 查询编辑器（仅支持 SELECT）
+                  <div style={{
+                    color: 'var(--text-secondary)',
+                    fontSize: '13px',
+                    fontWeight: 500
+                  }}>
+                    SQL 查询编辑器（仅支持 SELECT）
+                  </div>
+                  <Button size="small" icon={<IconCode />} onClick={handleFormatSql}>格式化</Button>
                 </div>
                 <div style={{ border: '1px solid var(--border-color)', borderRadius: 4, overflow: 'hidden' }}>
                   <Editor
@@ -1244,6 +1418,15 @@ const DataCenter: React.FC = () => {
                     theme={mode === 'dark' ? 'vs-dark' : 'vs-light'}
                     value={sqlQuery}
                     onChange={(v) => setSqlQuery(v || '')}
+                    onMount={(editor, monaco) => {
+                      sqlEditorRef.current = editor;
+                      editor.addAction({
+                        id: 'format-sql',
+                        label: 'Format SQL',
+                        keybindings: [monaco.KeyMod.Shift | monaco.KeyMod.Alt | monaco.KeyCode.KeyF],
+                        run: () => handleFormatSql(),
+                      });
+                    }}
                     options={{ minimap: { enabled: false }, fontSize: 13, scrollBeyondLastLine: false, automaticLayout: true, tabSize: 4, wordWrap: 'on' }}
                   />
                 </div>
@@ -1333,6 +1516,7 @@ const DataCenter: React.FC = () => {
                 <DatePicker
                   type="dateRange"
                   placeholder={['开始日期', '结束日期']}
+                  defaultPickerValue={dayjs().subtract(1, 'month').toDate()}
                   value={(syncStartDate && syncEndDate) ? [dayjs(syncStartDate, 'YYYYMMDD').toDate(), dayjs(syncEndDate, 'YYYYMMDD').toDate()] : undefined}
                   onChange={(date, dateStr) => {
                     const strs = dateStr as unknown as string[];
@@ -1415,6 +1599,7 @@ const DataCenter: React.FC = () => {
             <DatePicker
               type="dateRange"
               placeholder={['开始日期', '结束日期']}
+              defaultPickerValue={dayjs().subtract(1, 'month').toDate()}
               value={(batchSyncStartDate && batchSyncEndDate) ? [dayjs(batchSyncStartDate, 'YYYYMMDD').toDate(), dayjs(batchSyncEndDate, 'YYYYMMDD').toDate()] : undefined}
               onChange={(date, dateStr) => {
                 const strs = dateStr as unknown as string[];
@@ -1621,6 +1806,9 @@ const DataCenter: React.FC = () => {
 
               <TabPane tab="JSON 编辑" itemKey="json">
                 <div style={{ paddingTop: 8 }}>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+                    <Button size="small" icon={<IconCode />} onClick={handleFormatJson}>格式化</Button>
+                  </div>
                   <div style={{ border: '1px solid var(--border-color)', borderRadius: 4, overflow: 'hidden' }}>
                     <Editor
                       height="500px"
@@ -1630,6 +1818,15 @@ const DataCenter: React.FC = () => {
                       onChange={(v) => {
                         setTaskDrawerJson(v || '');
                         parseTaskDrawerJson(v || '');
+                      }}
+                      onMount={(editor, monaco) => {
+                        jsonEditorRef.current = editor;
+                        editor.addAction({
+                          id: 'format-json',
+                          label: 'Format JSON',
+                          keybindings: [monaco.KeyMod.Shift | monaco.KeyMod.Alt | monaco.KeyCode.KeyF],
+                          run: () => handleFormatJson(),
+                        });
                       }}
                       options={{ minimap: { enabled: false }, fontSize: 13, scrollBeyondLastLine: false, automaticLayout: true, tabSize: 2, wordWrap: 'on' }}
                     />
@@ -1813,11 +2010,14 @@ const DataCenter: React.FC = () => {
             )}
           </div>
           <div>
-            <div style={{ marginBottom: 4, fontSize: '12px', color: 'var(--text-secondary)' }}>
-              DolphinDB ETL 脚本
-              <span style={{ marginLeft: 8, color: 'var(--text-muted)', fontSize: '11px' }}>
-                使用 {'{date}'} 变量表示执行日期，格式为 YYYY.MM.DD
-              </span>
+            <div style={{ marginBottom: 4, fontSize: '12px', color: 'var(--text-secondary)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                DolphinDB ETL 脚本
+                <span style={{ marginLeft: 8, color: 'var(--text-muted)', fontSize: '11px' }}>
+                  使用 {'{date}'} 变量表示执行日期，格式为 YYYY.MM.DD
+                </span>
+              </div>
+              <Button size="small" icon={<IconCode />} onClick={handleFormatEtlScript}>格式化</Button>
             </div>
             <div style={{ border: '1px solid var(--border-color)', borderRadius: 4, overflow: 'hidden' }}>
               <Editor
@@ -1826,6 +2026,15 @@ const DataCenter: React.FC = () => {
                 theme={mode === 'dark' ? 'vs-dark' : 'vs-light'}
                 value={etlDrawerConfig.script}
                 onChange={(v) => { setEtlDrawerConfig({ ...etlDrawerConfig, script: v || '' }); setEtlTestResult(null); }}
+                onMount={(editor, monaco) => {
+                  etlEditorRef.current = editor;
+                  editor.addAction({
+                    id: 'format-etl-script',
+                    label: 'Format SQL',
+                    keybindings: [monaco.KeyMod.Shift | monaco.KeyMod.Alt | monaco.KeyCode.KeyF],
+                    run: () => handleFormatEtlScript(),
+                  });
+                }}
                 options={{ minimap: { enabled: false }, fontSize: 13, scrollBeyondLastLine: false, automaticLayout: true, tabSize: 4, wordWrap: 'on' }}
               />
             </div>
@@ -1843,11 +2052,13 @@ const DataCenter: React.FC = () => {
               )}
             </div>
           </div>
-          {etlTestResult?.field_types?.length > 0 && (
+          {etlFieldTypes.length > 0 && (
             <div>
-              <div style={{ marginBottom: 4, fontSize: '12px', color: 'var(--text-secondary)' }}>字段定义（勾选主键）</div>
+              <div style={{ marginBottom: 4, fontSize: '12px', color: 'var(--text-secondary)' }}>
+                字段定义（勾选主键，可修改类型）
+              </div>
               <Table
-                dataSource={etlTestResult.field_types}
+                dataSource={etlFieldTypes}
                 rowKey="name"
                 size="small"
                 pagination={false}
@@ -1856,36 +2067,34 @@ const DataCenter: React.FC = () => {
                   onChange: (keys) => setEtlSelectedPrimaryKeys(keys as string[]),
                 }}
                 columns={[
-                  { title: '字段名', dataIndex: 'name', key: 'name', width: 200,
+                  { title: '字段名', dataIndex: 'name', key: 'name', width: 180,
                     render: (v: string) => <code style={{ fontSize: '12px', color: 'var(--color-primary)' }}>{v}</code>
                   },
-                  { title: '类型', dataIndex: 'type', key: 'type', width: 120 },
-                ]}
-              />
-              {etlSelectedPrimaryKeys.length > 0 && (
-                <div style={{ marginTop: 4, fontSize: '11px', color: 'var(--text-muted)' }}>
-                  主键: {etlSelectedPrimaryKeys.join(', ')}
-                </div>
-              )}
-            </div>
-          )}
-          {!etlTestResult?.field_types?.length && etlSavedSchema.length > 0 && (
-            <div>
-              <div style={{ marginBottom: 4, fontSize: '12px', color: 'var(--text-secondary)' }}>表字段（勾选主键）</div>
-              <Table
-                dataSource={etlSavedSchema}
-                rowKey="name"
-                size="small"
-                pagination={false}
-                rowSelection={{
-                  selectedRowKeys: etlSelectedPrimaryKeys,
-                  onChange: (keys) => setEtlSelectedPrimaryKeys(keys as string[]),
-                }}
-                columns={[
-                  { title: '字段名', dataIndex: 'name', key: 'name', width: 200,
-                    render: (v: string) => <code style={{ fontSize: '12px', color: 'var(--color-primary)' }}>{v}</code>
+                  { title: '类型', dataIndex: 'type', key: 'type',
+                    render: (v: string, record: { name: string; type: string }) => (
+                      <Select
+                        size="small"
+                        value={v}
+                        style={{ width: 130 }}
+                        onChange={(val) => setEtlFieldTypes(prev =>
+                          prev.map(f => f.name === record.name ? { ...f, type: val as string } : f)
+                        )}
+                        optionList={[
+                          { label: 'STRING', value: 'STRING' },
+                          { label: 'SYMBOL', value: 'SYMBOL' },
+                          { label: 'INT', value: 'INT' },
+                          { label: 'LONG', value: 'LONG' },
+                          { label: 'SHORT', value: 'SHORT' },
+                          { label: 'DOUBLE', value: 'DOUBLE' },
+                          { label: 'FLOAT', value: 'FLOAT' },
+                          { label: 'DATE', value: 'DATE' },
+                          { label: 'TIMESTAMP', value: 'TIMESTAMP' },
+                          { label: 'DATETIME', value: 'DATETIME' },
+                          { label: 'BOOL', value: 'BOOL' },
+                        ]}
+                      />
+                    )
                   },
-                  { title: '类型', dataIndex: 'type', key: 'type', width: 120 },
                 ]}
               />
               {etlSelectedPrimaryKeys.length > 0 && (
@@ -1968,6 +2177,7 @@ const DataCenter: React.FC = () => {
             <DatePicker
               type="dateRange"
               placeholder={['开始日期', '结束日期']}
+              defaultPickerValue={dayjs().subtract(1, 'month').toDate()}
               value={(etlBackfillStartDate && etlBackfillEndDate) ? [dayjs(etlBackfillStartDate, 'YYYYMMDD').toDate(), dayjs(etlBackfillEndDate, 'YYYYMMDD').toDate()] : undefined}
               onChange={(date: any, dateStr: any) => {
                 const strs = dateStr as unknown as string[];
@@ -2033,6 +2243,7 @@ const DataCenter: React.FC = () => {
             <DatePicker
               type="dateRange"
               placeholder={['开始日期', '结束日期']}
+              defaultPickerValue={dayjs().subtract(1, 'month').toDate()}
               value={(batchBackfillStartDate && batchBackfillEndDate) ? [dayjs(batchBackfillStartDate, 'YYYYMMDD').toDate(), dayjs(batchBackfillEndDate, 'YYYYMMDD').toDate()] : undefined}
               onChange={(date: any, dateStr: any) => {
                 const strs = dateStr as unknown as string[];

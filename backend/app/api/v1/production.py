@@ -13,7 +13,7 @@ import polars as pl
 from data_manager.refactored_sync_engine import sync_engine as _sync_engine
 from app.core.config import settings
 from app.core.logger import logger
-from app.core.utils import DateUtils
+from app.core.utils import DateUtils, safe_json_parse
 
 router = APIRouter()
 analyzer = FactorAnalyzer(db_client)
@@ -71,13 +71,8 @@ def _format_db_analysis(row: dict) -> dict:
     ic_summary = []
     layer_returns = []
 
-    periods = row.get("periods") or []
-    if isinstance(periods, str):
-        periods = json.loads(periods)
-
-    quantile_returns = row.get("quantile_returns")
-    if isinstance(quantile_returns, str):
-        quantile_returns = json.loads(quantile_returns)
+    periods = safe_json_parse(row.get("periods"), default=[])
+    quantile_returns = safe_json_parse(row.get("quantile_returns"))
 
     for p in periods:
         ic_summary.append({
@@ -196,24 +191,10 @@ class BatchRunRequest(BaseModel):
     preprocess: Optional[PreprocessOptions] = None
 
 
-def _parse_params(raw) -> dict:
-    """安全解析 params 字段：兼容 str / dict / None"""
-    if raw is None:
-        return {}
-    if isinstance(raw, dict):
-        return raw
-    if isinstance(raw, str):
-        try:
-            return json.loads(raw)
-        except (json.JSONDecodeError, TypeError):
-            return {}
-    return {}
-
-
 @router.get("/production/factors")
 async def list_registered_factors():
     """列出所有因子（合并装饰器注册 + 数据库手动注册）"""
-    discover_factors()
+    discover_factors(db_client=db_client)
 
     # 装饰器注册的因子
     code_factors = {f["factor_id"]: f for f in list_factors()}
@@ -241,18 +222,30 @@ async def list_registered_factors():
     except Exception:
         pass
 
-    # 自动种子：代码因子不在 DB 中时自动写入
+    # 自动种子：代码因子不在 DB 中时自动写入（包含代码）
+    import inspect
     for fid, fdef in code_factors.items():
         if fid not in db_meta:
             try:
                 now = datetime.now()
+
+                # 提取因子函数的源代码
+                code_str = ""
+                if "func" in fdef and callable(fdef["func"]):
+                    try:
+                        code_str = inspect.getsource(fdef["func"])
+                    except (OSError, TypeError):
+                        pass  # 无法获取源代码时保持为空
+
                 seed_df = pl.DataFrame({
                     "factor_id": [fid],
                     "description": [fdef.get("description", "")],
                     "category": [fdef.get("category", "custom")],
                     "compute_mode": [fdef.get("compute_mode", "incremental")],
                     "storage_target": [fdef.get("storage_target", "factor_values")],
+                    "depends_on": [json.dumps(fdef.get("depends_on", []))],
                     "params": [json.dumps(fdef.get("params", {}))],
+                    "code": [code_str],  # 保存因子函数源代码
                     "last_computed_date": [""],
                     "last_computed_at": pl.Series([None], dtype=pl.Datetime),
                     "created_at": [now],
@@ -270,13 +263,17 @@ async def list_registered_factors():
     for fid in sorted(all_ids):
         item = code_factors.get(fid, {})
         meta = db_meta.get(fid, {})
-        db_params = _parse_params(meta.get("params"))
+        db_params = safe_json_parse(meta.get("params"))
+
+        # 解析 depends_on (JSON 数组)
+        db_depends_on = safe_json_parse(meta.get("depends_on"), default=[])
+
         merged.append({
             "factor_id": fid,
             "description": meta.get("description") or item.get("description", ""),
             "category": meta.get("category") or item.get("category", "custom"),
             "compute_mode": meta.get("compute_mode") or item.get("compute_mode", "incremental"),
-            "depends_on": meta.get("depends_on") or item.get("depends_on", []),
+            "depends_on": db_depends_on if db_depends_on else item.get("depends_on", []),
             "storage_target": meta.get("storage_target") or item.get("storage_target", "factor_values"),
             "params": db_params if db_params else item.get("params", {}),
             "last_computed_date": meta.get("last_computed_date"),
@@ -291,7 +288,7 @@ async def list_registered_factors():
 
 @router.post("/production/factors")
 async def create_factor(req: FactorCreateRequest):
-    """手动注册因子（写入 factor_metadata），可选同时创建代码文件"""
+    """手动注册因子（写入 factor_metadata），代码保存到数据库"""
     try:
         existing = db_client.query(
             "SELECT factor_id FROM factor_metadata WHERE factor_id = %s", (req.factor_id,)
@@ -306,7 +303,9 @@ async def create_factor(req: FactorCreateRequest):
             "category": [req.category],
             "compute_mode": [req.compute_mode],
             "storage_target": [req.storage_target],
+            "depends_on": [json.dumps(req.depends_on if hasattr(req, 'depends_on') else [])],
             "params": [json.dumps(req.params)],
+            "code": [req.code if req.code else ""],
             "last_computed_date": [""],
             "last_computed_at": pl.Series([None], dtype=pl.Datetime),
             "created_at": [now],
@@ -314,17 +313,7 @@ async def create_factor(req: FactorCreateRequest):
         })
         db_client.upsert("factor_metadata", new_df, ["factor_id"])
 
-        # 保存因子代码文件
-        filename = None
-        if req.code and req.code.strip():
-            filename = f"{req.factor_id}.py"
-            factors_dir = os.path.normpath(FACTORS_DIR)
-            fpath = os.path.join(factors_dir, filename)
-            with open(fpath, "w", encoding="utf-8") as f:
-                f.write(req.code)
-            logger.info(f"Created factor code file: {filename}")
-
-        return {"status": "success", "data": {"factor_id": req.factor_id, "filename": filename}}
+        return {"status": "success", "data": {"factor_id": req.factor_id}}
     except HTTPException:
         raise
     except Exception as e:
@@ -346,7 +335,8 @@ async def update_factor(factor_id: str, req: FactorUpdateRequest):
             row = {
                 "factor_id": factor_id, "description": "", "category": "custom",
                 "compute_mode": "incremental", "storage_target": "factor_values",
-                "params": "{}", "last_computed_date": "", "last_computed_at": None,
+                "depends_on": "[]", "params": "{}", "code": "",
+                "last_computed_date": "", "last_computed_at": None,
                 "created_at": now, "updated_at": now,
             }
         else:
@@ -372,7 +362,9 @@ async def update_factor(factor_id: str, req: FactorUpdateRequest):
             "category": pl.Utf8,
             "compute_mode": pl.Utf8,
             "storage_target": pl.Utf8,
+            "depends_on": pl.Utf8,
             "params": pl.Utf8,
+            "code": pl.Utf8,
             "last_computed_date": pl.Utf8,
             "last_computed_at": pl.Datetime,
             "created_at": pl.Datetime,
@@ -491,9 +483,21 @@ async def get_production_history(factor_id: Optional[str] = None, limit: int = 2
 
 @router.get("/production/factors/{factor_id}/code")
 async def get_factor_code(factor_id: str):
-    """获取因子源代码"""
+    """获取因子源代码（优先从数据库读取，备用从文件读取）"""
+    # 1. 优先从数据库读取
+    try:
+        df = db_client.query(
+            "SELECT code FROM factor_metadata WHERE factor_id = %s", (factor_id,)
+        )
+        if not df.is_empty():
+            code = df["code"][0]
+            if code and code.strip():
+                return {"status": "success", "data": {"filename": f"{factor_id}.py", "code": code}}
+    except Exception as e:
+        logger.warning(f"Failed to read code from database: {e}")
+
+    # 2. 备用：从文件读取（兼容旧的因子）
     factors_dir = os.path.normpath(FACTORS_DIR)
-    # 在 factors 目录下搜索包含该 factor_id 的文件
     for fname in os.listdir(factors_dir):
         if not fname.endswith(".py") or fname.startswith("__"):
             continue
@@ -505,6 +509,7 @@ async def get_factor_code(factor_id: str):
                 return {"status": "success", "data": {"filename": fname, "code": content}}
         except Exception:
             continue
+
     raise HTTPException(status_code=404, detail=f"因子 {factor_id} 的源代码未找到")
 
 
@@ -515,17 +520,42 @@ class FactorCodeUpdateRequest(BaseModel):
 
 @router.put("/production/factors/{factor_id}/code")
 async def update_factor_code(factor_id: str, req: FactorCodeUpdateRequest):
-    """更新因子源代码"""
-    # 安全检查：只允许写入 factors 目录下的 .py 文件
-    if not req.filename.endswith(".py") or "/" in req.filename or "\\" in req.filename:
-        raise HTTPException(status_code=400, detail="非法文件名")
-    factors_dir = os.path.normpath(FACTORS_DIR)
-    fpath = os.path.join(factors_dir, req.filename)
+    """更新因子源代码（保存到数据库）"""
     try:
-        with open(fpath, "w", encoding="utf-8") as f:
-            f.write(req.code)
-        return {"status": "success", "data": {"filename": req.filename}}
+        # 检查因子是否存在
+        existing = db_client.query(
+            "SELECT * FROM factor_metadata WHERE factor_id = %s", (factor_id,)
+        )
+
+        if existing.is_empty():
+            raise HTTPException(status_code=404, detail=f"因子 {factor_id} 不存在")
+
+        # 更新代码字段
+        row = existing.to_dicts()[0]
+        row["code"] = req.code
+        row["updated_at"] = datetime.now()
+
+        update_df = pl.DataFrame([row], schema={
+            "factor_id": pl.Utf8,
+            "description": pl.Utf8,
+            "category": pl.Utf8,
+            "compute_mode": pl.Utf8,
+            "storage_target": pl.Utf8,
+            "depends_on": pl.Utf8,
+            "params": pl.Utf8,
+            "code": pl.Utf8,
+            "last_computed_date": pl.Utf8,
+            "last_computed_at": pl.Datetime,
+            "created_at": pl.Datetime,
+            "updated_at": pl.Datetime,
+        })
+        db_client.upsert("factor_metadata", update_df, ["factor_id"])
+
+        return {"status": "success", "data": {"factor_id": factor_id}}
+    except HTTPException:
+        raise
     except Exception as e:
+        logger.error(f"Update factor code failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -538,6 +568,7 @@ class FactorTestRequest(BaseModel):
     end_date: str                      # 测试数据结束日期 YYYYMMDD
     depends_on: List[str] = ["sync_daily_data"]  # 依赖数据源
     params: Dict[str, Any] = {}        # 因子参数
+    preprocess: Optional[Dict[str, Any]] = None  # 预处理选项
 
 
 @router.post("/production/factors/test")
@@ -655,6 +686,16 @@ async def test_factor_code(req: FactorTestRequest):
     # 3. 加载真实数据
     log("data", f"加载数据 {req.start_date}~{req.end_date} (depends_on={depends_on})...")
     t0 = time.time()
+
+    # 提取预处理选项
+    from engine.production.engine import ProductionEngine
+    # 优先级：请求中的 preprocess > 因子 params 中的 preprocess > 默认值
+    preprocess_opts = func_params.get("preprocess", {})
+    if req.preprocess:
+        preprocess_opts = {**preprocess_opts, **req.preprocess}
+    opts = {**ProductionEngine.DEFAULT_PREPROCESS, **preprocess_opts}
+    log("data", f"预处理配置: adjust_price={opts['adjust_price']}, filter_st={opts['filter_st']}, filter_new_stock={opts['filter_new_stock']}, handle_suspension={opts['handle_suspension']}, mark_limit={opts['mark_limit']}")
+
     try:
         from engine.production.registry import FactorDefinition, StorageConfig
         mock_def = FactorDefinition(
@@ -667,9 +708,20 @@ async def test_factor_code(req: FactorTestRequest):
             compute_mode="full",
             storage=StorageConfig(),
         )
-        df = prod_engine._load_data(mock_def, req.start_date, req.end_date)
+        df = prod_engine._load_data(mock_def, req.start_date, req.end_date, adjust_price=opts["adjust_price"])
         if df is None or df.is_empty():
             return make_error("data", f"日期范围 {req.start_date}~{req.end_date} 内无数据")
+
+        # 应用预处理过滤
+        if opts["filter_st"] or opts["filter_new_stock"] or opts["mark_limit"]:
+            df = prod_engine._apply_stock_status(
+                df, req.start_date, req.end_date,
+                filter_st=opts["filter_st"],
+                filter_new_stock=opts["filter_new_stock"],
+                new_stock_days=opts["new_stock_days"],
+                mark_limit=opts["mark_limit"],
+            )
+
     except Exception as e:
         return make_error("data", f"数据加载失败: {e}")
     log("data", f"加载完成: {len(df)} 行, {df['ts_code'].n_unique()} 只股票, 列: {df.columns} ({(time.time()-t0)*1000:.0f}ms)")
@@ -691,6 +743,11 @@ async def test_factor_code(req: FactorTestRequest):
 
     if result is None or not hasattr(result, "is_empty") or result.is_empty():
         return make_error("compute", "因子计算返回空结果")
+
+    # 4.5 停牌处理
+    if opts["handle_suspension"] and "factor_value" in result.columns:
+        window = func_params.get("window", 20)
+        result = prod_engine._handle_suspension_from_status(result, req.start_date, req.end_date, window)
 
     # 5. 校验结果格式
     log("validate", f"结果列: {result.columns}, 行数: {len(result)}")
@@ -792,7 +849,7 @@ async def get_factor_stats(factor_id: str):
                 MIN(trade_date) AS min_date,
                 MAX(trade_date) AS max_date,
                 AVG(factor_value) AS mean_val,
-                STDDEV(factor_value) AS std_val,
+                STD(factor_value) AS std_val,
                 MIN(factor_value) AS min_val,
                 MAX(factor_value) AS max_val
             FROM factor_values WHERE factor_id = %s
@@ -808,4 +865,90 @@ async def get_factor_stats(factor_id: str):
     except Exception as e:
         if "does not exist" in str(e):
             return {"status": "success", "data": None}
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================== 数据配置 ====================
+
+class DataFieldMapping(BaseModel):
+    field_key: str
+    description: str = ""
+    table_name: str = ""
+    column_name: str = ""
+    extra_config: str = "{}"
+
+
+class DataConfigUpdateRequest(BaseModel):
+    mappings: List[DataFieldMapping]
+
+
+@router.get("/production/data-config")
+async def get_data_config():
+    """获取所有字段映射配置"""
+    try:
+        df = db_client.query("SELECT * FROM factor_data_config ORDER BY field_key")
+        rows = df.to_dicts() if not df.is_empty() else []
+        return {"status": "success", "data": rows}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/production/data-config")
+async def update_data_config(req: DataConfigUpdateRequest):
+    """批量更新字段映射配置"""
+    try:
+        now = datetime.now()
+        update_df = pl.DataFrame({
+            "field_key": [m.field_key for m in req.mappings],
+            "description": [m.description for m in req.mappings],
+            "table_name": [m.table_name for m in req.mappings],
+            "column_name": [m.column_name for m in req.mappings],
+            "extra_config": [m.extra_config for m in req.mappings],
+            "updated_at": [now] * len(req.mappings),
+        })
+        db_client.upsert("factor_data_config", update_df, ["field_key"])
+        return {"status": "success", "message": f"已更新 {len(req.mappings)} 条配置"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/production/data-config/resolved")
+async def get_resolved_data_config():
+    """返回简化的 field_key → source_label + values 字典，供前端注解显示"""
+    try:
+        df = db_client.query("SELECT field_key, table_name, column_name, extra_config FROM factor_data_config")
+        result = {}
+        if not df.is_empty():
+            for row in df.to_dicts():
+                fk = row["field_key"]
+                tbl = row.get("table_name", "") or ""
+                col = row.get("column_name", "") or ""
+                extra = row.get("extra_config", "{}") or "{}"
+                values = None
+                if tbl and col:
+                    source_label = f"{tbl}.{col}"
+                elif extra != "{}":
+                    try:
+                        cfg = json.loads(extra)
+                        mode = cfg.get("mode", "")
+                        if mode == "infer_from_gaps":
+                            source_label = "从交易日缺失推断"
+                        elif mode == "compute_from_ohlcv":
+                            source_label = "从OHLCV计算"
+                        else:
+                            source_label = "未配置"
+                    except Exception:
+                        source_label = "未配置"
+                else:
+                    source_label = "未配置"
+                # 解析枚举值
+                try:
+                    cfg = json.loads(extra)
+                    if "values" in cfg:
+                        values = cfg["values"]
+                except Exception:
+                    pass
+                result[fk] = {"table_name": tbl, "column_name": col, "source_label": source_label, "values": values}
+        return {"status": "success", "data": result}
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

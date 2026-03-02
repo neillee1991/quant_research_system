@@ -11,11 +11,26 @@ tasks:
     type: sync
   - id: sync_adj_factor
     type: sync
+  - id: sync_stk_limit
+    type: sync
+  - id: sync_stock_st
+    type: sync
+  - id: sync_suspend_d
+    type: sync
+  - id: etl_stock_daily_status
+    type: etl
+    depends_on:
+      - sync_daily
+      - sync_stk_limit
+      - sync_stock_st
+      - sync_suspend_d
   - id: factor_ma_20
     type: factor
     depends_on:
       - sync_daily
+      - etl_stock_daily_status
   - id: factor_pe_rank
     type: factor
     depends_on:
       - sync_daily_basic
+      - etl_stock_daily_status

@@ -1,11 +1,26 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { Handle, Position, NodeProps } from 'reactflow';
-import { Card, Form } from '@douyinfe/semi-ui';
+import { Card, Form, Toast } from '@douyinfe/semi-ui';
 import Editor from '@monaco-editor/react';
 import { useThemeStore } from '../../../store';
+import { formatCode } from '../../../utils/codeFormatter';
 
 const SignalNode: React.FC<NodeProps> = ({ data }) => {
   const { mode } = useThemeStore();
+  const editorRef = useRef<any>(null);
+
+  const handleFormat = async () => {
+    if (!editorRef.current) return;
+    try {
+      const currentValue = editorRef.current.getValue();
+      const formatted = await formatCode(currentValue, 'python');
+      editorRef.current.setValue(formatted);
+      Toast.success('代码格式化成功');
+    } catch (error: any) {
+      Toast.error(error.message || '格式化失败');
+    }
+  };
+
   return (
     <Card
       title="Signal"
@@ -22,6 +37,15 @@ const SignalNode: React.FC<NodeProps> = ({ data }) => {
             language="python"
             theme={mode === 'dark' ? 'vs-dark' : 'vs-light'}
             defaultValue={data.condition || 'close > sma20'}
+            onMount={(editor, monaco) => {
+              editorRef.current = editor;
+              editor.addAction({
+                id: 'format-signal-code',
+                label: 'Format Code',
+                keybindings: [monaco.KeyMod.Shift | monaco.KeyMod.Alt | monaco.KeyCode.KeyF],
+                run: () => handleFormat(),
+              });
+            }}
             options={{
               minimap: { enabled: false },
               fontSize: 12,

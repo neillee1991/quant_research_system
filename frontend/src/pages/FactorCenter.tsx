@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Tabs, TabPane, Table, Button, Card, Tag, Select, InputNumber, Spin, Empty,
   Modal, Input, Popconfirm, Checkbox, Tooltip, SideSheet, DatePicker, Banner,
@@ -8,14 +8,34 @@ import { TextArea } from '@douyinfe/semi-ui';
 import {
   IconTestScoreStroked, IconPlay, IconRefresh, IconBarChartHStroked, IconPlus,
   IconDelete, IconEdit, IconBolt, IconCode, IconServer, IconInfoCircle,
-  IconSearch, IconSave, IconSetting, IconAlertTriangle,
+  IconSearch, IconSave, IconSetting, IconAlertTriangle, IconCopy, IconHistory,
 } from '@douyinfe/semi-icons';
 import dayjs from 'dayjs';
 import ReactECharts from 'echarts-for-react';
 import Editor from '@monaco-editor/react';
-import { productionApi, DEFAULT_PREPROCESS } from '../api';
-import type { PreprocessOptions } from '../api';
+import { productionApi, dataApi, DEFAULT_PREPROCESS } from '../api';
+import type { PreprocessOptions, DataFieldMapping } from '../api';
 import { useThemeStore } from '../store';
+import { formatCode } from '../utils/codeFormatter';
+
+const formatRunParams = (record: any): string => {
+  const parts: string[] = [];
+  const start = record.start_date || '';
+  const end = record.end_date || '';
+  if (start || end) parts.push(`${start}~${end}`);
+  if (record.preprocess) {
+    try {
+      const pp = typeof record.preprocess === 'string' ? JSON.parse(record.preprocess) : record.preprocess;
+      const adjMap: Record<string, string> = { forward: '前复权', backward: '后复权', none: '不复权' };
+      if (pp.adjust_price) parts.push(adjMap[pp.adjust_price] || pp.adjust_price);
+      if (pp.filter_st === false) parts.push('含ST');
+      if (pp.filter_new_stock === false) parts.push('含次新');
+      if (pp.handle_suspension === false) parts.push('含停牌');
+      if (pp.mark_limit === false) parts.push('不标涨跌停');
+    } catch { /* ignore */ }
+  }
+  return parts.join(' | ') || '-';
+};
 
 // ==================== 因子详情/编辑 统一 SideSheet ====================
 interface FactorDrawerProps {
@@ -36,7 +56,6 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
   const [editSaving, setEditSaving] = useState(false);
   // 预处理
   const [ppEdit, setPpEdit] = useState<PreprocessOptions>({ ...DEFAULT_PREPROCESS });
-  const [ppSaving, setPpSaving] = useState(false);
   // 代码
   const [code, setCode] = useState<{ filename: string; code: string } | null>(null);
   const [editedCode, setEditedCode] = useState('');
@@ -49,6 +68,25 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
   const [factorData, setFactorData] = useState<any[]>([]);
   const [dataLoading, setDataLoading] = useState(false);
   const [dataFilter, setDataFilter] = useState<{ ts_code?: string; start_date?: string; end_date?: string }>({});
+  // 计算日志
+  const [history, setHistory] = useState<any[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  // 数据源注解
+  const [dataConfigLabels, setDataConfigLabels] = useState<Record<string, { source_label: string; values?: Record<string, string> }>>({});
+  // 编辑器引用
+  const codeEditorRef = useRef<any>(null);
+
+  // 格式化代码
+  const handleFormatCode = async () => {
+    try {
+      const formatted = await formatCode(editedCode, 'python');
+      setEditedCode(formatted);
+      setCodeChanged(true);
+      Toast.success('代码格式化成功');
+    } catch (error: any) {
+      Toast.error(error.message || '格式化失败');
+    }
+  };
 
   // 打开时初始化
   useEffect(() => {
@@ -59,31 +97,28 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
     setStats(null);
     setFactorData([]);
     setDataFilter({});
+    setHistory([]);
     // 编辑表单
     setEditDesc(factor.description || '');
     setEditCategory(factor.category || '');
     setEditComputeMode(factor.compute_mode || '');
     // 预处理
     const pp = factor.params?.preprocess || {};
+    console.log('[FactorDrawer] 加载因子配置:', { factor_id: factor.factor_id, params: factor.params, preprocess: pp });
     setPpEdit({ ...DEFAULT_PREPROCESS, ...pp });
     // 统计
     setStatsLoading(true);
     productionApi.getFactorStats(factorId).then(r => setStats(r.data?.data)).catch(() => {}).finally(() => setStatsLoading(false));
-  }, [factor, open, initialTab, factorId]);
-
-  // 切到代码 tab 时加载
-  const loadCode = useCallback(async () => {
-    if (!factorId) return;
+    // 代码 - 直接加载
     setCodeLoading(true);
-    try {
-      const res = await productionApi.getFactorCode(factorId);
+    productionApi.getFactorCode(factorId).then(res => {
       const d = res.data?.data;
       setCode(d);
       setEditedCode(d?.code || '');
-      setCodeChanged(false);
-    } catch { setCode(null); }
-    setCodeLoading(false);
-  }, [factorId]);
+    }).catch(() => setCode(null)).finally(() => setCodeLoading(false));
+    // 数据源注解
+    productionApi.getResolvedDataConfig().then(r => setDataConfigLabels(r.data?.data || {})).catch(() => {});
+  }, [factor, open, initialTab, factorId]);
 
   const loadData = useCallback(async () => {
     if (!factorId) return;
@@ -95,37 +130,34 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
     setDataLoading(false);
   }, [factorId, dataFilter]);
 
-  useEffect(() => { if (activeTab === 'code' && factorId) loadCode(); }, [activeTab, factorId, loadCode]);
-  useEffect(() => { if (activeTab === 'data' && factorId) loadData(); }, [activeTab, factorId, loadData]);
+  const loadHistory = useCallback(async () => {
+    if (!factorId) return;
+    setHistoryLoading(true);
+    try {
+      const res = await productionApi.getProductionHistory(factorId, 50);
+      setHistory(res.data?.data || []);
+    } catch { setHistory([]); }
+    setHistoryLoading(false);
+  }, [factorId]);
 
-  // 保存编辑
-  const handleSaveEdit = async () => {
+  useEffect(() => { if (activeTab === 'data' && factorId) loadData(); }, [activeTab, factorId, loadData]);
+  useEffect(() => { if (activeTab === 'logs' && factorId) loadHistory(); }, [activeTab, factorId, loadHistory]);
+
+  // 保存编辑（基本信息 + 预处理）
+  const handleSave = async () => {
     if (!factor) return;
     setEditSaving(true);
     try {
-      const values = { description: editDesc, category: editCategory, compute_mode: editComputeMode };
+      const newParams = { ...(factor.params || {}), preprocess: ppEdit };
+      const values = { description: editDesc, category: editCategory, compute_mode: editComputeMode, params: newParams };
+      console.log('[FactorDrawer] 保存预处理配置:', ppEdit);
       await productionApi.updateFactor(factorId, values);
-      Toast.success('基本信息已保存');
+      Toast.success('保存成功');
       onSaved();
     } catch (e: any) {
       if (e.response) Toast.error(e.response?.data?.detail || '保存失败');
     }
     setEditSaving(false);
-  };
-
-  // 保存预处理
-  const handleSavePp = async () => {
-    if (!factor) return;
-    setPpSaving(true);
-    try {
-      const newParams = { ...(factor.params || {}), preprocess: ppEdit };
-      await productionApi.updateFactor(factorId, { params: newParams });
-      Toast.success('预处理配置已保存');
-      onSaved();
-    } catch (e: any) {
-      Toast.error(e.response?.data?.detail || '保存失败');
-    }
-    setPpSaving(false);
   };
 
   // 保存代码
@@ -146,121 +178,182 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
     { title: '因子值', dataIndex: 'factor_value', key: 'factor_value', render: (v: number) => v?.toFixed(6) },
   ];
 
+  const logColumns = [
+    { title: '模式', dataIndex: 'mode', key: 'mode', width: 80,
+      render: (v: string) => <Tag color={v === 'incremental' ? 'cyan' : 'orange'}>{v === 'incremental' ? '增量' : '全量'}</Tag>
+    },
+    { title: '状态', dataIndex: 'status', key: 'status', width: 80,
+      render: (v: string) => <Tag color={v === 'success' ? 'green' : v === 'running' ? 'blue' : 'red'}>{v}</Tag>
+    },
+    { title: '计算参数', key: 'range',
+      render: (_: any, record: any) => {
+        const text = formatRunParams(record);
+        return <Tooltip content={text}><span style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>{text}</span></Tooltip>;
+      }
+    },
+    { title: '行数', dataIndex: 'rows_affected', key: 'rows', width: 100,
+      render: (v: number) => v?.toLocaleString() || '-'
+    },
+    { title: '耗时', dataIndex: 'duration_seconds', key: 'dur', width: 80,
+      render: (v: number) => v ? `${v.toFixed(1)}s` : '-'
+    },
+    { title: '时间', dataIndex: 'created_at', key: 'time',
+      render: (v: string) => v ? <Tooltip content={v}><span style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>{v.slice(0, 19)}</span></Tooltip> : '-'
+    },
+  ];
+
   return (
     <SideSheet
       title={<span style={{ color: 'var(--color-primary)' }}>{factorId}</span>}
       visible={open} onCancel={onClose} width={780}
     >
       <Tabs activeKey={activeTab} onChange={setActiveTab} size="small">
-        {/* ---- 编辑信息 ---- */}
+        {/* ---- 编辑（合并基本信息 + 预处理 + 代码） ---- */}
         <TabPane itemKey="edit" tab={<span><IconEdit size="small" /> 编辑</span>}>
           <div>
-            <div style={{ display: 'flex', gap: 16 }}>
-              <div style={{ flex: 1 }}>
-                <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>描述</div>
-                <Input size="small" value={editDesc} onChange={setEditDesc} />
-              </div>
-              <div style={{ flex: '0 0 140px' }}>
-                <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>分类</div>
-                <Select size="small" style={{ width: '100%' }} value={editCategory} onChange={v => setEditCategory(v as string)}
-                  optionList={['momentum','value','technical','quality','custom'].map(v => ({ label: v, value: v }))} />
-              </div>
-              <div style={{ flex: '0 0 140px' }}>
-                <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>计算模式</div>
-                <Select size="small" style={{ width: '100%' }} value={editComputeMode} onChange={v => setEditComputeMode(v as string)}
-                  optionList={[{ label: '增量', value: 'incremental' }, { label: '全量', value: 'full' }]} />
-              </div>
-            </div>
-            {/* 统计概览 */}
-            <Spin spinning={statsLoading}>
-              {stats ? (
-                <div style={{ marginTop: 8 }}>
-                  <div style={{ display: 'flex', gap: 12 }}>
-                    <Card style={{ flex: 1, background: 'var(--bg-card)' }} bodyStyle={{ padding: 12 }}>
-                      <div style={{ color: 'var(--text-secondary)', fontSize: 11 }}>总行数</div>
-                      <div style={{ color: 'var(--color-primary)', fontSize: 16, fontWeight: 600 }}>{stats.total_rows}</div>
-                    </Card>
-                    <Card style={{ flex: 1, background: 'var(--bg-card)' }} bodyStyle={{ padding: 12 }}>
-                      <div style={{ color: 'var(--text-secondary)', fontSize: 11 }}>股票数</div>
-                      <div style={{ color: 'var(--color-gain)', fontSize: 16, fontWeight: 600 }}>{stats.stock_count}</div>
-                    </Card>
-                    <Card style={{ flex: 1, background: 'var(--bg-card)' }} bodyStyle={{ padding: 12 }}>
-                      <div style={{ color: 'var(--text-secondary)', fontSize: 11 }}>起始日期</div>
-                      <div style={{ color: 'var(--text-secondary)', fontSize: 13 }}>{stats.min_date || '-'}</div>
-                    </Card>
-                    <Card style={{ flex: 1, background: 'var(--bg-card)' }} bodyStyle={{ padding: 12 }}>
-                      <div style={{ color: 'var(--text-secondary)', fontSize: 11 }}>截止日期</div>
-                      <div style={{ color: 'var(--text-secondary)', fontSize: 13 }}>{stats.max_date || '-'}</div>
-                    </Card>
+            {/* 基本信息 */}
+            <Collapse defaultActiveKey={['info', 'preprocess', 'code']}>
+              <Collapse.Panel itemKey="info" header={<span style={{ fontSize: 13, fontWeight: 500 }}>基本信息</span>}>
+                <div style={{ display: 'flex', gap: 16 }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>描述</div>
+                    <Input size="small" value={editDesc} onChange={setEditDesc} />
                   </div>
-                  <Card style={{ marginTop: 8, background: 'var(--bg-card)' }} bodyStyle={{ padding: 12 }}
-                    title={<span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>分布统计</span>}>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-                      <div><span style={{ color: 'var(--text-muted)', marginRight: 6 }}>均值</span><span style={{ color: 'var(--text-primary)' }}>{stats.mean_val?.toFixed(6) ?? '-'}</span></div>
-                      <div><span style={{ color: 'var(--text-muted)', marginRight: 6 }}>标准差</span><span style={{ color: 'var(--text-primary)' }}>{stats.std_val?.toFixed(6) ?? '-'}</span></div>
-                      <div><span style={{ color: 'var(--text-muted)', marginRight: 6 }}>最小值</span><span style={{ color: 'var(--text-primary)' }}>{stats.min_val?.toFixed(6) ?? '-'}</span></div>
-                      <div><span style={{ color: 'var(--text-muted)', marginRight: 6 }}>最大值</span><span style={{ color: 'var(--text-primary)' }}>{stats.max_val?.toFixed(6) ?? '-'}</span></div>
+                  <div style={{ flex: '0 0 140px' }}>
+                    <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>分类</div>
+                    <Select size="small" style={{ width: '100%' }} value={editCategory} onChange={v => setEditCategory(v as string)}
+                      optionList={['momentum','value','technical','quality','custom'].map(v => ({ label: v, value: v }))} />
+                  </div>
+                  <div style={{ flex: '0 0 140px' }}>
+                    <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>计算模式</div>
+                    <Select size="small" style={{ width: '100%' }} value={editComputeMode} onChange={v => setEditComputeMode(v as string)}
+                      optionList={[{ label: '增量', value: 'incremental' }, { label: '全量', value: 'full' }]} />
+                  </div>
+                </div>
+                {/* 统计概览 */}
+                <Spin spinning={statsLoading}>
+                  {stats ? (
+                    <div style={{ marginTop: 8 }}>
+                      <div style={{ display: 'flex', gap: 12 }}>
+                        <Card style={{ flex: 1, background: 'var(--bg-card)' }} bodyStyle={{ padding: 12 }}>
+                          <div style={{ color: 'var(--text-secondary)', fontSize: 11 }}>总行数</div>
+                          <div style={{ color: 'var(--color-primary)', fontSize: 16, fontWeight: 600 }}>{stats.total_rows}</div>
+                        </Card>
+                        <Card style={{ flex: 1, background: 'var(--bg-card)' }} bodyStyle={{ padding: 12 }}>
+                          <div style={{ color: 'var(--text-secondary)', fontSize: 11 }}>股票数</div>
+                          <div style={{ color: 'var(--color-gain)', fontSize: 16, fontWeight: 600 }}>{stats.stock_count}</div>
+                        </Card>
+                        <Card style={{ flex: 1, background: 'var(--bg-card)' }} bodyStyle={{ padding: 12 }}>
+                          <div style={{ color: 'var(--text-secondary)', fontSize: 11 }}>起始日期</div>
+                          <div style={{ color: 'var(--text-secondary)', fontSize: 13 }}>{stats.min_date || '-'}</div>
+                        </Card>
+                        <Card style={{ flex: 1, background: 'var(--bg-card)' }} bodyStyle={{ padding: 12 }}>
+                          <div style={{ color: 'var(--text-secondary)', fontSize: 11 }}>截止日期</div>
+                          <div style={{ color: 'var(--text-secondary)', fontSize: 13 }}>{stats.max_date || '-'}</div>
+                        </Card>
+                      </div>
+                      <Card style={{ marginTop: 8, background: 'var(--bg-card)' }} bodyStyle={{ padding: 12 }}
+                        title={<span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>分布统计</span>}>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
+                          <div><span style={{ color: 'var(--text-muted)', marginRight: 6 }}>均值</span><span style={{ color: 'var(--text-primary)' }}>{stats.mean_val?.toFixed(6) ?? '-'}</span></div>
+                          <div><span style={{ color: 'var(--text-muted)', marginRight: 6 }}>标准差</span><span style={{ color: 'var(--text-primary)' }}>{stats.std_val?.toFixed(6) ?? '-'}</span></div>
+                          <div><span style={{ color: 'var(--text-muted)', marginRight: 6 }}>最小值</span><span style={{ color: 'var(--text-primary)' }}>{stats.min_val?.toFixed(6) ?? '-'}</span></div>
+                          <div><span style={{ color: 'var(--text-muted)', marginRight: 6 }}>最大值</span><span style={{ color: 'var(--text-primary)' }}>{stats.max_val?.toFixed(6) ?? '-'}</span></div>
+                        </div>
+                      </Card>
                     </div>
-                  </Card>
+                  ) : null}
+                </Spin>
+              </Collapse.Panel>
+
+              <Collapse.Panel itemKey="preprocess" header={<span style={{ fontSize: 13, fontWeight: 500 }}>预处理配置</span>}>
+                <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                  <div style={{ flex: '1 1 200px' }}>
+                    <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>复权方式</div>
+                    <Select size="small" style={{ width: '100%' }} value={ppEdit.adjust_price}
+                      onChange={(v) => setPpEdit(p => ({ ...p, adjust_price: v as PreprocessOptions['adjust_price'] }))}
+                      optionList={[
+                        { label: '前复权', value: 'forward' },
+                        { label: '后复权', value: 'backward' },
+                        { label: '不复权', value: 'none' },
+                      ]} />
+                    {dataConfigLabels.adj_factor && <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>数据源: {dataConfigLabels.adj_factor.source_label}</div>}
+                  </div>
+                  <div style={{ flex: '1 1 200px' }}>
+                    <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>新股排除天数</div>
+                    <InputNumber size="small" min={1} max={250} value={ppEdit.new_stock_days}
+                      disabled={!ppEdit.filter_new_stock} style={{ width: '100%' }}
+                      onChange={(v) => setPpEdit(p => ({ ...p, new_stock_days: (v as number) || 60 }))} />
+                  </div>
                 </div>
-              ) : null}
-            </Spin>
+                <div style={{ display: 'flex', gap: 16, marginTop: 12, flexWrap: 'wrap' }}>
+                  <span>
+                    <Checkbox checked={ppEdit.filter_st} onChange={(e) => setPpEdit(p => ({ ...p, filter_st: !!e.target.checked }))}>过滤 ST</Checkbox>
+                    {dataConfigLabels.is_st && (
+                      <Tooltip content={dataConfigLabels.is_st.values ? Object.entries(dataConfigLabels.is_st.values).map(([k, v]) => `${k}: ${v}`).join('\n') : undefined} position="bottom">
+                        <span style={{ fontSize: 10, color: 'var(--text-muted)', cursor: dataConfigLabels.is_st.values ? 'help' : undefined }}> ({dataConfigLabels.is_st.source_label})</span>
+                      </Tooltip>
+                    )}
+                  </span>
+                  <span>
+                    <Checkbox checked={ppEdit.filter_new_stock} onChange={(e) => setPpEdit(p => ({ ...p, filter_new_stock: !!e.target.checked }))}>过滤新股</Checkbox>
+                    {dataConfigLabels.list_date && <span style={{ fontSize: 10, color: 'var(--text-muted)' }}> ({dataConfigLabels.list_date.source_label})</span>}
+                  </span>
+                  <span>
+                    <Checkbox checked={ppEdit.handle_suspension} onChange={(e) => setPpEdit(p => ({ ...p, handle_suspension: !!e.target.checked }))}>停牌处理</Checkbox>
+                    {dataConfigLabels.is_suspend && (
+                      <Tooltip content={dataConfigLabels.is_suspend.values ? Object.entries(dataConfigLabels.is_suspend.values).map(([k, v]) => `${k}: ${v}`).join('\n') : undefined} position="bottom">
+                        <span style={{ fontSize: 10, color: 'var(--text-muted)', cursor: dataConfigLabels.is_suspend.values ? 'help' : undefined }}> ({dataConfigLabels.is_suspend.source_label})</span>
+                      </Tooltip>
+                    )}
+                  </span>
+                  <span>
+                    <Checkbox checked={ppEdit.mark_limit} onChange={(e) => setPpEdit(p => ({ ...p, mark_limit: !!e.target.checked }))}>涨跌停标记</Checkbox>
+                    {dataConfigLabels.is_limit && (
+                      <Tooltip content={dataConfigLabels.is_limit.values ? Object.entries(dataConfigLabels.is_limit.values).map(([k, v]) => `${k}: ${v}`).join('\n') : undefined} position="bottom">
+                        <span style={{ fontSize: 10, color: 'var(--text-muted)', cursor: dataConfigLabels.is_limit.values ? 'help' : undefined }}> ({dataConfigLabels.is_limit.source_label})</span>
+                      </Tooltip>
+                    )}
+                  </span>
+                </div>
+              </Collapse.Panel>
+
+              <Collapse.Panel itemKey="code" header={<span style={{ fontSize: 13, fontWeight: 500 }}>因子代码</span>}>
+                <Spin spinning={codeLoading}>
+                  {code ? (
+                    <div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                        <Tag color="blue">{code.filename}</Tag>
+                        <div style={{ display: 'flex', gap: 8 }}>
+                          <Button size="small" icon={<IconCode />} onClick={handleFormatCode}>格式化</Button>
+                          <Button size="small" theme="solid" icon={<IconSave />} disabled={!codeChanged}
+                            loading={codeSaving} onClick={handleSaveCode}>保存代码</Button>
+                        </div>
+                      </div>
+                      <div style={{ border: '1px solid var(--border-color)', borderRadius: 4, overflow: 'hidden' }}>
+                        <Editor height="320px" language="python" theme={mode === 'dark' ? 'vs-dark' : 'vs-light'}
+                          value={editedCode} onChange={(v) => { setEditedCode(v || ''); setCodeChanged(true); }}
+                          onMount={(editor, monaco) => {
+                            codeEditorRef.current = editor;
+                            editor.addAction({
+                              id: 'format-code',
+                              label: 'Format Code',
+                              keybindings: [monaco.KeyMod.Shift | monaco.KeyMod.Alt | monaco.KeyCode.KeyF],
+                              run: () => handleFormatCode(),
+                            });
+                          }}
+                          options={{ minimap: { enabled: false }, fontSize: 13, scrollBeyondLastLine: false, automaticLayout: true, tabSize: 4, wordWrap: 'on' }} />
+                      </div>
+                      <CodeTestPanel code={editedCode} preprocess={ppEdit} />
+                    </div>
+                  ) : <Empty description="未找到源代码文件" />}
+                </Spin>
+              </Collapse.Panel>
+            </Collapse>
             <div style={{ marginTop: 12, textAlign: 'right' }}>
-              <Button theme="solid" icon={<IconSave />} loading={editSaving} onClick={handleSaveEdit}>保存信息</Button>
+              <Button theme="solid" icon={<IconSave />} loading={editSaving} onClick={handleSave}>保存</Button>
             </div>
           </div>
-        </TabPane>
-        {/* ---- 预处理配置 ---- */}
-        <TabPane itemKey="preprocess" tab={<span><IconSetting size="small" /> 预处理</span>}>
-          <div>
-            <div style={{ display: 'flex', gap: 16, marginTop: 4, flexWrap: 'wrap' }}>
-              <div style={{ flex: '1 1 200px' }}>
-                <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>复权方式</div>
-                <Select size="small" style={{ width: '100%' }} value={ppEdit.adjust_price}
-                  onChange={(v) => setPpEdit(p => ({ ...p, adjust_price: v as PreprocessOptions['adjust_price'] }))}
-                  optionList={[
-                    { label: '前复权', value: 'forward' },
-                    { label: '后复权', value: 'backward' },
-                    { label: '不复权', value: 'none' },
-                  ]} />
-              </div>
-              <div style={{ flex: '1 1 200px' }}>
-                <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>新股排除天数</div>
-                <InputNumber size="small" min={1} max={250} value={ppEdit.new_stock_days}
-                  disabled={!ppEdit.filter_new_stock} style={{ width: '100%' }}
-                  onChange={(v) => setPpEdit(p => ({ ...p, new_stock_days: (v as number) || 60 }))} />
-              </div>
-            </div>
-            <div style={{ display: 'flex', gap: 16, marginTop: 12, flexWrap: 'wrap' }}>
-              <Checkbox checked={ppEdit.filter_st} onChange={(e) => setPpEdit(p => ({ ...p, filter_st: !!e.target.checked }))}>过滤 ST</Checkbox>
-              <Checkbox checked={ppEdit.filter_new_stock} onChange={(e) => setPpEdit(p => ({ ...p, filter_new_stock: !!e.target.checked }))}>过滤新股</Checkbox>
-              <Checkbox checked={ppEdit.handle_suspension} onChange={(e) => setPpEdit(p => ({ ...p, handle_suspension: !!e.target.checked }))}>停牌处理</Checkbox>
-              <Checkbox checked={ppEdit.mark_limit} onChange={(e) => setPpEdit(p => ({ ...p, mark_limit: !!e.target.checked }))}>涨跌停标记</Checkbox>
-            </div>
-            <div style={{ marginTop: 16, textAlign: 'right' }}>
-              <Button theme="solid" icon={<IconSave />} loading={ppSaving} onClick={handleSavePp}>保存预处理</Button>
-            </div>
-          </div>
-        </TabPane>
-        {/* ---- 源代码 + 测试 ---- */}
-        <TabPane itemKey="code" tab={<span><IconCode size="small" /> 代码</span>}>
-          <Spin spinning={codeLoading}>
-            {code ? (
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                  <Tag color="blue">{code.filename}</Tag>
-                  <Button size="small" theme="solid" icon={<IconSave />} disabled={!codeChanged}
-                    loading={codeSaving} onClick={handleSaveCode}>保存代码</Button>
-                </div>
-                <div style={{ border: '1px solid var(--border-color)', borderRadius: 4, overflow: 'hidden' }}>
-                  <Editor height="380px" language="python" theme={mode === 'dark' ? 'vs-dark' : 'vs-light'}
-                    value={editedCode} onChange={(v) => { setEditedCode(v || ''); setCodeChanged(true); }}
-                    options={{ minimap: { enabled: false }, fontSize: 13, scrollBeyondLastLine: false, automaticLayout: true, tabSize: 4, wordWrap: 'on' }} />
-                </div>
-                <CodeTestPanel code={editedCode} />
-              </div>
-            ) : <Empty description="未找到源代码文件" />}
-          </Spin>
         </TabPane>
         {/* ---- 数据探查 ---- */}
         <TabPane itemKey="data" tab={<span><IconServer size="small" /> 数据</span>}>
@@ -277,6 +370,19 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
             <Table dataSource={factorData} columns={dataColumns} rowKey={(r: any) => `${r.ts_code}-${r.trade_date}`}
               loading={dataLoading} size="small" pagination={{ pageSize: 15 }}
               scroll={{ y: 400 }} />
+          </div>
+        </TabPane>
+        {/* ---- 计算日志 ---- */}
+        <TabPane itemKey="logs" tab={<span><IconHistory size="small" /> 日志</span>}>
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <span style={{ color: 'var(--text-secondary)', fontSize: 13 }}>最近 50 条计算记录</span>
+              <Button size="small" icon={<IconRefresh />} onClick={loadHistory}>刷新</Button>
+            </div>
+            <Table dataSource={history} columns={logColumns}
+              rowKey={(r: any) => `${r.factor_id}-${r.created_at}`}
+              loading={historyLoading} size="small" pagination={{ pageSize: 15 }}
+              empty={<Empty description="暂无计算记录" />} />
           </div>
         </TabPane>
       </Tabs>
@@ -309,7 +415,7 @@ def compute_custom(df: pl.DataFrame, params: dict) -> pl.DataFrame:
     )
 `;
 
-const CodeTestPanel: React.FC<{ code: string; dependsOn?: string[] }> = ({ code, dependsOn }) => {
+const CodeTestPanel: React.FC<{ code: string; dependsOn?: string[]; preprocess?: PreprocessOptions }> = ({ code, dependsOn, preprocess }) => {
   const [dateRange, setDateRange] = useState<[string, string]>(['', '']);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<any>(null);
@@ -336,6 +442,8 @@ const CodeTestPanel: React.FC<{ code: string; dependsOn?: string[] }> = ({ code,
         start_date: dateRange[0],
         end_date: dateRange[1],
         depends_on: dependsOn || ['sync_daily_data'],
+        params: {},
+        preprocess: preprocess || undefined,
       });
       const d = res.data;
       if (d.status === 'error') {
@@ -379,6 +487,7 @@ const CodeTestPanel: React.FC<{ code: string; dependsOn?: string[] }> = ({ code,
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
         <span style={{ color: 'var(--text-secondary)', fontSize: 12, whiteSpace: 'nowrap' }}>测试区间:</span>
         <DatePicker type="dateRange" size="small" style={{ flex: 1 }}
+          defaultPickerValue={dayjs().subtract(1, 'month').toDate()}
           onChange={(date, dateStr) => {
             const strs = dateStr as unknown as string[];
             if (strs && Array.isArray(strs) && strs[0] && strs[1]) {
@@ -487,13 +596,28 @@ const FactorManageTab: React.FC = () => {
   const [createCode, setCreateCode] = useState(CODE_TEMPLATE);
   const [createPreprocess, setCreatePreprocess] = useState<PreprocessOptions>({ ...DEFAULT_PREPROCESS });
   const [drawerState, setDrawerState] = useState<{ open: boolean; factor: any; tab?: string }>({ open: false, factor: null });
-  const [fullRunModal, setFullRunModal] = useState<{ visible: boolean; factorId: string | null }>({ visible: false, factorId: null });
+  const [fullRunModal, setFullRunModal] = useState<{ visible: boolean; factorId: string | null; computeMode: string }>({ visible: false, factorId: null, computeMode: 'incremental' });
   const [fullRunDates, setFullRunDates] = useState<[dayjs.Dayjs | null, dayjs.Dayjs | null]>([null, null]);
   // Create form state (replaces Form.useForm)
   const [createFactorId, setCreateFactorId] = useState('');
   const [createDesc, setCreateDesc] = useState('');
   const [createCategory, setCreateCategory] = useState('custom');
   const [createComputeMode, setCreateComputeMode] = useState('incremental');
+  const createEditorRef = useRef<any>(null);
+
+  // 格式化创建代码
+  const handleFormatCreateCode = async () => {
+    try {
+      const formatted = await formatCode(createCode, 'python');
+      setCreateCode(formatted);
+      Toast.success('代码格式化成功');
+    } catch (error: any) {
+      Toast.error(error.message || '格式化失败');
+    }
+  };
+  // 批量计算模态框
+  const [batchCalcModalVisible, setBatchCalcModalVisible] = useState(false);
+  const [batchCalcDates, setBatchCalcDates] = useState<[dayjs.Dayjs | null, dayjs.Dayjs | null]>([null, null]);
 
   const loadFactors = useCallback(async () => {
     setLoading(true);
@@ -528,11 +652,11 @@ const FactorManageTab: React.FC = () => {
     setRunLoading(null);
   };
 
-  const handleBatchRun = async (runMode: string) => {
+  const handleBatchRun = async (runMode: string, startDate?: string, endDate?: string) => {
     if (selectedRowKeys.length === 0) { Toast.warning('请先勾选因子'); return; }
     setBatchLoading(true);
     try {
-      const res = await productionApi.batchRunFactors(selectedRowKeys, runMode);
+      const res = await productionApi.batchRunFactors(selectedRowKeys, runMode, startDate, endDate);
       const results = res.data?.data || [];
       const ok = results.filter((r: any) => r.success).length;
       const fail = results.length - ok;
@@ -582,36 +706,86 @@ const FactorManageTab: React.FC = () => {
     setDrawerState({ open: true, factor: record, tab });
   };
 
+  const handleCopyFactor = async (factor: any) => {
+    // 预填充新建因子 SideSheet，ID 加 _copy 后缀
+    setCreateFactorId(`${factor.factor_id}_copy`);
+    setCreateDesc(factor.description || '');
+    setCreateCategory(factor.category || 'custom');
+    setCreateComputeMode(factor.compute_mode || 'incremental');
+    setCreatePreprocess(factor.params?.preprocess ? { ...DEFAULT_PREPROCESS, ...factor.params.preprocess } : { ...DEFAULT_PREPROCESS });
+    // 异步加载因子代码
+    try {
+      const res = await productionApi.getFactorCode(factor.factor_id);
+      setCreateCode(res.data?.data?.code || CODE_TEMPLATE);
+    } catch {
+      setCreateCode(CODE_TEMPLATE);
+    }
+    setCreateModal(true);
+  };
+
   const factorColumns = [
-    { title: '因子ID', dataIndex: 'factor_id', key: 'factor_id', width: 160,
+    { title: '因子ID', dataIndex: 'factor_id', key: 'factor_id', width: 180,
       render: (v: string, r: any) => (
-        <span style={{ cursor: 'pointer' }} onClick={() => openDrawer(r)}>
-          <Tag color="blue">{v}</Tag>
-        </span>
+        <Tooltip content={v}>
+          <span style={{ cursor: 'pointer', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} onClick={() => openDrawer(r)}>
+            <code style={{ color: 'var(--color-primary)', fontSize: '12px' }}>{v}</code>
+          </span>
+        </Tooltip>
       )
     },
-    { title: '描述', dataIndex: 'description', key: 'desc', ellipsis: true },
-    { title: '分类', dataIndex: 'category', key: 'cat', width: 90, render: (v: string) => <Tag>{v || '-'}</Tag> },
-    { title: '模式', dataIndex: 'compute_mode', key: 'mode', width: 80,
-      render: (v: string) => <Tag color={v === 'incremental' ? 'cyan' : 'orange'}>{v === 'incremental' ? '增量' : '全量'}</Tag>
+    { title: '描述', dataIndex: 'description', key: 'desc', width: 180,
+      render: (v: string) => (
+        <Tooltip content={v}>
+          <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v}</div>
+        </Tooltip>
+      )
     },
-    { title: '最新数据', dataIndex: 'latest_data_date', key: 'latest', width: 110,
-      render: (v: string) => v ? <span style={{ color: 'var(--color-gain)' }}>{v}</span> : <span style={{ color: 'var(--text-muted)' }}>-</span>
+    { title: '分类', dataIndex: 'category', key: 'cat', width: 80,
+      render: (v: string) => (
+        <Tooltip content={v || '-'}>
+          <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <Tag size="small">{v || '-'}</Tag>
+          </div>
+        </Tooltip>
+      )
     },
-    { title: '上次计算', dataIndex: 'last_computed_at', key: 'computed', width: 140,
-      render: (v: string) => v ? <Tooltip content={v}><span style={{ color: 'var(--text-secondary)' }}>{v.slice(0, 16)}</span></Tooltip> : '-'
+    { title: '模式', dataIndex: 'compute_mode', key: 'mode', width: 60,
+      render: (v: string) => <Tag size="small" color={v === 'incremental' ? 'blue' : 'green'}>{v === 'incremental' ? '增量' : '全量'}</Tag>
+    },
+    { title: '最新数据', dataIndex: 'latest_data_date', key: 'latest', width: 90,
+      render: (v: string) => {
+        if (!v) return <span style={{ color: 'var(--text-muted)' }}>-</span>;
+        return (
+          <Tooltip content={v}>
+            <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--color-gain)' }}>{v}</div>
+          </Tooltip>
+        );
+      }
+    },
+    { title: '上次计算', dataIndex: 'last_computed_at', key: 'computed', width: 130,
+      render: (v: string) => {
+        if (!v) return '-';
+        return (
+          <Tooltip content={v}>
+            <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-secondary)', fontSize: '12px' }}>
+              {v.slice(0, 16)}
+            </div>
+          </Tooltip>
+        );
+      }
     },
     {
-      title: '操作', key: 'action', width: 320, render: (_: any, record: any) => (
+      title: '操作', key: 'action', width: 160, render: (_: any, record: any) => (
         <div style={{ display: 'flex', gap: 4 }}>
-          <Button size="small" icon={<IconInfoCircle />}
-            onClick={() => openDrawer(record)}>详情</Button>
-          <Button size="small" theme="solid" icon={<IconPlay />}
+          <Button size="small" icon={<IconHistory />}
             loading={runLoading === record.factor_id}
-            onClick={() => handleRun(record.factor_id, 'incremental')}>增量</Button>
-          <Button size="small" icon={<IconRefresh />}
-            loading={runLoading === record.factor_id}
-            onClick={() => { setFullRunModal({ visible: true, factorId: record.factor_id }); setFullRunDates([null, null]); }}>回溯</Button>
+            onClick={() => {
+              setFullRunModal({ visible: true, factorId: record.factor_id, computeMode: record.compute_mode || 'incremental' });
+              setFullRunDates([null, null]);
+            }}>计算</Button>
+          <Tooltip content="复制因子">
+            <Button size="small" icon={<IconCopy />} onClick={() => handleCopyFactor(record)} />
+          </Tooltip>
           <Popconfirm title="确认删除?" onConfirm={() => handleDelete(record.factor_id)}>
             <Button size="small" type="danger" icon={<IconDelete />} />
           </Popconfirm>
@@ -621,12 +795,61 @@ const FactorManageTab: React.FC = () => {
   ];
 
   const historyColumns = [
-    { title: '因子', dataIndex: 'factor_id', key: 'fid', render: (v: string) => <Tag color="blue">{v}</Tag> },
-    { title: '模式', dataIndex: 'mode', key: 'mode', render: (v: string) => <Tag color={v === 'incremental' ? 'cyan' : 'orange'}>{v === 'incremental' ? '增量' : '全量'}</Tag> },
-    { title: '状态', dataIndex: 'status', key: 'status', render: (v: string) => <Tag color={v === 'success' ? 'green' : v === 'running' ? 'blue' : 'red'}>{v}</Tag> },
-    { title: '行数', dataIndex: 'rows_affected', key: 'rows', render: (v: number) => v?.toLocaleString() || '-' },
-    { title: '耗时', dataIndex: 'duration_seconds', key: 'dur', render: (v: number) => v ? `${v.toFixed(1)}s` : '-' },
-    { title: '时间', dataIndex: 'created_at', key: 'time', render: (v: string) => v?.slice(0, 19) },
+    { title: '因子', dataIndex: 'factor_id', key: 'fid', width: 150,
+      render: (v: string) => (
+        <Tooltip content={v}>
+          <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <code style={{ color: 'var(--color-primary)', fontSize: '12px' }}>{v}</code>
+          </div>
+        </Tooltip>
+      )
+    },
+    { title: '模式', dataIndex: 'mode', key: 'mode', width: 60,
+      render: (v: string) => <Tag size="small" color={v === 'incremental' ? 'blue' : 'green'}>{v === 'incremental' ? '增量' : '全量'}</Tag>
+    },
+    { title: '状态', dataIndex: 'status', key: 'status', width: 80,
+      render: (v: string) => <Tag size="small" color={v === 'success' ? 'green' : v === 'running' ? 'blue' : 'red'}>{v}</Tag>
+    },
+    { title: '行数', dataIndex: 'rows_affected', key: 'rows', width: 90,
+      render: (v: number) => {
+        const formatted = v?.toLocaleString() || '-';
+        return (
+          <Tooltip content={formatted}>
+            <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{formatted}</div>
+          </Tooltip>
+        );
+      }
+    },
+    { title: '耗时', dataIndex: 'duration_seconds', key: 'dur', width: 80,
+      render: (v: number) => {
+        const formatted = v ? `${v.toFixed(1)}s` : '-';
+        return (
+          <Tooltip content={formatted}>
+            <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{formatted}</div>
+          </Tooltip>
+        );
+      }
+    },
+    { title: '计算参数', key: 'range', width: 200,
+      render: (_: any, record: any) => {
+        const text = formatRunParams(record);
+        return (
+          <Tooltip content={text}>
+            <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '12px', color: 'var(--text-secondary)' }}>{text}</div>
+          </Tooltip>
+        );
+      }
+    },
+    { title: '时间', dataIndex: 'created_at', key: 'time', width: 150,
+      render: (v: string) => {
+        const formatted = v?.slice(0, 19) || '-';
+        return (
+          <Tooltip content={formatted}>
+            <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{formatted}</div>
+          </Tooltip>
+        );
+      }
+    },
   ];
 
   return (
@@ -637,7 +860,7 @@ const FactorManageTab: React.FC = () => {
           <div style={{ display: 'flex', gap: 8 }}>
             {selectedRowKeys.length > 0 && (
               <Button size="small" theme="solid" icon={<IconBolt />} loading={batchLoading}
-                onClick={() => handleBatchRun('incremental')}>批量增量 ({selectedRowKeys.length})</Button>
+                onClick={() => { setBatchCalcDates([null, null]); setBatchCalcModalVisible(true); }}>批量计算 ({selectedRowKeys.length})</Button>
             )}
             <Button size="small" icon={<IconPlus />} onClick={() => setCreateModal(true)}>新建因子</Button>
             <Button icon={<IconRefresh />} onClick={loadFactors} size="small">刷新</Button>
@@ -659,13 +882,27 @@ const FactorManageTab: React.FC = () => {
           size="small" pagination={{ pageSize: 10 }} />
       </Card>
 
-      {/* 新建因子 Modal */}
-      <Modal title="新建因子" visible={createModal} onOk={handleCreate} width={820}
+      {/* 新建因子 SideSheet */}
+      <SideSheet
+        title={<span style={{ color: 'var(--color-primary)' }}>新建因子</span>}
+        visible={createModal}
         onCancel={() => {
           setCreateModal(false);
           setCreateFactorId(''); setCreateDesc(''); setCreateCategory('custom'); setCreateComputeMode('incremental');
           setCreateCode(CODE_TEMPLATE); setCreatePreprocess({ ...DEFAULT_PREPROCESS });
-        }} okText="创建">
+        }}
+        width={720}
+        footer={
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <Button onClick={() => {
+              setCreateModal(false);
+              setCreateFactorId(''); setCreateDesc(''); setCreateCategory('custom'); setCreateComputeMode('incremental');
+              setCreateCode(CODE_TEMPLATE); setCreatePreprocess({ ...DEFAULT_PREPROCESS });
+            }}>取消</Button>
+            <Button theme="solid" type="primary" onClick={handleCreate}>创建</Button>
+          </div>
+        }
+      >
         <div style={{ display: 'flex', gap: 16, marginBottom: 12 }}>
           <div style={{ flex: 1 }}>
             <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>因子ID <span style={{ color: 'var(--color-loss)' }}>*</span></div>
@@ -712,37 +949,144 @@ const FactorManageTab: React.FC = () => {
           </div>
         )}
         <div style={{ marginTop: 8 }}>
-          <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>因子计算代码</div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+            <div style={{ color: 'var(--text-secondary)', fontSize: 12 }}>因子计算代码</div>
+            <Button size="small" icon={<IconCode />} onClick={handleFormatCreateCode}>格式化</Button>
+          </div>
           <div style={{ border: '1px solid var(--border-color)', borderRadius: 4, overflow: 'hidden' }}>
             <Editor height="300px" language="python" theme={mode === 'dark' ? 'vs-dark' : 'vs-light'}
               value={createCode} onChange={(v) => setCreateCode(v || '')}
+              onMount={(editor, monaco) => {
+                createEditorRef.current = editor;
+                editor.addAction({
+                  id: 'format-create-code',
+                  label: 'Format Code',
+                  keybindings: [monaco.KeyMod.Shift | monaco.KeyMod.Alt | monaco.KeyCode.KeyF],
+                  run: () => handleFormatCreateCode(),
+                });
+              }}
               options={{ minimap: { enabled: false }, fontSize: 13, scrollBeyondLastLine: false, automaticLayout: true, tabSize: 4, wordWrap: 'on' }} />
           </div>
-          <CodeTestPanel code={createCode} />
+          <CodeTestPanel code={createCode} preprocess={createPreprocess} />
+        </div>
+      </SideSheet>
+
+      <Modal title={`计算因子: ${fullRunModal.factorId}`} visible={fullRunModal.visible}
+        onCancel={() => setFullRunModal({ visible: false, factorId: null, computeMode: 'incremental' })}
+        onOk={() => {
+          if (!fullRunModal.factorId) return;
+          if (fullRunModal.computeMode === 'full') {
+            setFullRunModal({ visible: false, factorId: null, computeMode: 'incremental' });
+            handleRun(fullRunModal.factorId, 'full');
+          } else {
+            const sd = fullRunDates[0]?.format('YYYYMMDD');
+            const ed = fullRunDates[1]?.format('YYYYMMDD');
+            setFullRunModal({ visible: false, factorId: null, computeMode: 'incremental' });
+            handleRun(fullRunModal.factorId, sd && ed ? 'full' : 'incremental', sd, ed);
+          }
+        }}
+        okText="开始计算" cancelText="取消">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {fullRunModal.computeMode === 'full' ? (
+            <div style={{ color: 'var(--text-secondary)', fontSize: 13 }}>
+              该因子为全量计算模式，将执行一次完整计算。
+            </div>
+          ) : (
+            <>
+              <div style={{ color: 'var(--text-secondary)', fontSize: 13 }}>
+                选择计算日期范围。留空则执行增量计算（仅计算最新数据）。
+              </div>
+              <div>
+                <div style={{ marginBottom: 6, fontWeight: 500, fontSize: '13px' }}>计算日期范围</div>
+                <DatePicker type="dateRange" style={{ width: '100%' }} size="small"
+                  placeholder={['开始日期', '结束日期']}
+                  defaultPickerValue={dayjs().subtract(1, 'month').toDate()}
+                  value={fullRunDates[0] && fullRunDates[1] ? [fullRunDates[0].toDate(), fullRunDates[1].toDate()] : undefined}
+                  onChange={(dates) => {
+                    if (dates && Array.isArray(dates) && dates.length === 2 && dates[0] && dates[1]) {
+                      setFullRunDates([dayjs(dates[0]), dayjs(dates[1])]);
+                    } else {
+                      setFullRunDates([null, null]);
+                    }
+                  }} />
+                {fullRunDates[0] && fullRunDates[1] && (
+                  <div style={{ marginTop: 8, padding: '8px 12px', background: 'var(--color-primary-light-default)', borderRadius: '6px' }}>
+                    <span style={{ color: 'var(--color-primary)', fontSize: '13px', fontWeight: 500 }}>
+                      共 {fullRunDates[1].diff(fullRunDates[0], 'day') + 1} 天
+                    </span>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
         </div>
       </Modal>
 
-      <Modal title="全量计算" visible={fullRunModal.visible}
-        onCancel={() => setFullRunModal({ visible: false, factorId: null })}
+      {/* 批量计算模态框 */}
+      <Modal
+        title={`批量计算 (已选 ${selectedRowKeys.length} 个因子)`}
+        visible={batchCalcModalVisible}
         onOk={() => {
-          if (!fullRunModal.factorId) return;
-          const sd = fullRunDates[0]?.format('YYYYMMDD');
-          const ed = fullRunDates[1]?.format('YYYYMMDD');
-          setFullRunModal({ visible: false, factorId: null });
-          handleRun(fullRunModal.factorId, 'full', sd, ed);
+          const sd = batchCalcDates[0]?.format('YYYYMMDD');
+          const ed = batchCalcDates[1]?.format('YYYYMMDD');
+          setBatchCalcModalVisible(false);
+          handleBatchRun(sd && ed ? 'full' : 'incremental', sd, ed);
         }}
-        okText="开始计算" cancelText="取消">
-        <p style={{ marginBottom: 12 }}>因子: <Tag color="blue">{fullRunModal.factorId}</Tag></p>
-        <p style={{ marginBottom: 8 }}>选择日期范围（留空则使用默认252个交易日）:</p>
-        <DatePicker type="dateRange" style={{ width: '100%' }}
-          value={fullRunDates as any}
-          onChange={(dates) => {
-            if (dates && Array.isArray(dates) && dates.length === 2) {
-              setFullRunDates([dates[0] ? dayjs(dates[0]) : null, dates[1] ? dayjs(dates[1]) : null]);
-            } else {
-              setFullRunDates([null, null]);
-            }
-          }} />
+        onCancel={() => setBatchCalcModalVisible(false)}
+        okText="开始计算" cancelText="取消"
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ padding: '12px', background: 'var(--bg-surface)', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
+            {(() => {
+              const fullIds = selectedRowKeys.filter(id => factors.find(f => f.factor_id === id)?.compute_mode === 'full');
+              const incIds = selectedRowKeys.filter(id => !fullIds.includes(id));
+              return (<>
+                {incIds.length > 0 && (
+                  <div style={{ marginBottom: fullIds.length > 0 ? 8 : 0 }}>
+                    <div style={{ color: 'var(--text-secondary)', fontSize: '13px', marginBottom: 6 }}>增量因子（按日期范围计算）：</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                      {incIds.map(id => <Tag key={id} color="cyan" style={{ fontSize: '12px' }}>{id}</Tag>)}
+                    </div>
+                  </div>
+                )}
+                {fullIds.length > 0 && (
+                  <div>
+                    <div style={{ color: 'var(--text-secondary)', fontSize: '13px', marginBottom: 6 }}>全量因子（仅执行一次，忽略日期）：</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                      {fullIds.map(id => <Tag key={id} color="orange" style={{ fontSize: '12px' }}>{id}</Tag>)}
+                    </div>
+                  </div>
+                )}
+              </>);
+            })()}
+          </div>
+          {selectedRowKeys.some(id => factors.find(f => f.factor_id === id)?.compute_mode !== 'full') && (
+          <div>
+            <div style={{ color: 'var(--text-secondary)', fontSize: 13, marginBottom: 8 }}>
+              选择计算日期范围。留空则执行增量计算（仅计算最新数据）。
+            </div>
+            <div style={{ marginBottom: 6, fontWeight: 500, fontSize: '13px' }}>计算日期范围</div>
+            <DatePicker type="dateRange" style={{ width: '100%' }} size="small"
+              placeholder={['开始日期', '结束日期']}
+              defaultPickerValue={dayjs().subtract(1, 'month').toDate()}
+              value={batchCalcDates[0] && batchCalcDates[1] ? [batchCalcDates[0].toDate(), batchCalcDates[1].toDate()] : undefined}
+              onChange={(dates) => {
+                if (dates && Array.isArray(dates) && dates.length === 2 && dates[0] && dates[1]) {
+                  setBatchCalcDates([dayjs(dates[0]), dayjs(dates[1])]);
+                } else {
+                  setBatchCalcDates([null, null]);
+                }
+              }} />
+            {batchCalcDates[0] && batchCalcDates[1] && (
+              <div style={{ marginTop: 8, padding: '8px 12px', background: 'var(--color-primary-light-default)', borderRadius: '6px' }}>
+                <span style={{ color: 'var(--color-primary)', fontSize: '13px', fontWeight: 500 }}>
+                  共 {batchCalcDates[1].diff(batchCalcDates[0], 'day') + 1} 天
+                </span>
+              </div>
+            )}
+          </div>
+          )}
+        </div>
       </Modal>
 
       <FactorDrawer factor={drawerState.factor} open={drawerState.open} initialTab={drawerState.tab}
@@ -879,6 +1223,138 @@ const AnalysisTab: React.FC = () => {
   );
 };
 
+// ==================== 数据配置 Tab ====================
+const DataConfigTab: React.FC = () => {
+  const [mappings, setMappings] = useState<DataFieldMapping[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [tables, setTables] = useState<string[]>([]);
+  const [tableColumns, setTableColumns] = useState<Record<string, string[]>>({});
+  const [changed, setChanged] = useState(false);
+
+  const loadConfig = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await productionApi.getDataConfig();
+      setMappings(res.data?.data || []);
+      setChanged(false);
+    } catch { Toast.error('加载数据配置失败'); }
+    setLoading(false);
+  }, []);
+
+  const loadTables = useCallback(async () => {
+    try {
+      const res = await dataApi.listTables();
+      const list: string[] = (res.data?.tables || []).map((t: any) => t.table_name || t.name || t);
+      setTables(list);
+    } catch { /* ignore */ }
+  }, []);
+
+  useEffect(() => { loadConfig(); loadTables(); }, [loadConfig, loadTables]);
+
+  const loadColumnsForTable = async (tableName: string) => {
+    if (!tableName || tableColumns[tableName]) return;
+    try {
+      const res = await dataApi.getTableInfo(tableName);
+      const cols: string[] = (res.data?.columns || []).map((c: any) => c.name || c);
+      setTableColumns(prev => ({ ...prev, [tableName]: cols }));
+    } catch { /* ignore */ }
+  };
+
+  const updateMapping = (idx: number, field: Partial<DataFieldMapping>) => {
+    setMappings(prev => prev.map((m, i) => i === idx ? { ...m, ...field } : m));
+    setChanged(true);
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await productionApi.updateDataConfig(mappings);
+      Toast.success('配置已保存');
+      setChanged(false);
+    } catch (e: any) {
+      Toast.error(e.response?.data?.detail || '保存失败');
+    }
+    setSaving(false);
+  };
+
+  return (
+    <Card style={{ background: 'var(--bg-card)' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <div>
+          <span style={{ color: 'var(--color-primary)', fontWeight: 600, fontSize: 15 }}>数据字段映射</span>
+          <span style={{ color: 'var(--text-muted)', fontSize: 11, marginLeft: 8 }}>配置因子计算引擎使用的数据表和字段映射。主键: trade_date + ts_code。留空表示使用引擎内置逻辑。</span>
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Button size="small" icon={<IconRefresh />} onClick={loadConfig}>刷新</Button>
+          <Button size="small" theme="solid" icon={<IconSave />} disabled={!changed} loading={saving}
+            onClick={handleSave}>保存配置</Button>
+        </div>
+      </div>
+      <Spin spinning={loading}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {mappings.map((m, idx) => {
+            const extra = (() => { try { return JSON.parse(m.extra_config || '{}'); } catch { return {}; } })();
+            const hasTable = !!m.table_name;
+            const enumValues: Record<string, string> | undefined = extra.values;
+            return (
+              <div key={m.field_key} style={{
+                display: 'flex', flexDirection: 'column', gap: 8, padding: '10px 14px',
+                background: 'var(--bg-surface)', borderRadius: 6, border: '1px solid var(--border-color)',
+              }}>
+                {/* 第一行: 字段信息 + 枚举标签 + 状态 */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <code style={{ color: 'var(--color-primary)', fontSize: 12, fontWeight: 600 }}>{m.field_key}</code>
+                  <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>{m.description?.split('。')[0]}</span>
+                  {enumValues && (
+                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                      {Object.entries(enumValues).map(([k, v]) => (
+                        <Tag key={k} size="small" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px' }}
+                          color={k === '0' ? 'green' : k === '1' ? 'red' : k === '-1' ? 'blue' : 'grey'}
+                        >{k}={v}</Tag>
+                      ))}
+                    </div>
+                  )}
+                  <div style={{ marginLeft: 'auto' }}>
+                    {hasTable ? (
+                      <Tag color="green" style={{ fontSize: 11 }}>{m.table_name}{m.column_name ? `.${m.column_name}` : ''}</Tag>
+                    ) : extra.mode ? (
+                      <Tag color="blue" style={{ fontSize: 11 }}>{extra.mode === 'infer_from_gaps' ? '从交易日缺失推断' : extra.mode === 'compute_from_ohlcv' ? '从OHLCV计算' : extra.mode}</Tag>
+                    ) : (
+                      <Tag color="grey" style={{ fontSize: 11 }}>未配置</Tag>
+                    )}
+                  </div>
+                </div>
+                {/* 第二行: 数据表 + 列选择器 */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ color: 'var(--text-muted)', fontSize: 11, flexShrink: 0 }}>数据表</span>
+                  <Select size="small" style={{ width: 240 }} placeholder="选择数据表" showClear filter
+                    value={m.table_name || undefined}
+                    onChange={(v) => {
+                      updateMapping(idx, { table_name: (v as string) || '', column_name: '' });
+                      if (v) loadColumnsForTable(v as string);
+                    }}
+                    optionList={tables.map(t => ({ label: t, value: t }))}
+                  />
+                  <span style={{ color: 'var(--text-muted)', fontSize: 11, flexShrink: 0 }}>列</span>
+                  <Select size="small" style={{ width: 200 }} placeholder="选择列" showClear filter
+                    value={m.column_name || undefined}
+                    disabled={!m.table_name}
+                    onFocus={() => { if (m.table_name) loadColumnsForTable(m.table_name); }}
+                    onChange={(v) => updateMapping(idx, { column_name: (v as string) || '' })}
+                    optionList={(tableColumns[m.table_name] || []).map(c => ({ label: c, value: c }))}
+                  />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        {mappings.length === 0 && !loading && <Empty description="暂无配置数据" />}
+      </Spin>
+    </Card>
+  );
+};
+
 // ==================== 主组件 ====================
 const FactorCenter: React.FC = () => (
   <div style={{ padding: '16px', maxWidth: '1600px', margin: '0 auto' }}>
@@ -901,6 +1377,9 @@ const FactorCenter: React.FC = () => (
       </TabPane>
       <TabPane itemKey="analysis" tab={<span><IconBarChartHStroked /> 因子分析</span>}>
         <AnalysisTab />
+      </TabPane>
+      <TabPane itemKey="dataconfig" tab={<span><IconSetting /> 数据配置</span>}>
+        <DataConfigTab />
       </TabPane>
     </Tabs>
   </div>

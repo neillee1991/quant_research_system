@@ -120,6 +120,15 @@ export const mlApi = {
   getWeights: () => api.get('/ml/weights'),
 };
 
+export interface DataFieldMapping {
+  field_key: string;
+  description: string;
+  table_name: string;
+  column_name: string;
+  extra_config: string;
+  updated_at?: string;
+}
+
 export const productionApi = {
   // 因子 CRUD
   listFactors: () => api.get('/production/factors'),
@@ -144,7 +153,7 @@ export const productionApi = {
     api.put(`/production/factors/${factorId}/code`, { filename, code }),
 
   // 因子代码测试
-  testFactorCode: (data: { code: string; start_date: string; end_date: string; depends_on?: string[]; params?: Record<string, any> }) =>
+  testFactorCode: (data: { code: string; start_date: string; end_date: string; depends_on?: string[]; params?: Record<string, any>; preprocess?: PreprocessOptions }) =>
     longRunningApi.post('/production/factors/test', data),
 
   // 因子数据探查
@@ -158,6 +167,11 @@ export const productionApi = {
   getAnalysis: (factorId: string) => api.get(`/analysis/${factorId}`),
   getAnalysisHistory: (factorId: string, limit = 10) =>
     api.get(`/analysis/${factorId}/history`, { params: { limit } }),
+
+  // 数据配置
+  getDataConfig: () => api.get('/production/data-config'),
+  updateDataConfig: (mappings: DataFieldMapping[]) => api.put('/production/data-config', { mappings }),
+  getResolvedDataConfig: () => api.get('/production/data-config/resolved'),
 };
 
 // Flow 配置管理

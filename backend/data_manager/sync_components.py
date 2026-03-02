@@ -346,22 +346,83 @@ class SyncTaskExecutor(ISyncTaskExecutor):
                 pass
             return False
 
+    def _fetch_with_pagination(
+        self,
+        task_id: str,
+        api_name: str,
+        params: Dict[str, Any],
+        api_limit: int,
+    ) -> Optional[pl.DataFrame]:
+        """
+        带 offset 分页的 API 调用，自动循环直到取完全部数据。
+
+        Returns:
+            合并后的完整 DataFrame，无数据时返回 None
+        """
+        all_frames: list[pl.DataFrame] = []
+        offset = 0
+        page = 0
+
+        while True:
+            page += 1
+            page_params = {**params, "limit": api_limit, "offset": offset}
+            df = self.api_client.call_api(api_name, **page_params)
+
+            if df is None or df.is_empty():
+                break
+
+            rows = len(df)
+            all_frames.append(df)
+            logger.info(
+                f"[{task_id}] page {page}: fetched {rows} rows "
+                f"(offset={offset}, limit={api_limit})"
+            )
+
+            if rows < api_limit:
+                # 返回行数不足 limit，说明已是最后一页
+                break
+            offset += rows
+
+        if not all_frames:
+            return None
+
+        result = pl.concat(all_frames)
+        if page > 1:
+            logger.info(
+                f"[{task_id}] pagination done: {page} pages, "
+                f"{len(result)} total rows"
+            )
+        return result
+
     def _execute_full_sync(self, task: Dict[str, Any]) -> bool:
         """执行全量同步"""
         task_id = task["task_id"]
         api_name = task["api_name"]
+        api_limit = task.get("api_limit", 5000)
+        table_name = task["table_name"]
+        primary_keys = task.get("primary_keys", [])
         params = self._format_params(task["params"])
         params_str = f"type=full, api={api_name}"
 
         try:
-            df = self.api_client.call_api(api_name, **params)
+            df = self._fetch_with_pagination(task_id, api_name, params, api_limit)
             if df is None or df.is_empty():
                 logger.warning(f"No data for {task_id}")
                 self.log_manager.update_sync_log(task_id, DateUtils.today(), 0, params=params_str)
                 return False
 
+            # 全量同步且无主键时，先清空表再写入，避免数据不断累积
+            if not primary_keys:
+                try:
+                    self.repository.execute(
+                        f"delete from loadTable('{self.repository._db_path}', '{table_name}')"
+                    )
+                    logger.info(f"[{task_id}] cleared table {table_name} before full sync (no primary keys)")
+                except Exception as e:
+                    logger.warning(f"[{task_id}] failed to clear table {table_name}: {e}")
+
             rows_count = len(df)
-            self.repository.upsert(task["table_name"], df, task["primary_keys"])
+            self.repository.upsert(table_name, df, primary_keys)
             self.log_manager.update_sync_log(task_id, DateUtils.today(), rows_count, params=params_str)
             logger.info(f"Full sync completed for {task_id}: {rows_count} rows")
             return True
@@ -379,6 +440,7 @@ class SyncTaskExecutor(ISyncTaskExecutor):
         """执行增量同步"""
         task_id = task["task_id"]
         api_name = task["api_name"]
+        api_limit = task.get("api_limit", 5000)
 
         # 确定日期范围
         if target_date is None:
@@ -416,7 +478,7 @@ class SyncTaskExecutor(ISyncTaskExecutor):
             params_str = f"type=incremental, date={date_str}, range={start_date}~{target_date}"
             try:
                 params = self._format_params(task["params"], date_str)
-                df = self.api_client.call_api(api_name, **params)
+                df = self._fetch_with_pagination(task_id, api_name, params, api_limit)
 
                 if df is not None and not df.is_empty():
                     self.repository.upsert(task["table_name"], df, task["primary_keys"])
