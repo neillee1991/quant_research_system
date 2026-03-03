@@ -849,7 +849,7 @@ async def get_factor_stats(factor_id: str):
                 MIN(trade_date) AS min_date,
                 MAX(trade_date) AS max_date,
                 AVG(factor_value) AS mean_val,
-                STD(factor_value) AS std_val,
+                SQRT(AVG(POWER(factor_value - AVG(factor_value), 2))) AS std_val,
                 MIN(factor_value) AS min_val,
                 MAX(factor_value) AS max_val
             FROM factor_values WHERE factor_id = %s
@@ -952,3 +952,513 @@ async def get_resolved_data_config():
         return {"status": "success", "data": result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================== 指数股票池 CRUD ====================
+
+class IndexPoolBatchUploadRequest(BaseModel):
+    """批量上传指数成分股请求"""
+    index_code: str
+    index_name: str = ""
+    description: str = ""
+    data: List[Dict[str, Any]]  # [{"trade_date": "20240101", "ts_code": "000001.SZ", "weight": 0.05}]
+
+
+class IndexPoolCSVUploadRequest(BaseModel):
+    """CSV 上传请求"""
+    index_code: str
+    index_name: str = ""
+    description: str = ""
+    csv_content: str  # CSV 文件内容
+
+
+@router.post("/index-pool/batch-upload")
+async def batch_upload_index_pool(req: IndexPoolBatchUploadRequest):
+    """批量上传指数成分股（JSON 格式）
+
+    请求示例:
+    {
+        "index_code": "000300.SH",
+        "index_name": "沪深300",
+        "description": "沪深300指数成分股",
+        "data": [
+            {"trade_date": "20240101", "ts_code": "000001.SZ", "weight": 0.05},
+            {"trade_date": "20240101", "ts_code": "000002.SZ", "weight": 0.03}
+        ]
+    }
+    """
+    try:
+        if not req.data:
+            raise HTTPException(status_code=400, detail="数据不能为空")
+
+        # 验证数据格式
+        required_fields = ["trade_date", "ts_code"]
+        for item in req.data:
+            for field in required_fields:
+                if field not in item:
+                    raise HTTPException(status_code=400, detail=f"缺少必需字段: {field}")
+
+        # 添加 index_code 到每条记录
+        for item in req.data:
+            item["index_code"] = req.index_code
+            if "weight" not in item:
+                item["weight"] = 0.0
+
+        # 转换为 DataFrame
+        constituents_df = pl.DataFrame(req.data)
+
+        # 插入成分股数据
+        db_client.upsert(
+            "index_constituents",
+            constituents_df,
+            key_columns=["trade_date", "ts_code", "index_code"]
+        )
+
+        # 更新或插入元数据
+        latest_date = constituents_df["trade_date"].max()
+        stock_count = constituents_df.filter(pl.col("trade_date") == latest_date)["ts_code"].n_unique()
+
+        metadata_df = pl.DataFrame({
+            "index_code": [req.index_code],
+            "index_name": [req.index_name],
+            "description": [req.description],
+            "stock_count": [stock_count],
+            "latest_date": [latest_date],
+            "created_at": [datetime.now()],
+            "updated_at": [datetime.now()]
+        })
+
+        db_client.upsert(
+            "index_metadata",
+            metadata_df,
+            key_columns=["index_code"]
+        )
+
+        logger.info(f"Uploaded {len(req.data)} records for index {req.index_code}")
+
+        return {
+            "status": "success",
+            "message": f"成功上传 {len(req.data)} 条成分股数据",
+            "data": {
+                "index_code": req.index_code,
+                "records_count": len(req.data),
+                "stock_count": stock_count,
+                "latest_date": latest_date
+            }
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to upload index pool: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/index-pool/csv-upload")
+async def csv_upload_index_pool(req: IndexPoolCSVUploadRequest):
+    """CSV 上传指数成分股
+
+    CSV 格式要求:
+    trade_date,ts_code,weight
+    20240101,000001.SZ,0.05
+    20240101,000002.SZ,0.03
+    """
+    try:
+        import io
+        import csv
+
+        # 解析 CSV
+        csv_file = io.StringIO(req.csv_content)
+        reader = csv.DictReader(csv_file)
+        data = []
+
+        for row in reader:
+            if "trade_date" not in row or "ts_code" not in row:
+                raise HTTPException(status_code=400, detail="CSV 必须包含 trade_date 和 ts_code 列")
+
+            data.append({
+                "trade_date": row["trade_date"],
+                "ts_code": row["ts_code"],
+                "weight": float(row.get("weight", 0.0))
+            })
+
+        if not data:
+            raise HTTPException(status_code=400, detail="CSV 文件为空")
+
+        # 调用批量上传逻辑
+        batch_req = IndexPoolBatchUploadRequest(
+            index_code=req.index_code,
+            index_name=req.index_name,
+            description=req.description,
+            data=data
+        )
+
+        return await batch_upload_index_pool(batch_req)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to parse CSV: {e}")
+        raise HTTPException(status_code=500, detail=f"CSV 解析失败: {str(e)}")
+
+
+@router.get("/index-pool/list")
+async def list_index_pools():
+    """列出所有指数股票池"""
+    try:
+        df = db_client.query("""
+            SELECT index_code, index_name, description, stock_count, latest_date, updated_at
+            FROM loadTable("dfs://quant", "index_metadata")
+            ORDER BY updated_at DESC
+        """)
+
+        if df.is_empty():
+            return {"status": "success", "data": []}
+
+        return {"status": "success", "data": df.to_dicts()}
+
+    except Exception as e:
+        logger.error(f"Failed to list index pools: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/index-pool/template")
+async def download_index_pool_template():
+    """下载 CSV 模板"""
+    from fastapi.responses import Response
+
+    csv_template = """trade_date,ts_code,weight
+20240101,000001.SZ,0.05
+20240101,000002.SZ,0.03
+20240101,600000.SH,0.04
+"""
+
+    return Response(
+        content=csv_template,
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": "attachment; filename=index_pool_template.csv"
+        }
+    )
+
+
+@router.get("/index-pool/{index_code}")
+async def get_index_pool(index_code: str, trade_date: Optional[str] = None):
+    """查询指数成分股
+
+    Args:
+        index_code: 指数代码
+        trade_date: 交易日期（可选），如果不指定则返回最新日期的成分股
+    """
+    try:
+        # 如果未指定日期，获取最新日期
+        if not trade_date:
+            latest_df = db_client.query("""
+                SELECT MAX(trade_date) as latest_date
+                FROM loadTable("dfs://quant", "index_constituents")
+                WHERE index_code = %s
+            """, (index_code,))
+
+            if latest_df.is_empty() or latest_df["latest_date"][0] is None:
+                raise HTTPException(status_code=404, detail=f"指数 {index_code} 无数据")
+
+            trade_date = latest_df["latest_date"][0]
+
+        # 查询成分股
+        df = db_client.query("""
+            SELECT ts_code, trade_date, weight
+            FROM loadTable("dfs://quant", "index_constituents")
+            WHERE index_code = %s AND trade_date = %s
+            ORDER BY weight DESC
+        """, (index_code, trade_date))
+
+        if df.is_empty():
+            raise HTTPException(status_code=404, detail=f"指数 {index_code} 在 {trade_date} 无数据")
+
+        # 获取元数据
+        metadata_df = db_client.query("""
+            SELECT index_code, index_name, description, stock_count, latest_date
+            FROM loadTable("dfs://quant", "index_metadata")
+            WHERE index_code = %s
+        """, (index_code,))
+
+        metadata = metadata_df.to_dicts()[0] if not metadata_df.is_empty() else {
+            "index_code": index_code,
+            "index_name": "",
+            "description": "",
+            "stock_count": len(df),
+            "latest_date": trade_date
+        }
+
+        return {
+            "status": "success",
+            "data": {
+                "metadata": metadata,
+                "constituents": df.to_dicts(),
+                "query_date": trade_date
+            }
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get index pool: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/index-pool/{index_code}")
+async def delete_index_pool(index_code: str):
+    """删除指数股票池"""
+    try:
+        # DolphinDB 删除数据的方式：使用 delete 函数
+        # 删除成分股数据
+        db_client._session.run(f"""
+            constituents_table = loadTable("dfs://quant", "index_constituents");
+            delete from constituents_table where index_code = "{index_code}";
+        """)
+
+        # 删除元数据
+        db_client._session.run(f"""
+            metadata_table = loadTable("dfs://quant", "index_metadata");
+            delete from metadata_table where index_code = "{index_code}";
+        """)
+
+        logger.info(f"Deleted index pool: {index_code}")
+
+        return {
+            "status": "success",
+            "message": f"成功删除指数 {index_code}"
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to delete index pool: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================== Alphalens 分析 API ====================
+
+class AlphalensAnalysisRequest(BaseModel):
+    """Alphalens 分析请求"""
+    factor_id: str
+    start_date: str
+    end_date: str
+    periods: List[int] = [1, 5, 10]
+    quantiles: int = 5
+    index_pool: Optional[str] = None
+    groupby_field: Optional[str] = None
+
+
+class AlphalensAnalysisHistoryQuery(BaseModel):
+    """Alphalens 分析历史查询参数"""
+    limit: int = 20
+    offset: int = 0
+
+
+@router.post("/analysis/alphalens")
+async def run_alphalens_analysis(req: AlphalensAnalysisRequest):
+    """运行 Alphalens 因子分析
+
+    Args:
+        factor_id: 因子ID
+        start_date: 开始日期 (YYYYMMDD)
+        end_date: 结束日期 (YYYYMMDD)
+        periods: 持有周期列表，默认 [1, 5, 10]
+        quantiles: 分位数，默认 5
+        index_pool: 指数股票池代码（可选），如 '000300.SH'
+        groupby_field: 分组字段（可选），如 'industry', 'market_cap'
+
+    Returns:
+        完整的 Alphalens 分析结果
+    """
+    try:
+        logger.info(f"Starting Alphalens analysis: factor_id={req.factor_id}, "
+                   f"date_range={req.start_date}~{req.end_date}, "
+                   f"index_pool={req.index_pool}, groupby={req.groupby_field}")
+
+        # 运行分析
+        results = analyzer.analyze(
+            factor_id=req.factor_id,
+            start_date=req.start_date,
+            end_date=req.end_date,
+            periods=req.periods,
+            quantiles=req.quantiles,
+            use_alphalens=True,
+            index_pool=req.index_pool,
+            groupby_field=req.groupby_field
+        )
+
+        if not results:
+            raise HTTPException(status_code=500, detail="分析失败，未返回结果")
+
+        # 清理 NaN/Inf 值以确保 JSON 序列化
+        import math
+        import numpy as np
+
+        def clean_value(v):
+            if isinstance(v, (float, np.floating)):
+                if math.isnan(v) or math.isinf(v):
+                    return None
+            elif isinstance(v, (np.integer, np.int64, np.int32)):
+                return int(v)
+            return v
+
+        def clean_dict(d):
+            if isinstance(d, dict):
+                return {k: clean_dict(v) for k, v in d.items()}
+            elif isinstance(d, (list, tuple)):
+                return [clean_dict(item) for item in d]
+            else:
+                return clean_value(d)
+
+        results = clean_dict(results)
+
+        logger.info(f"Alphalens analysis completed for {req.factor_id}")
+
+        return {
+            "status": "success",
+            "message": f"成功完成 Alphalens 分析",
+            "data": results
+        }
+
+    except Exception as e:
+        logger.error(f"Alphalens analysis failed: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/analysis/alphalens/{factor_id}/latest")
+async def get_latest_alphalens_analysis(factor_id: str):
+    """获取指定因子的最新 Alphalens 分析结果
+
+    Args:
+        factor_id: 因子ID
+
+    Returns:
+        最新的分析结果，包含完整的 Alphalens 输出
+    """
+    try:
+        # 查询最新的分析记录
+        df = db_client.query("""
+            SELECT *
+            FROM loadTable("dfs://quant", "factor_analysis_extended")
+            WHERE factor_id = %s
+            ORDER BY analysis_date DESC
+            LIMIT 1
+        """, (factor_id,))
+
+        if df.is_empty():
+            raise HTTPException(
+                status_code=404,
+                detail=f"未找到因子 {factor_id} 的分析结果"
+            )
+
+        record = df.to_dicts()[0]
+
+        # 解析 JSON 字段
+        json_fields = [
+            'ic_summary', 'ic_by_period', 'ic_ts', 'quantile_returns',
+            'cumulative_returns', 'ic_by_group', 'returns_by_group',
+            'turnover', 'decay_analysis', 'chart_data'
+        ]
+
+        for field in json_fields:
+            if field in record and record[field]:
+                try:
+                    record[field] = safe_json_parse(record[field])
+                except:
+                    logger.warning(f"Failed to parse {field} for {factor_id}")
+                    record[field] = None
+
+        return {
+            "status": "success",
+            "data": record
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get latest analysis: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/analysis/alphalens/{factor_id}/history")
+async def get_alphalens_analysis_history(
+    factor_id: str,
+    limit: int = 20,
+    offset: int = 0
+):
+    """获取指定因子的 Alphalens 分析历史记录
+
+    Args:
+        factor_id: 因子ID
+        limit: 返回记录数，默认 20
+        offset: 偏移量，默认 0
+
+    Returns:
+        分析历史记录列表（元数据，不包含完整结果）
+    """
+    try:
+        # DolphinDB doesn't support OFFSET, use LIMIT offset, count instead
+        df = db_client.query("""
+            SELECT
+                id, factor_id, analysis_date, start_date, end_date,
+                config, task_status
+            FROM loadTable("dfs://quant", "factor_analysis_extended")
+            WHERE factor_id = %s
+            ORDER BY analysis_date DESC
+            LIMIT %s, %s
+        """, (factor_id, offset, limit))
+
+        if df.is_empty():
+            return {
+                "status": "success",
+                "data": {
+                    "records": [],
+                    "total": 0,
+                    "limit": limit,
+                    "offset": offset
+                }
+            }
+
+        records = df.to_dicts()
+
+        # 解析 config 字段（JSON）
+        for record in records:
+            if 'config' in record and record['config']:
+                try:
+                    config = safe_json_parse(record['config'])
+                    # 提取关键配置到顶层
+                    record['periods'] = config.get('periods')
+                    record['quantiles'] = config.get('quantiles')
+                    record['index_pool'] = config.get('index_pool')
+                    record['groupby_field'] = config.get('groupby_field')
+                except:
+                    record['periods'] = None
+                    record['quantiles'] = None
+                    record['index_pool'] = None
+                    record['groupby_field'] = None
+
+        # 获取总数
+        count_df = db_client.query("""
+            SELECT COUNT(*) as total
+            FROM loadTable("dfs://quant", "factor_analysis_extended")
+            WHERE factor_id = %s
+        """, (factor_id,))
+
+        total = count_df["total"][0] if not count_df.is_empty() else 0
+
+        return {
+            "status": "success",
+            "data": {
+                "records": records,
+                "total": total,
+                "limit": limit,
+                "offset": offset
+            }
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get analysis history: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+

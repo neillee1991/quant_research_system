@@ -284,9 +284,22 @@ class DolphinDBClient:
                 logger.info(f"表 {table_name} 已存在，跳过建表")
                 return
 
+            # SQL 类型 → DolphinDB 类型映射
+            _TYPE_MAP = {
+                "VARCHAR": "SYMBOL", "TEXT": "STRING", "CHAR": "SYMBOL",
+                "INTEGER": "INT", "INT": "INT", "BIGINT": "LONG",
+                "DOUBLE PRECISION": "DOUBLE", "DOUBLE": "DOUBLE",
+                "FLOAT": "FLOAT", "REAL": "FLOAT",
+                "BOOLEAN": "BOOL", "DATE": "DATE",
+                "TIMESTAMP": "TIMESTAMP", "DATETIME": "TIMESTAMP",
+            }
+
+            def _map_type(t: str) -> str:
+                return _TYPE_MAP.get(t.upper(), t.upper())
+
             # 构建列定义
             col_defs = ",".join([
-                f"array({col_def.get('type', 'STRING')},0) as {col_name}"
+                f"array({_map_type(col_def.get('type', 'STRING'))},0) as {col_name}"
                 for col_name, col_def in schema.items()
             ])
 
@@ -294,11 +307,11 @@ class DolphinDBClient:
             # 确定 sort key 列：优先用 primary_keys，末尾追加一个时间/整数列
             _TEMPORAL_INT_TYPES = {"DATE", "DATETIME", "TIMESTAMP", "INT", "LONG", "SHORT"}
             pk_list = list(primary_keys) if primary_keys else [list(schema.keys())[0]]
-            last_pk_type = schema.get(pk_list[-1], {}).get("type", "STRING").upper()
+            last_pk_type = _map_type(schema.get(pk_list[-1], {}).get("type", "STRING"))
             if last_pk_type not in _TEMPORAL_INT_TYPES:
                 # 找 schema 中可用的时间/整数列追加到末尾
                 for col_name, col_def in schema.items():
-                    if col_def.get("type", "STRING").upper() in _TEMPORAL_INT_TYPES and col_name not in pk_list:
+                    if _map_type(col_def.get("type", "STRING")) in _TEMPORAL_INT_TYPES and col_name not in pk_list:
                         pk_list.append(col_name)
                         break
                 else:

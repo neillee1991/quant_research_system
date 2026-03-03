@@ -172,6 +172,31 @@ export const productionApi = {
   getDataConfig: () => api.get('/production/data-config'),
   updateDataConfig: (mappings: DataFieldMapping[]) => api.put('/production/data-config', { mappings }),
   getResolvedDataConfig: () => api.get('/production/data-config/resolved'),
+
+  // 指数股票池管理
+  listIndexPools: () => api.get('/index-pool/list'),
+  getIndexPool: (indexCode: string, tradeDate?: string) =>
+    api.get(`/index-pool/${indexCode}`, { params: { trade_date: tradeDate } }),
+  batchUploadIndexPool: (data: { index_code: string; index_name?: string; description?: string; data: any[] }) =>
+    api.post('/index-pool/batch-upload', data),
+  csvUploadIndexPool: (data: { index_code: string; index_name?: string; description?: string; csv_content: string }) =>
+    api.post('/index-pool/csv-upload', data),
+  deleteIndexPool: (indexCode: string) => api.delete(`/index-pool/${indexCode}`),
+  downloadIndexPoolTemplate: () => api.get('/index-pool/template', { responseType: 'text' }),
+
+  // Alphalens 分析 API
+  runAlphalensAnalysis: (data: {
+    factor_id: string;
+    start_date: string;
+    end_date: string;
+    periods?: number[];
+    quantiles?: number;
+    index_pool?: string;
+    groupby_field?: string
+  }) => longRunningApi.post('/analysis/alphalens', data),
+  getLatestAlphalensAnalysis: (factorId: string) => api.get(`/analysis/alphalens/${factorId}/latest`),
+  getAlphalensAnalysisHistory: (factorId: string, limit = 20, offset = 0) =>
+    api.get(`/analysis/alphalens/${factorId}/history`, { params: { limit, offset } }),
 };
 
 // Flow 配置管理

@@ -6,6 +6,7 @@ import DataCenter from './pages/DataCenter';
 import FactorCenter from './pages/FactorCenter';
 import StrategyCenter from './pages/StrategyCenter';
 import SchedulerCenter from './pages/SchedulerCenter';
+import IndexPoolCenter from './pages/IndexPoolCenter';
 import './styles/global.css';
 
 const App: React.FC = () => (
@@ -17,6 +18,7 @@ const App: React.FC = () => (
         <Route path="/factor" element={<FactorCenter />} />
         <Route path="/strategy" element={<StrategyCenter />} />
         <Route path="/scheduler" element={<SchedulerCenter />} />
+        <Route path="/index-pool" element={<IndexPoolCenter />} />
       </Routes>
     </AppLayout>
   </BrowserRouter>

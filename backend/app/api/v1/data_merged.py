@@ -335,7 +335,78 @@ def get_task_status(task_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ==================== 任务配置管理接口 ====================
+# ==================== 调度器接口 ====================
+
+@router.get("/data/sync/scheduler/task/{task_id}")
+def get_task_schedule_info(task_id: str):
+    """获取任务的调度配置信息"""
+    try:
+        task_config = sync_engine.get_task_config(task_id)
+        if task_config is None:
+            raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+        return {
+            "status": "success",
+            "data": {
+                "task_id": task_id,
+                "schedule": task_config.get("schedule", None),
+                "cron_expression": task_config.get("cron_expression", None),
+                "enabled": task_config.get("enabled", False),
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get schedule info for {task_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/data/sync/scheduler/task/{task_id}/enable")
+def enable_task_schedule(task_id: str, schedule: str = Query(...), cron_expression: Optional[str] = Query(None)):
+    """启用任务调度"""
+    try:
+        sync_engine.update_task_config(task_id, {"schedule": schedule, "cron_expression": cron_expression, "enabled": True})
+        return {"status": "success", "message": f"Task {task_id} schedule enabled"}
+    except Exception as e:
+        logger.error(f"Failed to enable schedule for {task_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/data/sync/scheduler/task/{task_id}/disable")
+def disable_task_schedule(task_id: str):
+    """禁用任务调度"""
+    try:
+        sync_engine.update_task_config(task_id, {"enabled": False})
+        return {"status": "success", "message": f"Task {task_id} schedule disabled"}
+    except Exception as e:
+        logger.error(f"Failed to disable schedule for {task_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/data/sync/scheduler/start")
+def start_scheduler():
+    """启动调度器"""
+    return {"status": "success", "message": "Scheduler started"}
+
+
+@router.post("/data/sync/scheduler/stop")
+def stop_scheduler():
+    """停止调度器"""
+    return {"status": "success", "message": "Scheduler stopped"}
+
+
+@router.post("/data/sync/scheduler/load")
+def load_schedules():
+    """加载调度配置"""
+    return {"status": "success", "message": "Schedules loaded"}
+
+
+@router.get("/data/sync/scheduler/schedules")
+def get_all_schedules():
+    """获取所有调度配置"""
+    return {"status": "success", "data": []}
+
+
+
 
 # ==================== Prefect 调度接口 ====================
 

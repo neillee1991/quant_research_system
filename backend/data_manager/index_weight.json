@@ -1,0 +1,46 @@
+{
+  "task_id": "index_weight",
+  "api_name": "index_weight",
+  "description": "指数成分和权重",
+  "sync_mode": "by_date",
+  "sync_type": "incremental",
+  "enabled": true,
+  "params": {
+    "index_code": "000300.SH",
+    "trade_date": "{date}",
+    "fields": "index_code,con_code,trade_date,weight"
+  },
+  "date_field": "trade_date",
+  "primary_keys": ["index_code", "con_code", "trade_date"],
+  "table_name": "index_weight",
+  "api_limit": 5000,
+  "offset": 0,
+  "schema": {
+    "index_code": {
+      "type": "VARCHAR",
+      "nullable": false,
+      "comment": "指数代码"
+    },
+    "con_code": {
+      "type": "VARCHAR",
+      "nullable": false,
+      "comment": "成分股代码"
+    },
+    "trade_date": {
+      "type": "VARCHAR",
+      "nullable": false,
+      "comment": "交易日期"
+    },
+    "weight": {
+      "type": "DOUBLE PRECISION",
+      "nullable": true,
+      "comment": "权重"
+    }
+  },
+  "notes": {
+    "update_frequency": "每月更新",
+    "data_limit": "单次最大5000条",
+    "index_codes": ["000300.SH", "000016.SH", "000905.SH", "399006.SZ"],
+    "usage": "获取指数成分股及权重，需要指定index_code参数"
+  }
+}

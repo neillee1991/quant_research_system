@@ -1,0 +1,79 @@
+{
+  "task_id": "index_daily",
+  "api_name": "index_daily",
+  "description": "指数日线行情",
+  "sync_mode": "by_date",
+  "sync_type": "incremental",
+  "enabled": true,
+  "params": {
+    "trade_date": "{date}",
+    "fields": "ts_code,trade_date,open,high,low,close,pre_close,change,pct_chg,vol,amount"
+  },
+  "date_field": "trade_date",
+  "primary_keys": ["ts_code", "trade_date"],
+  "table_name": "index_daily",
+  "api_limit": 5000,
+  "offset": 0,
+  "schema": {
+    "ts_code": {
+      "type": "VARCHAR",
+      "nullable": false,
+      "comment": "指数代码"
+    },
+    "trade_date": {
+      "type": "VARCHAR",
+      "nullable": false,
+      "comment": "交易日期"
+    },
+    "open": {
+      "type": "DOUBLE PRECISION",
+      "nullable": true,
+      "comment": "开盘点位"
+    },
+    "high": {
+      "type": "DOUBLE PRECISION",
+      "nullable": true,
+      "comment": "最高点位"
+    },
+    "low": {
+      "type": "DOUBLE PRECISION",
+      "nullable": true,
+      "comment": "最低点位"
+    },
+    "close": {
+      "type": "DOUBLE PRECISION",
+      "nullable": true,
+      "comment": "收盘点位"
+    },
+    "pre_close": {
+      "type": "DOUBLE PRECISION",
+      "nullable": true,
+      "comment": "昨收盘点位"
+    },
+    "change": {
+      "type": "DOUBLE PRECISION",
+      "nullable": true,
+      "comment": "涨跌点"
+    },
+    "pct_chg": {
+      "type": "DOUBLE PRECISION",
+      "nullable": true,
+      "comment": "涨跌幅(%)"
+    },
+    "vol": {
+      "type": "DOUBLE PRECISION",
+      "nullable": true,
+      "comment": "成交量(手)"
+    },
+    "amount": {
+      "type": "DOUBLE PRECISION",
+      "nullable": true,
+      "comment": "成交额(千元)"
+    }
+  },
+  "notes": {
+    "update_frequency": "每日更新",
+    "data_limit": "单次最大5000条",
+    "usage": "获取指数日线行情，可按日期或指数代码查询"
+  }
+}

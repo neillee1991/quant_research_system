@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { Nav } from '@douyinfe/semi-ui';
-import { IconServer, IconTestScoreStroked, IconLineChartStroked, IconCalendarClock, IconCandlestickChartStroked } from '@douyinfe/semi-icons';
+import { IconServer, IconTestScoreStroked, IconLineChartStroked, IconCalendarClock, IconCandlestickChartStroked, IconGridStroked } from '@douyinfe/semi-icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 
 const navItems = [
   { itemKey: '/market', text: '行情', icon: <IconCandlestickChartStroked /> },
   { itemKey: '/', text: '数据', icon: <IconServer /> },
   { itemKey: '/factor', text: '因子', icon: <IconTestScoreStroked /> },
+  { itemKey: '/index-pool', text: '股票池', icon: <IconGridStroked /> },
   { itemKey: '/strategy', text: '策略', icon: <IconLineChartStroked /> },
   { itemKey: '/scheduler', text: '调度', icon: <IconCalendarClock /> },
 ];

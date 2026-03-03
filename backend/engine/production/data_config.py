@@ -1,6 +1,7 @@
 """因子数据配置加载器 - 从 factor_data_config 表读取字段映射"""
 import json
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
+import polars as pl
 
 from app.core.logger import logger
 
@@ -62,3 +63,61 @@ class DataConfigLoader:
     def invalidate_cache(self) -> None:
         """清除缓存（配置更新时调用）"""
         self._cache = None
+
+    def is_field_configured(self, field_key: str) -> bool:
+        """检查字段是否已配置（有表名和列名）"""
+        cfg = self.get(field_key)
+        return bool(cfg.get("table_name") and cfg.get("column_name"))
+
+    def load_field_data(
+        self,
+        field_key: str,
+        ts_codes: List[str],
+        start_date: str,
+        end_date: str
+    ) -> Optional[pl.DataFrame]:
+        """根据配置动态加载字段数据
+
+        Args:
+            field_key: 字段键（如 'industry', 'market_cap'）
+            ts_codes: 股票代码列表
+            start_date: 起始日期 YYYYMMDD
+            end_date: 结束日期 YYYYMMDD
+
+        Returns:
+            DataFrame with columns: ts_code, trade_date, {field_key}_value
+            如果字段未配置或加载失败，返回 None
+        """
+        if not self.is_field_configured(field_key):
+            logger.warning(f"字段 {field_key} 未配置，跳过加载")
+            return None
+
+        cfg = self.get(field_key)
+        table = cfg["table_name"]
+        column = cfg["column_name"]
+
+        if not ts_codes:
+            logger.warning(f"股票列表为空，跳过加载字段 {field_key}")
+            return None
+
+        # 构建查询（假设表结构包含 ts_code, trade_date）
+        # 使用 IN 子句过滤股票
+        placeholders = ", ".join(["%s"] * len(ts_codes))
+        sql = f"""
+            SELECT ts_code, trade_date, {column} AS {field_key}_value
+            FROM {table}
+            WHERE ts_code IN ({placeholders})
+              AND trade_date >= %s AND trade_date <= %s
+        """
+        params = tuple(ts_codes) + (start_date, end_date)
+
+        try:
+            df = self.db.query(sql, params)
+            if df.is_empty():
+                logger.warning(f"字段 {field_key} 查询结果为空")
+                return None
+            logger.info(f"成功加载字段 {field_key}: {len(df)} 行")
+            return df
+        except Exception as e:
+            logger.error(f"加载字段 {field_key} 失败: {e}")
+            return None

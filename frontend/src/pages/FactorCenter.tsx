@@ -1107,24 +1107,50 @@ const FactorManageTab: React.FC = () => {
 // ==================== 因子分析 Tab ====================
 const AnalysisTab: React.FC = () => {
   const [factors, setFactors] = useState<any[]>([]);
+  const [indexPools, setIndexPools] = useState<any[]>([]);
   const [selectedFactor, setSelectedFactor] = useState<string>('');
   const [periods, setPeriods] = useState<number[]>([1, 5, 10]);
   const [quantiles, setQuantiles] = useState(5);
+  const [startDate, setStartDate] = useState<string>('');
+  const [endDate, setEndDate] = useState<string>('');
+  const [indexPool, setIndexPool] = useState<string>('');
+  const [groupbyField, setGroupbyField] = useState<string>('');
+  const [useAlphalens, setUseAlphalens] = useState(true);
   const [analysisResult, setAnalysisResult] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [runLoading, setRunLoading] = useState(false);
+  const [analysisHistory, setAnalysisHistory] = useState<any[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   useEffect(() => {
     productionApi.listFactors().then(res => setFactors(res.data?.data || [])).catch(() => {});
+    productionApi.listIndexPools().then(res => setIndexPools(res.data?.data || [])).catch(() => {});
   }, []);
 
   const handleRunAnalysis = async () => {
     if (!selectedFactor) { Toast.warning('请选择因子'); return; }
     setRunLoading(true);
     try {
-      const res = await productionApi.runAnalysis(selectedFactor, undefined, undefined, periods, quantiles);
-      Toast.success('分析完成');
-      setAnalysisResult(res.data?.data);
+      let res;
+      if (useAlphalens) {
+        res = await productionApi.runAlphalensAnalysis({
+          factor_id: selectedFactor,
+          start_date: startDate || undefined as any,
+          end_date: endDate || undefined as any,
+          periods,
+          quantiles,
+          index_pool: indexPool || undefined,
+          groupby_field: groupbyField || undefined,
+        });
+        Toast.success('Alphalens 分析完成');
+        setAnalysisResult(res.data?.data);
+      } else {
+        res = await productionApi.runAnalysis(selectedFactor, startDate || undefined, endDate || undefined, periods, quantiles);
+        Toast.success('分析完成');
+        setAnalysisResult(res.data?.data);
+      }
+      // 刷新历史
+      if (selectedFactor) loadHistory(selectedFactor);
     } catch (e: any) {
       Toast.error(e.response?.data?.detail || '分析失败');
     }
@@ -1134,13 +1160,44 @@ const AnalysisTab: React.FC = () => {
   const loadAnalysis = async (factorId: string) => {
     setLoading(true);
     try {
-      const res = await productionApi.getAnalysis(factorId);
-      setAnalysisResult(res.data?.data);
+      if (useAlphalens) {
+        const res = await productionApi.getLatestAlphalensAnalysis(factorId);
+        setAnalysisResult(res.data?.data);
+      } else {
+        const res = await productionApi.getAnalysis(factorId);
+        setAnalysisResult(res.data?.data);
+      }
     } catch { setAnalysisResult(null); }
     setLoading(false);
   };
 
+  const loadHistory = async (factorId: string) => {
+    setHistoryLoading(true);
+    try {
+      const res = await productionApi.getAlphalensAnalysisHistory(factorId, 10);
+      setAnalysisHistory(res.data?.data?.records || []);
+    } catch { setAnalysisHistory([]); }
+    setHistoryLoading(false);
+  };
+
   const getICChartOption = () => {
+    if (useAlphalens) {
+      // Alphalens 格式: ic_summary.ic_mean, ic_by_period
+      const icByPeriod = analysisResult?.ic_by_period;
+      if (!icByPeriod || !icByPeriod.length) return {};
+      return {
+        backgroundColor: 'transparent',
+        tooltip: { trigger: 'axis' },
+        legend: { textStyle: { color: '#94A3B8' }, top: 0 },
+        grid: { top: 40, bottom: 30, left: 60, right: 20 },
+        xAxis: { type: 'category', data: icByPeriod.map((d: any) => d.period), axisLabel: { color: '#94A3B8' } },
+        yAxis: { type: 'value', axisLabel: { color: '#94A3B8' }, splitLine: { lineStyle: { color: 'rgba(148,163,184,0.15)' } } },
+        series: [
+          { name: 'IC均值', type: 'bar', data: icByPeriod.map((d: any) => d.ic_mean?.toFixed(4)), itemStyle: { color: '#0077FA' } },
+          { name: 'ICIR', type: 'bar', data: icByPeriod.map((d: any) => d.ic_ir?.toFixed(4)), itemStyle: { color: '#14C9C9' } },
+        ]
+      };
+    }
     if (!analysisResult?.ic_summary) return {};
     const data = analysisResult.ic_summary;
     return {
@@ -1158,8 +1215,9 @@ const AnalysisTab: React.FC = () => {
   };
 
   const getLayerReturnOption = () => {
-    if (!analysisResult?.layer_returns) return {};
-    const data = analysisResult.layer_returns;
+    const returns = useAlphalens ? analysisResult?.quantile_returns : analysisResult?.layer_returns;
+    if (!returns || !returns.length) return {};
+    const data = returns;
     const periodGroups = [...new Set(data.map((d: any) => d.period))];
     const quantileGroups = [...new Set(data.map((d: any) => d.quantile))];
     const colors = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#0077FA'];
@@ -1168,43 +1226,132 @@ const AnalysisTab: React.FC = () => {
       tooltip: { trigger: 'axis' },
       legend: { data: quantileGroups as string[], textStyle: { color: '#94A3B8' }, top: 0 },
       grid: { top: 40, bottom: 30, left: 60, right: 20 },
-      xAxis: { type: 'category', data: periodGroups.map((p: any) => `${p}D`), axisLabel: { color: '#94A3B8' } },
+      xAxis: { type: 'category', data: periodGroups.map((p: any) => `${p}`), axisLabel: { color: '#94A3B8' } },
       yAxis: { type: 'value', axisLabel: { color: '#94A3B8', formatter: (v: number) => `${(v * 100).toFixed(2)}%` }, splitLine: { lineStyle: { color: 'rgba(148,163,184,0.15)' } } },
       series: quantileGroups.map((q: any, i: number) => ({
-        name: q, type: 'bar',
-        data: periodGroups.map((p: any) => { const item = data.find((d: any) => d.period === p && d.quantile === q); return item?.mean_return || 0; }),
+        name: `Q${q}`, type: 'bar',
+        data: periodGroups.map((p: any) => {
+          const item = data.find((d: any) => d.period === p && d.quantile === q);
+          return item?.mean_return || 0;
+        }),
         itemStyle: { color: colors[i % colors.length] },
       }))
     };
   };
 
+  const getICTimeSeriesOption = () => {
+    const icTs = analysisResult?.ic_ts;
+    if (!icTs || !icTs.length) return {};
+    const dates = icTs.map((d: any) => d.date);
+    const periods = Object.keys(icTs[0]).filter(k => k !== 'date');
+    const colors = ['#0077FA', '#14C9C9', '#f97316', '#22c55e'];
+    return {
+      backgroundColor: 'transparent',
+      tooltip: { trigger: 'axis' },
+      legend: { data: periods, textStyle: { color: '#94A3B8' }, top: 0 },
+      grid: { top: 40, bottom: 30, left: 60, right: 20 },
+      xAxis: { type: 'category', data: dates, axisLabel: { color: '#94A3B8', rotate: 30 } },
+      yAxis: { type: 'value', axisLabel: { color: '#94A3B8' }, splitLine: { lineStyle: { color: 'rgba(148,163,184,0.15)' } } },
+      series: periods.map((p, i) => ({
+        name: p, type: 'line', smooth: true,
+        data: icTs.map((d: any) => d[p]),
+        lineStyle: { color: colors[i % colors.length] },
+        itemStyle: { color: colors[i % colors.length] },
+        showSymbol: false,
+      }))
+    };
+  };
+
   const icColumns = [
-    { title: '周期', dataIndex: 'period', key: 'period', render: (v: number) => `${v}D` },
+    { title: '周期', dataIndex: 'period', key: 'period', render: (v: any) => `${v}` },
     { title: 'IC均值', dataIndex: 'ic_mean', key: 'ic_mean', render: (v: number) => <span style={{ color: v > 0 ? 'var(--color-gain)' : 'var(--color-loss)' }}>{v?.toFixed(4)}</span> },
     { title: 'IC标准差', dataIndex: 'ic_std', key: 'ic_std', render: (v: number) => v?.toFixed(4) },
-    { title: 'ICIR', dataIndex: 'icir', key: 'icir', render: (v: number) => <span style={{ color: Math.abs(v) > 0.5 ? 'var(--color-primary)' : 'var(--text-secondary)', fontWeight: Math.abs(v) > 0.5 ? 700 : 400 }}>{v?.toFixed(4)}</span> },
-    { title: 'IC>0占比', dataIndex: 'ic_positive_ratio', key: 'ratio', render: (v: number) => `${(v * 100).toFixed(1)}%` },
-    { title: 'p值', dataIndex: 'p_value', key: 'p', render: (v: number) => <span style={{ color: v < 0.05 ? 'var(--color-gain)' : 'var(--color-loss)' }}>{v?.toFixed(4)}</span> },
+    { title: 'ICIR', dataIndex: 'ic_ir', key: 'ic_ir', render: (v: number) => <span style={{ color: Math.abs(v) > 0.5 ? 'var(--color-primary)' : 'var(--text-secondary)', fontWeight: Math.abs(v) > 0.5 ? 700 : 400 }}>{v?.toFixed(4)}</span> },
+    { title: 'IC胜率', dataIndex: 'ic_win_rate', key: 'win_rate', render: (v: number) => `${(v * 100).toFixed(1)}%` },
   ];
+
+  const historyColumns = [
+    { title: '分析日期', dataIndex: 'analysis_date', key: 'analysis_date', render: (v: any) => v ? new Date(v).toLocaleString('zh-CN') : '-' },
+    { title: '日期范围', key: 'range', render: (_: any, r: any) => `${r.start_date || '-'} ~ ${r.end_date || '-'}` },
+    { title: '股票池', dataIndex: 'index_pool', key: 'index_pool', render: (v: string) => v || '全市场' },
+    { title: '分组', dataIndex: 'groupby_field', key: 'groupby_field', render: (v: string) => v || '-' },
+    { title: '状态', dataIndex: 'task_status', key: 'task_status', render: (v: string) => <Tag color={v === 'completed' ? 'green' : 'orange'}>{v}</Tag> },
+    {
+      title: '操作', key: 'action', render: (_: any, r: any) => (
+        <Button size="small" onClick={async () => {
+          setLoading(true);
+          try {
+            const res = await productionApi.getLatestAlphalensAnalysis(selectedFactor);
+            setAnalysisResult(res.data?.data);
+          } catch { Toast.error('加载失败'); }
+          setLoading(false);
+        }}>查看</Button>
+      )
+    },
+  ];
+
+  const icSummary = useAlphalens ? analysisResult?.ic_summary : null;
 
   return (
     <div>
       <Card style={{ marginBottom: 16, background: 'var(--bg-card)' }}>
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
           <Select placeholder="选择因子" style={{ width: 180 }} value={selectedFactor || undefined}
-            onChange={(v) => { setSelectedFactor(v as string); loadAnalysis(v as string); }}
+            onChange={(v) => { setSelectedFactor(v as string); loadAnalysis(v as string); loadHistory(v as string); }}
             optionList={factors.map(f => ({ label: `${f.factor_id}`, value: f.factor_id }))} />
+          <DatePicker type="dateRange" placeholder={['开始日期', '结束日期']} style={{ width: 240 }}
+            onChange={(v: any) => {
+              if (v && v.length === 2) {
+                setStartDate(v[0] ? dayjs(v[0]).format('YYYYMMDD') : '');
+                setEndDate(v[1] ? dayjs(v[1]).format('YYYYMMDD') : '');
+              }
+            }} />
           <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>周期:</span>
           <Select multiple style={{ width: 200 }} value={periods} onChange={v => setPeriods(v as number[])}
             optionList={[1,2,3,5,10,20].map(v => ({ label: `${v}D`, value: v }))} />
           <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>分层:</span>
           <InputNumber min={3} max={10} value={quantiles} onChange={v => v && setQuantiles(v as number)} size="small" style={{ width: 60 }} />
+        </div>
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center', marginTop: 12 }}>
+          <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>股票池:</span>
+          <Select placeholder="全市场" style={{ width: 180 }} value={indexPool || undefined} showClear
+            onChange={(v) => setIndexPool(v as string || '')}
+            optionList={indexPools.map(p => ({ label: `${p.index_code} ${p.index_name}`, value: p.index_code }))} />
+          <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>分组字段:</span>
+          <Select placeholder="不分组" style={{ width: 150 }} value={groupbyField || undefined} showClear
+            onChange={(v) => setGroupbyField(v as string || '')}
+            optionList={[
+              { label: '行业', value: 'industry' },
+              { label: '市值', value: 'market_cap' },
+            ]} />
+          <Checkbox checked={useAlphalens} onChange={(v) => setUseAlphalens(!!v)}>
+            使用 Alphalens
+          </Checkbox>
           <Button theme="solid" icon={<IconBarChartHStroked />} loading={runLoading} onClick={handleRunAnalysis}>运行分析</Button>
         </div>
       </Card>
 
       {loading ? <Spin style={{ display: 'block', margin: '60px auto' }} /> : analysisResult ? (
         <>
+          {/* IC 汇总统计 */}
+          {icSummary && (
+            <Card style={{ marginBottom: 16, background: 'var(--bg-card)' }} title={<span style={{ color: 'var(--color-primary)' }}>IC 汇总</span>}>
+              <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
+                {[
+                  { label: 'IC 均值', value: icSummary.ic_mean?.toFixed(4), color: icSummary.ic_mean > 0 ? 'var(--color-gain)' : 'var(--color-loss)' },
+                  { label: 'IC 标准差', value: icSummary.ic_std?.toFixed(4), color: 'var(--text-primary)' },
+                  { label: 'IC IR', value: icSummary.ic_ir?.toFixed(4), color: Math.abs(icSummary.ic_ir) > 0.5 ? 'var(--color-primary)' : 'var(--text-primary)' },
+                  { label: 'IC 胜率', value: `${(icSummary.ic_win_rate * 100).toFixed(1)}%`, color: icSummary.ic_win_rate > 0.5 ? 'var(--color-gain)' : 'var(--text-primary)' },
+                ].map(item => (
+                  <div key={item.label} className="stat-card" style={{ minWidth: 120 }}>
+                    <div style={{ color: 'var(--text-secondary)', fontSize: 12 }}>{item.label}</div>
+                    <div style={{ color: item.color, fontSize: 20, fontWeight: 700 }}>{item.value}</div>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
+
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
             <Card style={{ background: 'var(--bg-card)' }} title={<span style={{ color: 'var(--color-primary)' }}>IC 分析</span>}>
               <ReactECharts option={getICChartOption()} style={{ height: 240 }} />
@@ -1213,12 +1360,33 @@ const AnalysisTab: React.FC = () => {
               <ReactECharts option={getLayerReturnOption()} style={{ height: 240 }} />
             </Card>
           </div>
-          <Card style={{ background: 'var(--bg-card)' }} title={<span style={{ color: 'var(--text-secondary)' }}>IC 详细指标</span>}>
-            <Table dataSource={analysisResult.ic_summary || []} columns={icColumns}
-              rowKey="period" size="small" pagination={false} />
-          </Card>
+
+          {/* IC 时间序列 */}
+          {analysisResult?.ic_ts && analysisResult.ic_ts.length > 0 && (
+            <Card style={{ marginBottom: 16, background: 'var(--bg-card)' }} title={<span style={{ color: 'var(--text-secondary)' }}>IC 时间序列</span>}>
+              <ReactECharts option={getICTimeSeriesOption()} style={{ height: 240 }} />
+            </Card>
+          )}
+
+          {/* 分周期 IC 表格 */}
+          {analysisResult?.ic_by_period && (
+            <Card style={{ background: 'var(--bg-card)' }} title={<span style={{ color: 'var(--text-secondary)' }}>分周期 IC 指标</span>}>
+              <Table dataSource={analysisResult.ic_by_period || []} columns={icColumns}
+                rowKey="period" size="small" pagination={false} />
+            </Card>
+          )}
         </>
       ) : <Empty description="选择因子并运行分析" style={{ marginTop: 60 }} />}
+
+      {/* 分析历史 */}
+      {selectedFactor && (
+        <Card style={{ marginTop: 16, background: 'var(--bg-card)' }} title={<span style={{ color: 'var(--text-secondary)' }}>分析历史</span>}>
+          <Spin spinning={historyLoading}>
+            <Table dataSource={analysisHistory} columns={historyColumns}
+              rowKey="id" size="small" pagination={{ pageSize: 5 }} />
+          </Spin>
+        </Card>
+      )}
     </div>
   );
 };

@@ -818,7 +818,7 @@ class ProductionEngine:
             with self.db._lock:
                 self.db._ensure_connected()
                 self.db._session.run(
-                    f'ts_val = array(TIMESTAMP, 0).append!({now_ts});'
+                    f'ts_val = [temporalParse("{now_ts}", "yyyy.MM.ddTHH:mm:ss.SSS")];'
                     f'tmpRun = table('
                     f'["{factor_id}"] as factor_id, '
                     f'["{mode or ""}"] as mode, '

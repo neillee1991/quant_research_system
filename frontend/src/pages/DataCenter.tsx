@@ -144,6 +144,7 @@ const DataCenter: React.FC = () => {
   const [etlTestDate, setEtlTestDate] = useState<string>('');
   const [etlBackfillModalVisible, setEtlBackfillModalVisible] = useState(false);
   const [etlBackfillTaskId, setEtlBackfillTaskId] = useState<string>('');
+  const [etlBackfillTaskIsFull, setEtlBackfillTaskIsFull] = useState<boolean>(false);
   const [etlBackfillStartDate, setEtlBackfillStartDate] = useState<string>('');
   const [etlBackfillEndDate, setEtlBackfillEndDate] = useState<string>('');
   const [selectedEtlTaskIds, setSelectedEtlTaskIds] = useState<string[]>([]);
@@ -451,23 +452,30 @@ const DataCenter: React.FC = () => {
   };
 
   const handleBackfillEtlTask = async () => {
-    if (!etlBackfillStartDate || !etlBackfillEndDate) {
+    if (!etlBackfillTaskIsFull && (!etlBackfillStartDate || !etlBackfillEndDate)) {
       Toast.warning('请选择回溯日期范围');
       return;
     }
     setEtlBackfillModalVisible(false);
-    Toast.info(`开始回溯 ${etlBackfillTaskId}...`);
+    Toast.info(`开始${etlBackfillTaskIsFull ? '执行' : '回溯'} ${etlBackfillTaskId}...`);
     try {
-      const res = await dataApi.backfillEtlTask(etlBackfillTaskId, etlBackfillStartDate, etlBackfillEndDate);
-      Toast.success(res.data.message || '回溯完成');
+      let res;
+      if (etlBackfillTaskIsFull) {
+        res = await dataApi.runEtlTask(etlBackfillTaskId);
+      } else {
+        res = await dataApi.backfillEtlTask(etlBackfillTaskId, etlBackfillStartDate, etlBackfillEndDate);
+      }
+      Toast.success(res.data.message || `${etlBackfillTaskIsFull ? '执行' : '回溯'}完成`);
       loadEtlLogs();
     } catch (error: any) {
-      Toast.error(error.response?.data?.detail || '回溯执行失败');
+      Toast.error(error.response?.data?.detail || `${etlBackfillTaskIsFull ? '执行' : '回溯'}失败`);
     }
   };
 
   const openEtlBackfillModal = (taskId: string) => {
+    const task = etlTasks.find(t => t.task_id === taskId);
     setEtlBackfillTaskId(taskId);
+    setEtlBackfillTaskIsFull(task?.sync_type === 'full');
     setEtlBackfillStartDate('');
     setEtlBackfillEndDate('');
     setEtlBackfillModalVisible(true);
@@ -2161,45 +2169,53 @@ const DataCenter: React.FC = () => {
 
       {/* ETL Backfill Modal */}
       <Modal
-        title={`回溯 ETL 任务: ${etlBackfillTaskId}`}
+        title={`${etlBackfillTaskIsFull ? '执行' : '回溯'} ETL 任务: ${etlBackfillTaskId}`}
         visible={etlBackfillModalVisible}
         onOk={handleBackfillEtlTask}
         onCancel={() => setEtlBackfillModalVisible(false)}
-        okText="开始回溯"
-        cancelText="跳过"
+        okText={etlBackfillTaskIsFull ? '开始执行' : '开始回溯'}
+        cancelText="取消"
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div style={{ color: 'var(--text-secondary)', fontSize: 13 }}>
-            任务已保存成功。是否需要回溯历史数据？系统将逐天替换脚本中的 {'{date}'} 变量执行。
-          </div>
-          <div>
-            <div style={{ marginBottom: 6, fontWeight: 500, fontSize: '13px' }}>回溯日期范围</div>
-            <DatePicker
-              type="dateRange"
-              placeholder={['开始日期', '结束日期']}
-              defaultPickerValue={dayjs().subtract(1, 'month').toDate()}
-              value={(etlBackfillStartDate && etlBackfillEndDate) ? [dayjs(etlBackfillStartDate, 'YYYYMMDD').toDate(), dayjs(etlBackfillEndDate, 'YYYYMMDD').toDate()] : undefined}
-              onChange={(date: any, dateStr: any) => {
-                const strs = dateStr as unknown as string[];
-                if (strs && Array.isArray(strs) && strs[0] && strs[1]) {
-                  setEtlBackfillStartDate(strs[0].replace(/-/g, ''));
-                  setEtlBackfillEndDate(strs[1].replace(/-/g, ''));
-                } else {
-                  setEtlBackfillStartDate('');
-                  setEtlBackfillEndDate('');
-                }
-              }}
-              style={{ width: '100%' }}
-              size="small"
-            />
-            {etlBackfillStartDate && etlBackfillEndDate && (
-              <div style={{ marginTop: 8, padding: '8px 12px', background: 'var(--color-primary-light-default)', borderRadius: '6px' }}>
-                <span style={{ color: 'var(--color-primary)', fontSize: '13px', fontWeight: 500 }}>
-                  共 {dayjs(etlBackfillEndDate, 'YYYYMMDD').diff(dayjs(etlBackfillStartDate, 'YYYYMMDD'), 'day') + 1} 天
-                </span>
+          {etlBackfillTaskIsFull ? (
+            <div style={{ color: 'var(--text-secondary)', fontSize: 13 }}>
+              全量任务将使用最新数据执行一次，不需要指定日期范围。
+            </div>
+          ) : (
+            <>
+              <div style={{ color: 'var(--text-secondary)', fontSize: 13 }}>
+                系统将逐天替换脚本中的 {'{date}'} 变量执行。
               </div>
-            )}
-          </div>
+              <div>
+                <div style={{ marginBottom: 6, fontWeight: 500, fontSize: '13px' }}>回溯日期范围</div>
+                <DatePicker
+                  type="dateRange"
+                  placeholder={['开始日期', '结束日期']}
+                  defaultPickerValue={dayjs().subtract(1, 'month').toDate()}
+                  value={(etlBackfillStartDate && etlBackfillEndDate) ? [dayjs(etlBackfillStartDate, 'YYYYMMDD').toDate(), dayjs(etlBackfillEndDate, 'YYYYMMDD').toDate()] : undefined}
+                  onChange={(date: any, dateStr: any) => {
+                    const strs = dateStr as unknown as string[];
+                    if (strs && Array.isArray(strs) && strs[0] && strs[1]) {
+                      setEtlBackfillStartDate(strs[0].replace(/-/g, ''));
+                      setEtlBackfillEndDate(strs[1].replace(/-/g, ''));
+                    } else {
+                      setEtlBackfillStartDate('');
+                      setEtlBackfillEndDate('');
+                    }
+                  }}
+                  style={{ width: '100%' }}
+                  size="small"
+                />
+                {etlBackfillStartDate && etlBackfillEndDate && (
+                  <div style={{ marginTop: 8, padding: '8px 12px', background: 'var(--color-primary-light-default)', borderRadius: '6px' }}>
+                    <span style={{ color: 'var(--color-primary)', fontSize: '13px', fontWeight: 500 }}>
+                      共 {dayjs(etlBackfillEndDate, 'YYYYMMDD').diff(dayjs(etlBackfillStartDate, 'YYYYMMDD'), 'day') + 1} 天
+                    </span>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
         </div>
       </Modal>
 

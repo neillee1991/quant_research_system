@@ -118,6 +118,14 @@ class RefactoredSyncEngine:
             logger.error(f"Failed to get task status: {e}")
             return {"error": str(e)}
 
+    def get_task_config(self, task_id: str) -> Optional[Dict]:
+        """获取任务配置"""
+        return self.config_manager.get_task(task_id)
+
+    def update_task_config(self, task_id: str, updates: Dict) -> None:
+        """更新任务配置"""
+        self.config_manager.update_task(task_id, updates)
+
 
 # 全局实例（保持向后兼容）
 sync_engine = RefactoredSyncEngine()
