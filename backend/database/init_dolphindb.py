@@ -101,29 +101,10 @@ def main():
             config["password"],
         )
 
-        research_tables = [
-            "sync_daily_data", "sync_daily_basic", "sync_adj_factor",
-            "sync_index_daily", "sync_moneyflow", "factor_values",
-        ]
-        # 维度表由后端应用启动时动态创建，此处仅验证是否已创建
-        meta_tables = [
-            "sync_log", "sync_log_history", "sync_stock_basic",
-            "factor_metadata", "factor_analysis",
-            "factor_task_run", "sync_trade_cal",
-        ]
-
-        print("\n  dfs://quant (TSDB 分区表):")
-        for t in research_tables:
-            exists = sess2.run(f'existsTable("dfs://quant", "{t}")')
-            status = "OK" if exists else "缺失"
-            print(f"    {t:20s} [{status}]")
-
-        print("\n  dfs://quant (维度表):")
-        print("    (维度表将在后端应用首次启动时自动创建)")
-        for t in meta_tables:
-            exists = sess2.run(f'existsTable("dfs://quant", "{t}")')
-            status = "OK" if exists else "待创建"
-            print(f"    {t:20s} [{status}]")
+        db_exists = sess2.run('existsDatabase("dfs://quant")')
+        status = "OK" if db_exists else "缺失"
+        print(f"\n  dfs://quant [{status}]")
+        print("  (元数据表和 TSDB 分区表将由后端应用启动时自动创建)")
 
     except Exception as e:
         print(f"[警告] 验证阶段出错: {e}")

@@ -1,6 +1,9 @@
 // ============================================================
 // 量化研究系统 DolphinDB 数据库初始化脚本
-// 对应 PostgreSQL init.sql，迁移至 DolphinDB TSDB 引擎
+// 仅创建数据库（dfs://quant）
+// 元数据表（维度表）和 TSDB 分区表均由后端应用动态创建：
+//   - 元数据表: DolphinDBClient.ensure_meta_tables() 在启动时创建
+//   - TSDB 分区表: TableManager.ensure_table() 在首次同步任务时创建
 // ============================================================
 
 // 登录（用户名密码由 init_dolphindb.py 通过 session.login 完成，此处做兜底）
@@ -9,7 +12,6 @@ try { login("admin", "123456") } catch(ex) { /* 已通过 session 登录 */ }
 // ==================== 数据库 dfs://quant ====================
 // COMPO 分区: VALUE(trade_date 按月) × HASH(ts_code, 50)
 // 引擎: TSDB
-// 维度表（不分区）也存储在此库中，由后端应用动态创建
 
 if (!existsDatabase("dfs://quant")) {
     // 月份分区范围: 2010.01 ~ 2030.12
@@ -23,126 +25,8 @@ if (!existsDatabase("dfs://quant")) {
     print("数据库 dfs://quant 已存在，跳过创建")
 }
 
-// ---------- 1. sync_daily_data 日线行情 ----------
-if (!existsTable("dfs://quant", "sync_daily_data")) {
-    schema_daily = table(
-        array(DATE, 0) as trade_date,
-        array(SYMBOL, 0) as ts_code,
-        array(DOUBLE, 0) as open,
-        array(DOUBLE, 0) as high,
-        array(DOUBLE, 0) as low,
-        array(DOUBLE, 0) as close,
-        array(DOUBLE, 0) as pre_close,
-        array(DOUBLE, 0) as change,
-        array(DOUBLE, 0) as pct_chg,
-        array(DOUBLE, 0) as vol,
-        array(DOUBLE, 0) as amount
-    )
-    createPartitionedTable(
-        dbHandle=db, table=schema_daily, tableName="sync_daily_data",
-        partitionColumns=["trade_date", "ts_code"],
-        sortColumns=["ts_code", "trade_date"],
-        keepDuplicates=LAST
-    )
-    print("已创建表 sync_daily_data (日线行情)")
-} else {
-    print("表 sync_daily_data 已存在，跳过")
-}
-
-// ---------- 2. sync_daily_basic 每日指标 ----------
-if (!existsTable("dfs://quant", "sync_daily_basic")) {
-    schema_basic = table(
-        array(SYMBOL, 0) as ts_code,
-        array(DATE, 0) as trade_date,
-        array(DOUBLE, 0) as close,
-        array(DOUBLE, 0) as turnover_rate,
-        array(DOUBLE, 0) as volume_ratio,
-        array(DOUBLE, 0) as pe,
-        array(DOUBLE, 0) as pb
-    )
-    createPartitionedTable(
-        dbHandle=db, table=schema_basic, tableName="sync_daily_basic",
-        partitionColumns=["trade_date", "ts_code"],
-        sortColumns=["ts_code", "trade_date"],
-        keepDuplicates=LAST
-    )
-    print("已创建表 sync_daily_basic (每日指标)")
-} else {
-    print("表 sync_daily_basic 已存在，跳过")
-}
-
-// ---------- 3. sync_adj_factor 复权因子 ----------
-if (!existsTable("dfs://quant", "sync_adj_factor")) {
-    schema_adj = table(
-        array(SYMBOL, 0) as ts_code,
-        array(DATE, 0) as trade_date,
-        array(DOUBLE, 0) as adj_factor
-    )
-    createPartitionedTable(
-        dbHandle=db, table=schema_adj, tableName="sync_adj_factor",
-        partitionColumns=["trade_date", "ts_code"],
-        sortColumns=["ts_code", "trade_date"],
-        keepDuplicates=LAST
-    )
-    print("已创建表 sync_adj_factor (复权因子)")
-} else {
-    print("表 sync_adj_factor 已存在，跳过")
-}
-
-// ---------- 4. sync_index_daily 指数日线 ----------
-if (!existsTable("dfs://quant", "sync_index_daily")) {
-    schema_idx = table(
-        array(SYMBOL, 0) as ts_code,
-        array(DATE, 0) as trade_date,
-        array(DOUBLE, 0) as open,
-        array(DOUBLE, 0) as high,
-        array(DOUBLE, 0) as low,
-        array(DOUBLE, 0) as close,
-        array(DOUBLE, 0) as pre_close,
-        array(DOUBLE, 0) as change,
-        array(DOUBLE, 0) as pct_chg,
-        array(DOUBLE, 0) as vol,
-        array(DOUBLE, 0) as amount
-    )
-    createPartitionedTable(
-        dbHandle=db, table=schema_idx, tableName="sync_index_daily",
-        partitionColumns=["trade_date", "ts_code"],
-        sortColumns=["ts_code", "trade_date"],
-        keepDuplicates=LAST
-    )
-    print("已创建表 sync_index_daily (指数日线)")
-} else {
-    print("表 sync_index_daily 已存在，跳过")
-}
-
-
-// ---------- 6. factor_values 因子值 ----------
-// 注意: TSDB 引擎要求 sortColumns 最后一列必须是整数或时间类型
-// factor_id 为 SYMBOL，不能放在最后；trade_date (DATE) 放最后
-if (!existsTable("dfs://quant", "factor_values")) {
-    schema_fv = table(
-        array(SYMBOL, 0) as ts_code,
-        array(DATE, 0) as trade_date,
-        array(SYMBOL, 0) as factor_id,
-        array(DOUBLE, 0) as factor_value,
-        array(TIMESTAMP, 0) as updated_at
-    )
-    createPartitionedTable(
-        dbHandle=db, table=schema_fv, tableName="factor_values",
-        partitionColumns=["trade_date", "ts_code"],
-        sortColumns=["factor_id", "ts_code", "trade_date"],
-        keepDuplicates=LAST
-    )
-    print("已创建表 factor_values (因子值)")
-} else {
-    print("表 factor_values 已存在，跳过")
-}
-
-// 维度表（sync_stock_basic, sync_trade_cal, sync_log, sync_log_history,
-//   factor_metadata, factor_analysis, factor_task_run, sync_task_config, etl_task_config）
-// 由后端应用首次启动时动态创建
-
 print("========================================")
 print("DolphinDB 数据库初始化完成!")
-print("  dfs://quant : 6 张 TSDB 分区表 + 维度表由后端动态创建")
+print("  dfs://quant : 数据库已就绪")
+print("  元数据表和 TSDB 分区表将由后端应用启动时自动创建")
 print("========================================")

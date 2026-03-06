@@ -234,10 +234,10 @@ start_frontend() {
 
     cd "$FRONTEND_DIR"
 
-    # 检查 node_modules
-    if [ ! -d "node_modules" ]; then
+    # 检查 node_modules 是否存在且完整（验证关键包）
+    if [ ! -d "node_modules" ] || [ ! -d "node_modules/react" ] || [ ! -d "node_modules/html-webpack-plugin/lib" ]; then
         print_warning "安装前端依赖..."
-        npm install --silent 2>/dev/null
+        npm install
     fi
 
     # 启动前端
