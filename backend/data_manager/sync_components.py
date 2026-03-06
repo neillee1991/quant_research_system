@@ -269,7 +269,18 @@ class TushareAPIClient:
         rate_limiter: RateLimiter,
         retry_policy: RetryPolicy
     ):
-        ts.set_token(token)
+        # 设置临时环境变量，避免写入 root 权限的 ~/tk.csv
+        import tempfile
+        import os
+        temp_dir = tempfile.gettempdir()
+        os.environ['TUSHARE_TOKEN_FILE'] = os.path.join(temp_dir, 'tushare_token.csv')
+
+        try:
+            ts.set_token(token)
+        except PermissionError:
+            # 如果写入 token 文件失败，忽略（token 已通过环境变量传递）
+            logger.warning("无法写入 Tushare token 文件，使用环境变量中的 token")
+
         self.pro = ts.pro_api()
         self.rate_limiter = rate_limiter
         self.retry_policy = retry_policy

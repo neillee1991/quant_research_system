@@ -2,6 +2,7 @@
 配置管理模块
 使用 Pydantic 管理所有配置项，支持环境变量和 .env 文件
 """
+import os
 from typing import Literal
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
@@ -76,7 +77,11 @@ class Settings(BaseSettings):
     raw_data_dir: Path = Field(default=BASE_DIR / "data" / "raw")
     factors_dir: Path = Field(default=BASE_DIR / "data" / "factors")
     models_dir: Path = Field(default=BASE_DIR / "data" / "models")
-    log_dir: Path = Field(default=BASE_DIR / "backend" / "logs")
+    # 日志目录：使用用户主目录避免权限问题，支持环境变量覆盖
+    log_dir: Path = Field(
+        default=Path(os.path.expanduser("~")) / ".quant_research" / "logs",
+        env="LOG_DIR"
+    )
 
     # 子配置
     collector: DataCollectorConfig = Field(default_factory=DataCollectorConfig)

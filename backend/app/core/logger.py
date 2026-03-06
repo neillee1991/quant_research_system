@@ -1,5 +1,13 @@
 import sys
+from pathlib import Path
 from loguru import logger
+
+# 从配置读取日志目录
+from app.core.config import settings
+
+# 确保日志目录存在
+LOG_DIR = settings.log_dir
+LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 logger.remove()
 logger.add(
@@ -8,7 +16,7 @@ logger.add(
     level="INFO",
 )
 logger.add(
-    "logs/app.log",
+    LOG_DIR / "app.log",
     rotation="10 MB",
     retention="7 days",
     level="DEBUG",
