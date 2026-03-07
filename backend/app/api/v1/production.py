@@ -230,10 +230,10 @@ async def list_registered_factors():
             if not fv_df.is_empty():
                 for row in fv_df.to_dicts():
                     latest_dates[row["factor_id"]] = row["latest_date"]
-        except Exception:
-            pass
-    except Exception:
-        pass
+        except Exception as e:
+            logger.debug(f"查询因子最新日期失败: {e}")
+    except Exception as e:
+        logger.debug(f"查询因子元数据失败: {e}")
 
     # 自动种子：代码因子不在 DB 中时自动写入（包含代码）
     import inspect
@@ -252,6 +252,8 @@ async def list_registered_factors():
 
                 seed_df = pl.DataFrame({
                     "factor_id": [fid],
+                    "version_number": [1],
+                    "is_current": [True],
                     "description": [fdef.get("description", "")],
                     "category": [fdef.get("category", "custom")],
                     "compute_mode": [fdef.get("compute_mode", "incremental")],
@@ -259,16 +261,16 @@ async def list_registered_factors():
                     "depends_on": [json.dumps(fdef.get("depends_on", []))],
                     "params": [json.dumps(fdef.get("params", {}))],
                     "code": [code_str],  # 保存因子函数源代码
-                    "last_computed_date": [""],
-                    "last_computed_at": pl.Series([None], dtype=pl.Datetime),
+                    "changed_by": ["system"],
+                    "change_reason": ["Auto-discovered from code"],
                     "created_at": [now],
                     "updated_at": [now],
                 })
-                db_client.upsert("factor_metadata", seed_df, ["factor_id"])
+                db_client.upsert("factor_metadata", seed_df, ["factor_id", "version_number"])
                 db_meta[fid] = {"factor_id": fid, "description": fdef.get("description", ""),
                                 "category": fdef.get("category", "custom")}
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"自动种子因子 {fid} 失败: {e}")
 
     # 合并：DB 元数据优先（用户手动修改），代码定义作为 fallback
     all_ids = set(code_factors.keys()) | set(db_meta.keys())
@@ -289,8 +291,6 @@ async def list_registered_factors():
             "depends_on": db_depends_on if db_depends_on else item.get("depends_on", []),
             "storage_target": meta.get("storage_target") or item.get("storage_target", "factor_values"),
             "params": db_params if db_params else item.get("params", {}),
-            "last_computed_date": meta.get("last_computed_date"),
-            "last_computed_at": str(meta["last_computed_at"]) if meta.get("last_computed_at") else None,
             "latest_data_date": latest_dates.get(fid),
         })
 
@@ -309,24 +309,27 @@ async def create_factor(req: FactorCreateRequest):
         if not existing.is_empty():
             raise HTTPException(status_code=409, detail=f"因子 {req.factor_id} 已存在")
 
-        now = datetime.now()
-        new_df = pl.DataFrame({
-            "factor_id": [req.factor_id],
-            "description": [req.description],
-            "category": [req.category],
-            "compute_mode": [req.compute_mode],
-            "storage_target": [req.storage_target],
-            "depends_on": [json.dumps(req.depends_on if hasattr(req, 'depends_on') else [])],
-            "params": [json.dumps(req.params)],
-            "code": [req.code if req.code else ""],
-            "last_computed_date": [""],
-            "last_computed_at": pl.Series([None], dtype=pl.Datetime),
-            "created_at": [now],
-            "updated_at": [now],
-        })
-        db_client.upsert("factor_metadata", new_df, ["factor_id"])
+        # 使用版本控制方法创建因子
+        config_data = {
+            "description": req.description,
+            "category": req.category,
+            "compute_mode": req.compute_mode,
+            "storage_target": req.storage_target,
+            "depends_on": json.dumps(req.depends_on if hasattr(req, 'depends_on') else []),
+            "params": json.dumps(req.params),
+            "code": req.code if req.code else "",
+        }
+
+        version = db_client.create_task_version(
+            task_type="factor",
+            task_id=req.factor_id,
+            config_data=config_data,
+            changed_by="system",
+            change_reason="创建因子"
+        )
+
         api_cache.invalidate("production:factors")
-        return {"status": "success", "data": {"factor_id": req.factor_id}}
+        return {"status": "success", "data": {"factor_id": req.factor_id, "version": version}}
     except HTTPException:
         raise
     except Exception as e:
@@ -338,22 +341,14 @@ async def create_factor(req: FactorCreateRequest):
 async def update_factor(factor_id: str, req: FactorUpdateRequest):
     """修改因子元数据"""
     try:
-        # 先读取现有记录
+        # 先读取当前版本
         existing = db_client.query(
-            "SELECT * FROM factor_metadata WHERE factor_id = %s", (factor_id,)
+            "SELECT * FROM factor_metadata WHERE factor_id = %s AND is_current = true", (factor_id,)
         )
         if existing.is_empty():
-            # 不存在则创建默认记录
-            now = datetime.now()
-            row = {
-                "factor_id": factor_id, "description": "", "category": "custom",
-                "compute_mode": "incremental", "storage_target": "factor_values",
-                "depends_on": "[]", "params": "{}", "code": "",
-                "last_computed_date": "", "last_computed_at": None,
-                "created_at": now, "updated_at": now,
-            }
-        else:
-            row = existing.to_dicts()[0]
+            raise HTTPException(status_code=404, detail=f"因子 {factor_id} 不存在")
+
+        row = existing.to_dicts()[0]
 
         # 应用更新
         if req.description is not None:
@@ -366,30 +361,30 @@ async def update_factor(factor_id: str, req: FactorUpdateRequest):
             row["storage_target"] = req.storage_target
         if req.params is not None:
             row["params"] = json.dumps(req.params)
-        row["updated_at"] = datetime.now()
 
-        # 使用显式 schema 确保 TIMESTAMP 列类型正确
-        update_df = pl.DataFrame([row], schema={
-            "factor_id": pl.Utf8,
-            "description": pl.Utf8,
-            "category": pl.Utf8,
-            "compute_mode": pl.Utf8,
-            "storage_target": pl.Utf8,
-            "depends_on": pl.Utf8,
-            "params": pl.Utf8,
-            "code": pl.Utf8,
-            "last_computed_date": pl.Utf8,
-            "last_computed_at": pl.Datetime,
-            "created_at": pl.Datetime,
-            "updated_at": pl.Datetime,
-        })
-        db_client.upsert("factor_metadata", update_df, ["factor_id"])
+        # 移除版本控制字段，由 create_task_version 自动处理
+        config_data = {k: v for k, v in row.items() if k not in [
+            "factor_id", "version_number", "is_current", "changed_by",
+            "change_reason", "created_at", "updated_at"
+        ]}
+
+        # 创建新版本
+        version = db_client.create_task_version(
+            task_type="factor",
+            task_id=factor_id,
+            config_data=config_data,
+            changed_by="system",
+            change_reason="更新因子配置"
+        )
+
         api_cache.invalidate("production:factors")
 
         # 清除因子列表缓存
         logger.debug(f"Cleared factor list cache after updating {factor_id}")
 
-        return {"status": "success", "data": {"factor_id": factor_id}}
+        return {"status": "success", "data": {"factor_id": factor_id, "version": version}}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Update factor failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -523,7 +518,8 @@ async def get_factor_code(factor_id: str):
                 content = f.read()
             if factor_id in content:
                 return {"status": "success", "data": {"filename": fname, "code": content}}
-        except Exception:
+        except Exception as e:
+            logger.debug(f"读取文件 {fname} 失败: {e}")
             continue
 
     raise HTTPException(status_code=404, detail=f"因子 {factor_id} 的源代码未找到")
@@ -540,7 +536,7 @@ async def update_factor_code(factor_id: str, req: FactorCodeUpdateRequest):
     try:
         # 检查因子是否存在
         existing = db_client.query(
-            "SELECT * FROM factor_metadata WHERE factor_id = %s", (factor_id,)
+            "SELECT * FROM factor_metadata WHERE factor_id = %s AND is_current = true", (factor_id,)
         )
 
         if existing.is_empty():
@@ -549,25 +545,23 @@ async def update_factor_code(factor_id: str, req: FactorCodeUpdateRequest):
         # 更新代码字段
         row = existing.to_dicts()[0]
         row["code"] = req.code
-        row["updated_at"] = datetime.now()
 
-        update_df = pl.DataFrame([row], schema={
-            "factor_id": pl.Utf8,
-            "description": pl.Utf8,
-            "category": pl.Utf8,
-            "compute_mode": pl.Utf8,
-            "storage_target": pl.Utf8,
-            "depends_on": pl.Utf8,
-            "params": pl.Utf8,
-            "code": pl.Utf8,
-            "last_computed_date": pl.Utf8,
-            "last_computed_at": pl.Datetime,
-            "created_at": pl.Datetime,
-            "updated_at": pl.Datetime,
-        })
-        db_client.upsert("factor_metadata", update_df, ["factor_id"])
+        # 移除版本控制字段
+        config_data = {k: v for k, v in row.items() if k not in [
+            "factor_id", "version_number", "is_current", "changed_by",
+            "change_reason", "created_at", "updated_at"
+        ]}
 
-        return {"status": "success", "data": {"factor_id": factor_id}}
+        # 创建新版本
+        version = db_client.create_task_version(
+            task_type="factor",
+            task_id=factor_id,
+            config_data=config_data,
+            changed_by="system",
+            change_reason="更新因子代码"
+        )
+
+        return {"status": "success", "data": {"factor_id": factor_id, "version": version}}
     except HTTPException:
         raise
     except Exception as e:
@@ -971,7 +965,8 @@ async def get_resolved_data_config():
                             source_label = "从OHLCV计算"
                         else:
                             source_label = "未配置"
-                    except Exception:
+                    except Exception as e:
+                        logger.debug(f"解析数据源配置失败: {e}")
                         source_label = "未配置"
                 else:
                     source_label = "未配置"
@@ -980,8 +975,8 @@ async def get_resolved_data_config():
                     cfg = json.loads(extra)
                     if "values" in cfg:
                         values = cfg["values"]
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"解析枚举值配置失败: {e}")
                 result[fk] = {"table_name": tbl, "column_name": col, "source_label": source_label, "values": values}
         result_resp = {"status": "success", "data": result}
         api_cache.set("production:data-config:resolved", result_resp, ttl=120)
@@ -1402,8 +1397,8 @@ async def get_latest_alphalens_analysis(factor_id: str):
             if field in record and record[field]:
                 try:
                     record[field] = safe_json_parse(record[field])
-                except:
-                    logger.warning(f"Failed to parse {field} for {factor_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to parse {field} for {factor_id}: {e}")
                     record[field] = None
 
         return {
@@ -1469,7 +1464,8 @@ async def get_alphalens_analysis_history(
                     record['quantiles'] = config.get('quantiles')
                     record['index_pool'] = config.get('index_pool')
                     record['groupby_field'] = config.get('groupby_field')
-                except:
+                except Exception as e:
+                    logger.debug(f"Failed to parse analysis config: {e}")
                     record['periods'] = None
                     record['quantiles'] = None
                     record['index_pool'] = None

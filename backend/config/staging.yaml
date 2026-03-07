@@ -1,0 +1,197 @@
+# 预发布环境配置
+# 环境: staging
+# 更新日期: 2026-03-07
+
+# 应用配置
+app:
+  name: "Quant Research System (Staging)"
+  environment: "staging"
+  debug: true
+  log_level: "DEBUG"
+
+# 服务端口
+server:
+  host: "0.0.0.0"
+  port: 8000
+  workers: 2
+  timeout: 300
+  keepalive: 65
+
+# CORS 配置
+cors:
+  origins:
+    - "http://localhost:3000"
+    - "http://staging.quant.example.com"
+  allow_credentials: true
+  allow_methods: ["GET", "POST", "PUT", "DELETE"]
+  allow_headers: ["*"]
+
+# DolphinDB 配置
+database:
+  host: "${DOLPHINDB_HOST:-localhost}"
+  port: 8848
+  user: "${DOLPHINDB_USER:-admin}"
+  password: "${DOLPHINDB_PASSWORD:-123456}"
+  db_path: "dfs://quant_staging"
+  pool_size: 20
+  timeout: 30
+  retry_times: 3
+  retry_delay: 2
+
+# 数据采集配置
+collector:
+  tushare_token: "${TUSHARE_TOKEN}"
+  calls_per_minute: 120
+  retry_times: 3
+  retry_delay: 2
+  timeout: 30
+  batch_size: 500
+
+# Prefect 配置
+prefect:
+  api_url: "${PREFECT_API_URL:-http://localhost:4200/api}"
+  work_pool: "staging-pool"
+  concurrency_limit: 5
+
+# 回测配置
+backtest:
+  initial_capital: 1000000.0
+  commission_rate: 0.0003
+  slippage_rate: 0.0001
+  min_position_size: 0.01
+  max_position_size: 0.2
+
+# 机器学习配置
+ml:
+  n_trials: 50
+  cv_folds: 3
+  test_size: 0.2
+  random_state: 42
+  n_jobs: -1
+
+# 数据同步配置
+sync:
+  default_start_date: "20200101"
+  incremental_days: 1
+  full_sync_interval: 7
+
+# 因子计算配置
+factor:
+  lookback_days: 250
+  min_periods: 20
+  batch_size: 200
+  parallel_workers: 2
+
+# 缓存配置
+cache:
+  enabled: true
+  ttl: 1800  # 30分钟
+  max_size: 500
+
+# 日志配置
+logging:
+  level: "DEBUG"
+  format: "text"
+  rotation: "1 day"
+  retention: "7 days"
+  compression: "gz"
+
+  files:
+    app: "logs/staging_app.log"
+    access: "logs/staging_access.log"
+    error: "logs/staging_error.log"
+
+  modules:
+    store: "DEBUG"
+    engine: "DEBUG"
+    data_manager: "DEBUG"
+    app: "DEBUG"
+
+# 监控配置
+monitoring:
+  enabled: true
+  metrics_port: 9090
+  health_check_interval: 60
+
+  prometheus:
+    enabled: true
+    port: 9090
+    path: "/metrics"
+
+  performance:
+    slow_query_threshold: 10.0
+    slow_api_threshold: 2.0
+
+# 告警配置
+alerting:
+  enabled: true
+  channels:
+    - type: "email"
+      recipients: ["dev@example.com"]
+
+  rules:
+    error_rate:
+      threshold: 0.05  # 5%
+      window: 300
+    response_time:
+      threshold: 10.0
+      percentile: 95
+    memory_usage:
+      threshold: 0.9
+    cpu_usage:
+      threshold: 0.9
+    disk_usage:
+      threshold: 0.9
+
+# 安全配置
+security:
+  api_key_enabled: false
+  jwt_enabled: false
+
+  rate_limit:
+    enabled: true
+    requests_per_minute: 500
+    burst: 50
+
+  ip_whitelist:
+    enabled: false
+    ips: []
+
+# 性能优化
+performance:
+  connection_pool:
+    min_size: 5
+    max_size: 20
+    timeout: 30
+
+  query:
+    max_rows: 50000
+    timeout: 60
+    cache_enabled: true
+
+  concurrency:
+    max_workers: 4
+    queue_size: 500
+
+# 备份配置
+backup:
+  enabled: true
+  schedule: "0 3 * * *"
+  retention_days: 7
+  path: "backups"
+  compress: true
+
+# 功能开关
+features:
+  data_sync: true
+  factor_calculation: true
+  backtest: true
+  ml_training: true
+  api_docs: true  # Staging 环境开启 API 文档
+
+# 资源限制
+limits:
+  max_request_size: 10485760
+  max_response_size: 104857600
+  max_concurrent_requests: 500
+  max_query_time: 600

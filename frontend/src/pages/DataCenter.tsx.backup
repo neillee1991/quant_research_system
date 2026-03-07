@@ -41,60 +41,36 @@ import { dataApi, productionApi } from '../api';
 import { useThemeStore } from '../store';
 import TradingViewChart from '../components/Charts/TradingViewChart';
 import { formatCode } from '../utils/codeFormatter';
-
-interface SyncTask {
-  task_id: string;
-  description: string;
-  sync_type: string;
-  table_name: string;
-  source?: string;
-  enabled?: boolean;
-}
-
-interface TaskStatus {
-  task_id: string;
-  description: string;
-  sync_type: string;
-  last_sync_date: string | null;
-  last_sync_time: string | null;
-  table_name: string;
-  table_latest_date?: string | null;
-  source?: string;
-}
-
-interface SyncLog {
-  id: number;
-  source: string;
-  data_type: string;
-  last_date: string;
-  sync_date: string;
-  rows_synced: number;
-  status: string;
-  created_at: string;
-}
-
-interface TableInfo {
-  table_name: string;
-  row_count: number;
-  column_count: number;
-  columns: string[];
-}
+import { VersionHistory, VersionBadge } from '../components/VersionHistory';
+import type {
+  SyncTask,
+  TaskStatus,
+  SyncLog,
+  TableInfo,
+  SyncTaskConfig,
+  ETLTask,
+  ETLTaskConfig,
+  ETLFieldDefinition,
+  ETLTestResult,
+  DailyData,
+  ScheduleInfo,
+} from '../types';
 
 const DataCenter: React.FC = () => {
   const { mode } = useThemeStore();
   const [stocks, setStocks] = useState<string[]>([]);
   const [selected, setSelected] = useState<string>('');
-  const [dailyData, setDailyData] = useState<any[]>([]);
+  const [dailyData, setDailyData] = useState<DailyData[]>([]);
   const [syncLogs, setSyncLogs] = useState<SyncLog[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState<boolean>(false);
 
   const [syncTasks, setSyncTasks] = useState<SyncTask[]>([]);
   const [taskStatuses, setTaskStatuses] = useState<Record<string, TaskStatus>>({});
   const [tables, setTables] = useState<TableInfo[]>([]);
-  const [sqlQuery, setSqlQuery] = useState('SELECT * FROM sync_daily_basic LIMIT 10');
-  const [queryResult, setQueryResult] = useState<any[]>([]);
+  const [sqlQuery, setSqlQuery] = useState<string>('SELECT * FROM sync_daily_basic LIMIT 10');
+  const [queryResult, setQueryResult] = useState<Record<string, unknown>[]>([]);
   const [queryColumns, setQueryColumns] = useState<string[]>([]);
-  const [queryLoading, setQueryLoading] = useState(false);
+  const [queryLoading, setQueryLoading] = useState<boolean>(false);
   const [syncingTasks, setSyncingTasks] = useState<Set<string>>(new Set());
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
 
@@ -116,54 +92,69 @@ const DataCenter: React.FC = () => {
   const [batchSyncEndDate, setBatchSyncEndDate] = useState<string>('');
   const [isNewTask, setIsNewTask] = useState(false);
 
-  const [scheduleInfo, setScheduleInfo] = useState<Record<string, any>>({});
+  const [scheduleInfo, setScheduleInfo] = useState<Record<string, ScheduleInfo>>({});
 
-  const [taskDrawerVisible, setTaskDrawerVisible] = useState(false);
+  const [taskDrawerVisible, setTaskDrawerVisible] = useState<boolean>(false);
   const [taskDrawerTask, setTaskDrawerTask] = useState<SyncTask | null>(null);
   const [taskDrawerJson, setTaskDrawerJson] = useState<string>('');
-  const [taskDrawerConfig, setTaskDrawerConfig] = useState<any>(null);
+  const [taskDrawerConfig, setTaskDrawerConfig] = useState<SyncTaskConfig | null>(null);
   const [taskDrawerTab, setTaskDrawerTab] = useState<string>('visual');
 
-  const [copyTaskModalVisible, setCopyTaskModalVisible] = useState(false);
+  const [copyTaskModalVisible, setCopyTaskModalVisible] = useState<boolean>(false);
   const [copyTaskSource, setCopyTaskSource] = useState<SyncTask | null>(null);
   const [copyTaskNewId, setCopyTaskNewId] = useState<string>('');
   const [copyTaskNewTableName, setCopyTaskNewTableName] = useState<string>('');
   const [copyTaskStep, setCopyTaskStep] = useState<'input' | 'table_not_exists'>('input');
-  const [copyTaskConfig, setCopyTaskConfig] = useState<any>(null);
+  const [copyTaskConfig, setCopyTaskConfig] = useState<SyncTaskConfig | null>(null);
 
   const [taskSyncHistory, setTaskSyncHistory] = useState<SyncLog[]>([]);
 
+  // 版本控制状态
+  const [versionHistoryVisible, setVersionHistoryVisible] = useState(false);
+  const [versionTaskType, setVersionTaskType] = useState<'sync' | 'etl'>('sync');
+  const [versionTaskId, setVersionTaskId] = useState<string>('');
+
   // ETL 任务状态
-  const [etlTasks, setEtlTasks] = useState<any[]>([]);
-  const [etlDrawerVisible, setEtlDrawerVisible] = useState(false);
-  const [etlDrawerConfig, setEtlDrawerConfig] = useState<any>({ task_id: '', description: '', script: '', sync_type: 'incremental', date_field: '', primary_keys: [] as string[], table_name: '' });
-  const [isNewEtlTask, setIsNewEtlTask] = useState(false);
+  const [etlTasks, setEtlTasks] = useState<ETLTask[]>([]);
+  const [etlDrawerVisible, setEtlDrawerVisible] = useState<boolean>(false);
+  const [etlDrawerConfig, setEtlDrawerConfig] = useState<ETLTaskConfig>({
+    task_id: '',
+    description: '',
+    script: '',
+    table_name: '',
+    fields: []
+  });
+  const [isNewEtlTask, setIsNewEtlTask] = useState<boolean>(false);
   const [runningEtlTasks, setRunningEtlTasks] = useState<Set<string>>(new Set());
-  const [etlTestResult, setEtlTestResult] = useState<any>(null);
-  const [etlTestLoading, setEtlTestLoading] = useState(false);
+  const [etlTestResult, setEtlTestResult] = useState<ETLTestResult | null>(null);
+  const [etlTestLoading, setEtlTestLoading] = useState<boolean>(false);
   const [etlTestDate, setEtlTestDate] = useState<string>('');
-  const [etlBackfillModalVisible, setEtlBackfillModalVisible] = useState(false);
+  const [etlBackfillModalVisible, setEtlBackfillModalVisible] = useState<boolean>(false);
   const [etlBackfillTaskId, setEtlBackfillTaskId] = useState<string>('');
   const [etlBackfillTaskIsFull, setEtlBackfillTaskIsFull] = useState<boolean>(false);
   const [etlBackfillStartDate, setEtlBackfillStartDate] = useState<string>('');
   const [etlBackfillEndDate, setEtlBackfillEndDate] = useState<string>('');
   const [selectedEtlTaskIds, setSelectedEtlTaskIds] = useState<string[]>([]);
-  const [batchBackfillModalVisible, setBatchBackfillModalVisible] = useState(false);
+  const [batchBackfillModalVisible, setBatchBackfillModalVisible] = useState<boolean>(false);
   const [batchBackfillStartDate, setBatchBackfillStartDate] = useState<string>('');
   const [batchBackfillEndDate, setBatchBackfillEndDate] = useState<string>('');
   const [etlSelectedPrimaryKeys, setEtlSelectedPrimaryKeys] = useState<string[]>([]);
   const [etlLogs, setEtlLogs] = useState<SyncLog[]>([]);
-  const [etlLogFilters, setEtlLogFilters] = useState({ taskId: undefined as string | undefined, startDate: undefined as string | undefined, endDate: undefined as string | undefined });
+  const [etlLogFilters, setEtlLogFilters] = useState({
+    taskId: undefined as string | undefined,
+    startDate: undefined as string | undefined,
+    endDate: undefined as string | undefined
+  });
   const [etlTaskStatus, setEtlTaskStatus] = useState<{ last_date: string | null; last_sync_time: string | null } | null>(null);
-  const [etlDrawerTab, setEtlDrawerTab] = useState('config');
+  const [etlDrawerTab, setEtlDrawerTab] = useState<string>('config');
   const [etlTaskHistory, setEtlTaskHistory] = useState<SyncLog[]>([]);
-  const [etlSavedSchema, setEtlSavedSchema] = useState<{ name: string; type: string }[]>([]);
-  const [etlFieldTypes, setEtlFieldTypes] = useState<{ name: string; type: string }[]>([]);
+  const [etlSavedSchema, setEtlSavedSchema] = useState<ETLFieldDefinition[]>([]);
+  const [etlFieldTypes, setEtlFieldTypes] = useState<ETLFieldDefinition[]>([]);
 
   // 编辑器引用
-  const sqlEditorRef = useRef<any>(null);
-  const jsonEditorRef = useRef<any>(null);
-  const etlEditorRef = useRef<any>(null);
+  const sqlEditorRef = useRef<unknown>(null);
+  const jsonEditorRef = useRef<unknown>(null);
+  const etlEditorRef = useRef<unknown>(null);
 
   // 格式化函数
   const handleFormatSql = async () => {
@@ -977,9 +968,6 @@ const DataCenter: React.FC = () => {
               rowSelection={{
                 selectedRowKeys: selectedTaskIds,
                 onChange: (selectedRowKeys) => setSelectedTaskIds(selectedRowKeys as string[]),
-                getCheckboxProps: (record: any) => ({
-                  disabled: !record.enabled,
-                }),
               }}
               scroll={{ x: 900 }}
               columns={[
@@ -1644,7 +1632,25 @@ const DataCenter: React.FC = () => {
 
       {/* Task Detail SideSheet */}
       <SideSheet
-        title={<span style={{ color: 'var(--color-primary)' }}>{isNewTask ? '新建任务' : taskDrawerTask?.task_id}</span>}
+        title={
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span style={{ color: 'var(--color-primary)' }}>{isNewTask ? '新建任务' : taskDrawerTask?.task_id}</span>
+            {!isNewTask && (
+              <Button
+                icon={<IconHistory />}
+                size="small"
+                theme="borderless"
+                onClick={() => {
+                  setVersionTaskType('sync');
+                  setVersionTaskId(taskDrawerTask?.task_id || '');
+                  setVersionHistoryVisible(true);
+                }}
+              >
+                版本历史
+              </Button>
+            )}
+          </div>
+        }
         visible={taskDrawerVisible}
         onCancel={() => { setTaskDrawerVisible(false); setIsNewTask(false); }}
         width={720}
@@ -1952,7 +1958,25 @@ const DataCenter: React.FC = () => {
 
       {/* ETL Task SideSheet */}
       <SideSheet
-        title={isNewEtlTask ? '新建 ETL 任务' : `编辑 ETL 任务: ${etlDrawerConfig.task_id}`}
+        title={
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span>{isNewEtlTask ? '新建 ETL 任务' : `编辑 ETL 任务: ${etlDrawerConfig.task_id}`}</span>
+            {!isNewEtlTask && (
+              <Button
+                icon={<IconHistory />}
+                size="small"
+                theme="borderless"
+                onClick={() => {
+                  setVersionTaskType('etl');
+                  setVersionTaskId(etlDrawerConfig.task_id || '');
+                  setVersionHistoryVisible(true);
+                }}
+              >
+                版本历史
+              </Button>
+            )}
+          </div>
+        }
         visible={etlDrawerVisible}
         onCancel={() => { setEtlDrawerVisible(false); setEtlTestResult(null); }}
         width={720}
@@ -2308,6 +2332,23 @@ const DataCenter: React.FC = () => {
           确定要删除任务 <code style={{ color: 'var(--color-primary)' }}>{deleteConfirmTaskId}</code> 及其数据表吗？此操作不可恢复。
         </div>
       </Modal>
+
+      {/* 版本历史 SideSheet */}
+      <VersionHistory
+        visible={versionHistoryVisible}
+        onClose={() => setVersionHistoryVisible(false)}
+        taskType={versionTaskType}
+        taskId={versionTaskId}
+        onRollback={(version: number) => {
+          Toast.success(`已切换到版本 ${version}`);
+          // 重新加载任务配置
+          if (versionTaskType === 'sync') {
+            loadInitialData();
+          } else {
+            loadEtlTasks();
+          }
+        }}
+      />
     </div>
   );
 };

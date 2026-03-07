@@ -2,11 +2,11 @@ import React from 'react';
 import ReactECharts from 'echarts-for-react';
 
 interface EquityCurveProps {
-  data: Array<{ trade_date: string; equity: number; port_return: number }>;
+  data: Array<{ date: string; equity: number; drawdown?: number; benchmark?: number }>;
 }
 
 const EquityCurveChart: React.FC<EquityCurveProps> = ({ data }) => {
-  const dates = data.map((d) => d.trade_date);
+  const dates = data.map((d) => d.date);
   const equity = data.map((d) => d.equity);
 
   let peak = equity[0] || 1;

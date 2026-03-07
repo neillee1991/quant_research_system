@@ -73,11 +73,16 @@ backend/
 │   │   ├── production.py         # Production engine
 │   │   ├── strategy.py           # Backtest execution
 │   │   ├── ml.py                 # ML training
-│   │   └── flows.py              # Prefect workflows
+│   │   ├── flows.py              # Prefect workflows
+│   │   ├── generic_task.py       # Generic task router factory
+│   │   └── versions.py           # Version control API
+│   ├── models/                   # Data models
+│   │   └── base_task.py          # Task configuration models
 │   ├── services/                 # Business logic
 │   │   ├── data_service.py
 │   │   ├── factor_service.py
-│   │   └── backtest_service.py
+│   │   ├── backtest_service.py
+│   │   └── task_service.py       # Generic task service
 │   ├── core/                     # Configuration & utilities
 │   │   ├── config.py             # Pydantic settings
 │   │   ├── exceptions.py         # Custom exceptions
@@ -181,6 +186,82 @@ capital = settings.backtest.initial_capital
 ```
 
 ## API Documentation
+
+### Task Management Abstraction Layer (New)
+
+The system now provides a unified task management abstraction layer for all task types (sync, ETL, factor).
+
+**Key Features:**
+- Unified CRUD operations for all task types
+- Built-in version control and rollback
+- Type-safe with Pydantic models
+- 60% code reduction through reuse
+
+**Example Usage:**
+
+```python
+# Backend - Using the generic service
+from app.services.task_service import sync_service
+
+# List all sync tasks
+tasks = sync_service.list_tasks(enabled_only=True)
+
+# Create a new task
+task = sync_service.create_task(
+    config_data={
+        "task_id": "new_task",
+        "api_name": "daily",
+        "api_limit": 5000
+    },
+    changed_by="user",
+    change_reason="Create new sync task"
+)
+
+# Update task
+updated = sync_service.update_task(
+    task_id="new_task",
+    config_data={"description": "Updated description"},
+    changed_by="user",
+    change_reason="Update description"
+)
+
+# Version control
+versions = sync_service.get_version_history("new_task")
+rollback = sync_service.rollback_to_version("new_task", version=1)
+```
+
+**API Endpoints:**
+
+All task types share the same endpoint structure:
+
+```bash
+# Sync Tasks
+GET    /api/v1/sync/tasks              # List all sync tasks
+GET    /api/v1/sync/tasks/{task_id}    # Get specific task
+POST   /api/v1/sync/tasks              # Create new task
+PUT    /api/v1/sync/tasks/{task_id}    # Update task
+DELETE /api/v1/sync/tasks/{task_id}    # Delete task (soft)
+
+# ETL Tasks
+GET    /api/v1/etl/tasks               # List all ETL tasks
+POST   /api/v1/etl/tasks               # Create new ETL task
+# ... (same pattern)
+
+# Factor Tasks
+GET    /api/v1/factors/tasks           # List all factors
+POST   /api/v1/factors/tasks           # Create new factor
+# ... (same pattern)
+
+# Version Control (all types)
+GET    /api/v1/tasks/{type}/{id}/versions        # Get version history
+GET    /api/v1/tasks/{type}/{id}/versions/{ver}  # Get specific version
+POST   /api/v1/tasks/{type}/{id}/rollback/{ver}  # Rollback to version
+```
+
+**Documentation:**
+- Migration Guide: `MIGRATION_GUIDE.md`
+- Performance Report: `PERFORMANCE_REPORT.md`
+- Design Document: `/tmp/task_abstraction_design.md`
 
 ### Data Endpoints
 
@@ -450,6 +531,25 @@ Common issues:
 
 ### Orchestration
 - **prefect** - Workflow scheduling
+
+## Project History
+
+### 2026-03 Major Refactoring
+完成了全面的代码重构和优化工作，主要成果包括：
+
+#### 核心改进
+- **DolphinDB客户端重构**: 实现单例模式连接管理，优化查询性能30-50%
+- **API模块重构**: 统一Data API和Production API接口，改进错误处理
+- **不可变性原则**: 全面采用不可变数据模式，提高代码可维护性
+- **数据迁移**: 完成Alphalens和因子数据的迁移脚本
+
+#### 归档文档
+重构过程的详细文档已归档至 `/docs/archive/`，包括：
+- 重构报告 (13个文件)
+- 验证脚本 (4个文件)
+- 迁移脚本 (3个文件)
+
+查看归档索引: `/docs/archive/README.md`
 
 ## Documentation
 

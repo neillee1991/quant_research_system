@@ -4,7 +4,6 @@
 from datetime import datetime
 from typing import Optional
 from prefect import flow, task, get_run_logger
-from prefect.tasks import task_input_hash
 
 import sys
 from pathlib import Path
@@ -42,7 +41,7 @@ def compute_factor(factor_id: str, target_date: Optional[str] = None):
         # 尝试使用 production engine
         from engine.production.engine import ProductionEngine
         engine = ProductionEngine(db_client)
-        result = engine.compute_factor(factor_id, target_date)
+        result = engine.run_task(factor_id, target_date=target_date)
         logger.info(f"因子 {factor_id} 计算完成")
         return result
     except ImportError:

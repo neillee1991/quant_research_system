@@ -207,7 +207,7 @@ def _restore_factor_from_db(db_client, factor_id: str):
     import json
     df = db_client.query(
         "SELECT factor_id, description, category, compute_mode, storage_target, depends_on, params, code "
-        "FROM factor_metadata WHERE factor_id = %s AND code IS NOT NULL AND code != ''",
+        "FROM factor_metadata WHERE factor_id = %s AND is_current = true AND code IS NOT NULL AND code != ''",
         (factor_id,)
     )
     if df.is_empty():
@@ -256,7 +256,7 @@ def load_factors_from_db(db_client):
             SELECT factor_id, description, category, compute_mode,
                    storage_target, depends_on, params, code
             FROM factor_metadata
-            WHERE code IS NOT NULL AND code != ''
+            WHERE is_current = true AND code IS NOT NULL AND code != ''
             ORDER BY factor_id
         """)
 

@@ -1,17 +1,19 @@
 # Developer Guide
 
-**Last Updated:** 2026-03-03
+**Last Updated:** 2026-03-07
+**Version:** v2.0 (重构后)
 **Target Audience:** Backend developers
 
 ## Table of Contents
 
 1. [Development Setup](#development-setup)
 2. [Architecture Overview](#architecture-overview)
-3. [Common Tasks](#common-tasks)
-4. [Code Patterns](#code-patterns)
-5. [Testing](#testing)
-6. [Debugging](#debugging)
-7. [Performance Tips](#performance-tips)
+3. [Working with Refactored Modules](#working-with-refactored-modules)
+4. [Common Tasks](#common-tasks)
+5. [Code Patterns](#code-patterns)
+6. [Testing](#testing)
+7. [Debugging](#debugging)
+8. [Performance Tips](#performance-tips)
 
 ## Development Setup
 
@@ -63,51 +65,32 @@ python main.py
 
 ### Layered Architecture
 
+详细架构请参考 [ARCHITECTURE.md](./ARCHITECTURE.md)
+
 ```
-┌─────────────────────────────────────────┐
-│         API Layer (FastAPI)             │
-│  Routes: /api/v1/data, /factor, etc.   │
-└────────────────┬────────────────────────┘
-                 │
-┌────────────────▼────────────────────────┐
-│      Service Layer (Business Logic)     │
-│  DataService, FactorService, etc.      │
-└────────────────┬────────────────────────┘
-                 │
-┌────────────────▼────────────────────────┐
-│    Engine Layer (Computation)           │
-│  ProductionEngine, BacktestEngine       │
-└────────────────┬────────────────────────┘
-                 │
-┌────────────────▼────────────────────────┐
-│      Data Layer (Storage)               │
-│  DolphinDB, Polars DataFrames           │
-└─────────────────────────────────────────┘
+API Layer (FastAPI)
+  ↓
+Service Layer (业务逻辑)
+  ↓
+Engine Layer (计算引擎)
+  ↓
+Data Layer (数据访问)
+  ↓
+Storage Layer (DolphinDB)
 ```
 
 ### Key Design Patterns
 
-**Dependency Injection:**
-```python
-from app.core.container import container
-
-# Get service instance
-data_service = container.get_data_service()
-factor_service = container.get_factor_service()
-```
-
 **Repository Pattern:**
 ```python
-# Services depend on abstract interfaces, not concrete implementations
-class DataService:
-    def __init__(self, db_client):
-        self.db = db_client
+# DolphinDBClient 作为统一的数据访问接口
+from store.dolphindb import DolphinDBClient
 
-    def get_daily_data(self, ts_code, start_date, end_date):
-        return self.db.query(
-            "SELECT * FROM sync_daily_data WHERE ts_code = %s AND trade_date BETWEEN %s AND %s",
-            (ts_code, start_date, end_date)
-        )
+client = DolphinDBClient()
+df = client.query(
+    "SELECT * FROM sync_daily_data WHERE ts_code = %s AND trade_date BETWEEN %s AND %s",
+    (ts_code, start_date, end_date)
+)
 ```
 
 **Factory Pattern:**
@@ -117,6 +100,193 @@ from engine.production.registry import get_factor
 
 definition = get_factor("ma20")
 result = definition.func(df, definition.params)
+```
+
+**Facade Pattern:**
+```python
+# DolphinDBClient 作为 Facade，隐藏内部复杂性
+class DolphinDBClient:
+    def __init__(self):
+        self._connection = DolphinDBConnection()
+        self._query_builder = QueryBuilder(self._connection)
+        self._meta_manager = MetadataManager(self._connection)
+        # ... 其他组件
+```
+
+---
+
+## Working with Refactored Modules
+
+### 1. DolphinDB Client (重构后)
+
+**位置**: `store/dolphindb/`
+
+**模块结构**:
+```
+dolphindb/
+├── __init__.py           # 客户端入口 (Facade)
+├── connection.py         # 连接管理 (Singleton)
+├── query_builder.py      # 查询构建
+├── meta_manager.py       # 元数据管理
+├── seed_data.py          # 数据初始化
+└── data_operations.py    # 数据操作
+```
+
+**使用示例**:
+```python
+from store.dolphindb import DolphinDBClient
+
+# 创建客户端实例
+client = DolphinDBClient()
+
+# 查询数据
+df = client.query(
+    "SELECT * FROM sync_daily_data WHERE ts_code = %s LIMIT 100",
+    ("000001.SZ",)
+)
+
+# 执行 SQL (无返回值)
+client.execute(
+    "UPDATE factor_metadata SET enabled = %s WHERE factor_id = %s",
+    (True, "ma20")
+)
+
+# 检查表是否存在
+if client.table_exists("factor_values"):
+    print("Table exists")
+
+# 创建表
+client.create_table(
+    table_name="my_table",
+    schema={
+        "id": {"type": "INT", "nullable": False},
+        "value": {"type": "DOUBLE", "nullable": True}
+    },
+    primary_keys=["id"]
+)
+```
+
+**关键改进**:
+- ✅ 单一职责：每个模块职责清晰
+- ✅ 线程安全：连接管理使用单例模式
+- ✅ SQL 安全：参数化查询防止注入
+- ✅ 易于测试：可以 Mock 各个组件
+
+### 2. Data API (重构后)
+
+**位置**: `app/api/v1/data/`
+
+**模块结构**:
+```
+data/
+├── __init__.py           # 路由聚合
+├── query_api.py          # 数据查询 (6 个端点)
+├── sync_api.py           # 数据同步 (18 个端点)
+├── config_api.py         # 配置管理 (5 个端点)
+└── etl_api.py            # ETL 任务 (10 个端点)
+```
+
+**添加新端点**:
+```python
+# 在对应的模块中添加
+# 例如：query_api.py
+
+from fastapi import APIRouter, HTTPException
+from app.core.response import success_response, error_response
+
+router = APIRouter()
+
+@router.get("/my-endpoint")
+async def my_endpoint(param: str):
+    try:
+        # 业务逻辑
+        result = do_something(param)
+        return success_response(result)
+    except Exception as e:
+        logger.error(f"Error: {e}")
+        return error_response(str(e))
+```
+
+**端点分类指南**:
+- `query_api.py`: 数据查询、表管理
+- `sync_api.py`: 数据同步、调度器
+- `config_api.py`: 任务配置 CRUD
+- `etl_api.py`: ETL 任务管理
+
+### 3. Production API (重构后)
+
+**位置**: `app/api/v1/production/`
+
+**模块结构**:
+```
+production/
+├── __init__.py           # 路由聚合
+├── factor_analysis.py    # 因子分析 (6 个端点)
+├── factor_compute.py     # 因子计算 (4 个端点)
+├── factor_registry.py    # 因子注册 (8 个端点)
+└── factor_config.py      # 配置管理 (8 个端点)
+```
+
+**使用 ProductionEngine**:
+```python
+from engine.production.engine import ProductionEngine
+from engine.production.registry import get_factor
+
+# 获取因子定义
+definition = get_factor("ma20")
+
+# 创建引擎实例
+engine = ProductionEngine()
+
+# 运行因子计算
+result = await engine.run_task(
+    factor_id="ma20",
+    start_date="20240101",
+    end_date="20240131",
+    mode="incremental",
+    preprocess_options={
+        "adjust_price": "forward",
+        "filter_st": True,
+        "filter_new_stock": True
+    }
+)
+```
+
+### 4. DataProcessor (预处理)
+
+**位置**: `data_manager/processor.py`
+
+**使用示例**:
+```python
+from data_manager.processor import DataProcessor
+
+processor = DataProcessor()
+
+# 应用预处理
+df_processed = processor.preprocess(
+    df=raw_df,
+    options={
+        "adjust_price": "forward",   # 前复权
+        "filter_st": True,           # 过滤 ST
+        "filter_new_stock": True,    # 过滤新股
+        "handle_suspension": True,   # 停牌处理
+        "mark_limit": True           # 标记涨跌停
+    }
+)
+```
+
+**自定义预处理器**:
+```python
+class MyProcessor(DataProcessor):
+    def custom_filter(self, df: pl.DataFrame) -> pl.DataFrame:
+        """自定义过滤逻辑"""
+        return df.filter(pl.col("volume") > 1000000)
+
+    def preprocess(self, df: pl.DataFrame, options: dict) -> pl.DataFrame:
+        df = super().preprocess(df, options)
+        if options.get("custom_filter"):
+            df = self.custom_filter(df)
+        return df
 ```
 
 ## Common Tasks
@@ -129,8 +299,16 @@ result = definition.func(df, definition.params)
 class TechnicalFactors:
     @staticmethod
     def my_indicator(series: pl.Series, param1: int) -> pl.Series:
-        """My custom indicator"""
-        # Implementation using Polars
+        """My custom indicator
+
+        Args:
+            series: 价格序列
+            param1: 参数1
+
+        Returns:
+            计算结果序列
+        """
+        # 使用 Polars 向量化操作
         return series.rolling_mean(window_size=param1)
 ```
 
@@ -143,11 +321,20 @@ from engine.factors.technical import TechnicalFactors
 @factor(
     factor_id="my_indicator",
     factor_name="My Indicator",
-    depends_on=["close"],
-    params={"param1": 20},
-    mode="incremental"
+    depends_on=["close"],  # 依赖的数据字段
+    params={"param1": 20},  # 默认参数
+    mode="incremental"  # 增量计算模式
 )
 def compute_my_indicator(df: pl.DataFrame, params: dict) -> pl.Series:
+    """计算自定义指标
+
+    Args:
+        df: 包含 close 列的 DataFrame
+        params: 参数字典
+
+    Returns:
+        因子值序列
+    """
     return TechnicalFactors.my_indicator(df["close"], params["param1"])
 ```
 
@@ -160,7 +347,261 @@ from engine.factors.technical import TechnicalFactors
 
 def test_my_indicator():
     data = pl.Series([1, 2, 3, 4, 5])
-    result = TechnicalFactors.my_indicator(data, 2)
+    result = TechnicalFactors.my_indicator(data, param1=2)
+    assert len(result) == len(data)
+    assert result[-1] == 4.5  # (4 + 5) / 2
+```
+
+**Step 4:** 通过 API 添加到数据库
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/production/factors" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "factor_id": "my_indicator",
+    "factor_name": "My Indicator",
+    "category": "technical",
+    "description": "自定义技术指标",
+    "depends_on": ["close"],
+    "params": {"param1": 20},
+    "enabled": true
+  }'
+```
+
+### Task 2: Add a New Data Sync Task
+
+**Step 1:** 在数据库添加任务配置
+
+```python
+from store.dolphindb import DolphinDBClient
+
+client = DolphinDBClient()
+
+# 插入任务配置
+client.execute("""
+    INSERT INTO sync_task_config VALUES (
+        'my_data_source',
+        'My Data Source',
+        'tushare',
+        'incremental',
+        'sync_my_data',
+        true,
+        '{"api_name": "my_api", "fields": ["field1", "field2"]}',
+        now(),
+        now()
+    )
+""")
+```
+
+**Step 2:** 创建 Prefect Flow
+
+```python
+# In flows/my_data_sync_flow.py
+from prefect import flow, task
+from data_manager.refactored_sync_engine import SyncEngine
+
+@task
+def sync_my_data(start_date: str, end_date: str):
+    """同步自定义数据"""
+    engine = SyncEngine()
+    return engine.run_task(
+        task_id="my_data_source",
+        start_date=start_date,
+        end_date=end_date
+    )
+
+@flow(name="my-data-sync")
+def my_data_sync_flow(start_date: str, end_date: str):
+    """自定义数据同步流程"""
+    result = sync_my_data(start_date, end_date)
+    return result
+```
+
+**Step 3:** 注册和调度
+
+```bash
+# 部署 Flow
+python -m flows.my_data_sync_flow
+
+# 通过 API 触发
+curl -X POST "http://localhost:8000/api/v1/data/sync/task/my_data_source"
+```
+
+### Task 3: Add a New API Endpoint
+
+**Step 1:** 选择合适的模块
+
+- 数据查询 → `data/query_api.py`
+- 数据同步 → `data/sync_api.py`
+- 因子分析 → `production/factor_analysis.py`
+- 因子计算 → `production/factor_compute.py`
+
+**Step 2:** 添加端点
+
+```python
+# 例如：在 data/query_api.py 添加
+from fastapi import APIRouter, Query
+from app.core.response import success_response, error_response
+from app.core.logger import logger
+
+router = APIRouter()
+
+@router.get("/my-endpoint")
+async def my_endpoint(
+    param1: str = Query(..., description="参数1"),
+    param2: int = Query(10, description="参数2")
+):
+    """
+    我的自定义端点
+
+    Args:
+        param1: 必需参数
+        param2: 可选参数，默认 10
+
+    Returns:
+        成功响应或错误响应
+    """
+    try:
+        # 业务逻辑
+        result = do_something(param1, param2)
+        return success_response(result)
+    except Exception as e:
+        logger.error(f"Error in my_endpoint: {e}", exc_info=True)
+        return error_response(str(e))
+```
+
+**Step 3:** 确保路由已注册
+
+```python
+# 在 data/__init__.py 中
+from .query_api import router as query_router
+
+# 路由应该已经包含在 router 中
+```
+
+### Task 4: 扩展 DataProcessor
+
+**Step 1:** 创建自定义处理器
+
+```python
+# In data_manager/custom_processor.py
+from data_manager.processor import DataProcessor
+import polars as pl
+
+class CustomProcessor(DataProcessor):
+    """自定义数据处理器"""
+
+    def filter_by_liquidity(self, df: pl.DataFrame, min_volume: int) -> pl.DataFrame:
+        """按流动性过滤
+
+        Args:
+            df: 输入数据
+            min_volume: 最小成交量
+
+        Returns:
+            过滤后的数据
+        """
+        return df.filter(pl.col("volume") >= min_volume)
+
+    def normalize_price(self, df: pl.DataFrame) -> pl.DataFrame:
+        """价格标准化
+
+        Args:
+            df: 输入数据
+
+        Returns:
+            标准化后的数据
+        """
+        return df.with_columns([
+            ((pl.col("close") - pl.col("close").mean()) / pl.col("close").std()).alias("close_norm")
+        ])
+
+    def preprocess(self, df: pl.DataFrame, options: dict) -> pl.DataFrame:
+        """扩展预处理流程
+
+        Args:
+            df: 输入数据
+            options: 预处理选项
+
+        Returns:
+            处理后的数据
+        """
+        # 先执行基础预处理
+        df = super().preprocess(df, options)
+
+        # 执行自定义处理
+        if options.get("filter_liquidity"):
+            df = self.filter_by_liquidity(df, options["min_volume"])
+
+        if options.get("normalize"):
+            df = self.normalize_price(df)
+
+        return df
+```
+
+**Step 2:** 使用自定义处理器
+
+```python
+from data_manager.custom_processor import CustomProcessor
+
+processor = CustomProcessor()
+
+df_processed = processor.preprocess(
+    df=raw_df,
+    options={
+        "adjust_price": "forward",
+        "filter_st": True,
+        "filter_liquidity": True,
+        "min_volume": 1000000,
+        "normalize": True
+    }
+)
+```
+
+### Task 5: 配置字段映射
+
+**场景**: 不同数据源的字段名不一致
+
+**Step 1:** 更新字段映射配置
+
+```python
+from store.dolphindb import DolphinDBClient
+
+client = DolphinDBClient()
+
+# 更新配置
+client.execute("""
+    UPDATE factor_data_config
+    SET field_mapping = '{"close": "close_price", "volume": "vol", "amount": "turnover"}'
+    WHERE config_id = 'default'
+""")
+```
+
+**Step 2:** 或通过 API 更新
+
+```bash
+curl -X PUT "http://localhost:8000/api/v1/production/data-config" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "field_mapping": {
+      "close": "close_price",
+      "volume": "vol",
+      "amount": "turnover"
+    }
+  }'
+```
+
+**Step 3:** 在因子计算中使用
+
+```python
+from engine.production.data_config import DataConfigLoader
+
+config_loader = DataConfigLoader()
+config = config_loader.load_config()
+
+# 获取映射后的字段名
+close_field = config.get_mapped_field("close")  # 返回 "close_price"
+```esult = TechnicalFactors.my_indicator(data, 2)
     assert len(result) == len(data)
     assert result[0] is None or result[0] == 1.0
 ```

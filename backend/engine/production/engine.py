@@ -162,7 +162,7 @@ class ProductionEngine:
             logger.info(f"Factor {factor_id} computed {len(result)} rows")
 
             # 5. 存储结果
-            rows = self._save_results(factor_id, result, definition.storage)
+            rows = self._save_results(factor_id, result, definition.storage, run_id)
 
             # 6. 更新因子元数据
             self._update_metadata(factor_id, definition, calc_end, rows)
@@ -238,23 +238,19 @@ class ProductionEngine:
         Args:
             adjust_price: 复权方式 "none"=不复权, "forward"=前复权, "backward"=后复权
         """
-        frames = []
-        needs_adj = "sync_daily_data" in definition.depends_on and adjust_price != "none"
-
-        for dep in definition.depends_on:
-            if dep.startswith("factor_"):
-                df = self._load_factor_data(dep, start_date, end_date)
-            elif dep in TABLE_COLUMNS:
-                df = self._load_table_data(dep, start_date, end_date)
-            else:
-                # 尝试作为普通表加载
-                df = self._load_table_data(dep, start_date, end_date)
-
-            if df is not None and not df.is_empty():
-                frames.append(df)
+        # 不可变模式：使用列表推导式收集所有数据帧
+        frames = [
+            df for dep in definition.depends_on
+            if (df := (
+                self._load_factor_data(dep, start_date, end_date) if dep.startswith("factor_")
+                else self._load_table_data(dep, start_date, end_date)
+            )) is not None and not df.is_empty()
+        ]
 
         if not frames:
             return None
+
+        needs_adj = "sync_daily_data" in definition.depends_on and adjust_price != "none"
 
         # 合并多个数据源
         result = frames[0]
@@ -342,17 +338,21 @@ class ProductionEngine:
         try:
             # 获取每个字段的配置
             fields = ["is_st", "is_suspend", "is_limit"]
-            field_configs = {}
-            missing_configs = []
 
-            for fk in fields:
+            # 不可变模式：使用字典推导式和列表推导式
+            def get_field_config(fk: str) -> tuple[str, Optional[Dict[str, str]]]:
+                """获取字段配置，返回 (field_key, config_dict or None)"""
                 cfg = self.data_config.get(fk)
                 tbl = cfg.get("table_name", "")
                 col = cfg.get("column_name", "")
                 if tbl and col:
-                    field_configs[fk] = {"table": tbl, "column": col}
-                else:
-                    missing_configs.append(fk)
+                    return fk, {"table": tbl, "column": col}
+                return fk, None
+
+            # 使用推导式构建配置和缺失列表
+            all_configs = [get_field_config(fk) for fk in fields]
+            field_configs = {fk: cfg for fk, cfg in all_configs if cfg is not None}
+            missing_configs = [fk for fk, cfg in all_configs if cfg is None]
 
             # 如果有字段未配置，提示用户（但继续处理其他已配置的字段）
             if missing_configs:
@@ -368,42 +368,49 @@ class ProductionEngine:
                     df = self._filter_new_stock(df, start_date, new_stock_days)
                 return df
 
-            # 收集所有需要的表及其字段
-            tables: Dict[str, List[str]] = {}  # table_name -> [columns]
+            # 收集所有需要的表及其字段（不可变模式：使用字典推导式）
+            # 先按表分组字段
+            from collections import defaultdict
+            table_cols_temp = defaultdict(set)
             for fk, cfg in field_configs.items():
-                tbl = cfg["table"]
-                col = cfg["column"]
-                if tbl not in tables:
-                    tables[tbl] = []
-                if col not in tables[tbl]:
-                    tables[tbl].append(col)
+                table_cols_temp[cfg["table"]].add(cfg["column"])
 
-            # 为每张表加载数据并合并
-            status_dfs = []
-            for tbl, cols in tables.items():
+            # 转换为不可变的字典（列表去重）
+            tables: Dict[str, List[str]] = {
+                tbl: list(cols) for tbl, cols in table_cols_temp.items()
+            }
+
+            # 为每张表加载数据并合并（不可变模式：使用列表推导式）
+            def load_status_table(tbl: str, cols: List[str]) -> Optional[pl.DataFrame]:
+                """加载单个状态表数据"""
                 if not self.db.table_exists(tbl):
                     logger.warning(f"配置的数据表 {tbl} 不存在，跳过状态过滤")
-                    return df
+                    return None
 
                 select_cols = ["ts_code", "trade_date"] + cols
                 col_str = ", ".join(select_cols)
-                # 将日期转为 DolphinDB DATE 字面量格式 (YYYY.MM.DD)，不加引号
-                # 这样可兼容 DATE 类型的列
                 ddb_start = f"{start_date[:4]}.{start_date[4:6]}.{start_date[6:]}"
                 ddb_end = f"{end_date[:4]}.{end_date[4:6]}.{end_date[6:]}"
                 status_df = self.db.query(
                     f"SELECT {col_str} FROM {tbl}"
                     f" WHERE trade_date >= {ddb_start} AND trade_date <= {ddb_end}"
                 )
-                if not status_df.is_empty():
-                    # 重命名列：column_name -> field_key (is_st, is_suspend, is_limit)
-                    rename_map = {}
-                    for fk, cfg in field_configs.items():
-                        if cfg["table"] == tbl:
-                            rename_map[cfg["column"]] = fk
-                    if rename_map:
-                        status_df = status_df.rename(rename_map)
-                    status_dfs.append(status_df)
+                if status_df.is_empty():
+                    return None
+
+                # 重命名列：column_name -> field_key (is_st, is_suspend, is_limit)
+                rename_map = {
+                    cfg["column"]: fk
+                    for fk, cfg in field_configs.items()
+                    if cfg["table"] == tbl
+                }
+                return status_df.rename(rename_map) if rename_map else status_df
+
+            # 使用列表推导式收集所有状态数据帧
+            status_dfs = [
+                sdf for tbl, cols in tables.items()
+                if (sdf := load_status_table(tbl, cols)) is not None
+            ]
 
             if not status_dfs:
                 logger.warning("股票状态数据为空，跳过过滤")
@@ -639,24 +646,46 @@ class ProductionEngine:
         return result
 
     def _save_results(self, factor_id: str, df: pl.DataFrame,
-                      storage: StorageConfig) -> int:
+                      storage: StorageConfig, run_id: str = "") -> int:
         """保存因子计算结果"""
         if storage.target == "factor_values":
-            return self._save_to_unified_table(factor_id, df)
+            return self._save_to_unified_table(factor_id, df, run_id)
         else:
             return self._save_to_custom_table(df, storage)
 
-    def _save_to_unified_table(self, factor_id: str, df: pl.DataFrame) -> int:
+    def _save_to_unified_table(self, factor_id: str, df: pl.DataFrame, run_id: str = "", task_version: int = 1) -> int:
         """保存到统一因子表"""
-        # 构造写入数据：ts_code, trade_date, factor_id, factor_value, quality_flag
-        select_cols = [
+        from datetime import datetime
+
+        # 获取当前因子版本
+        current_version = self.db.get_current_task_version("factor", factor_id)
+        if current_version:
+            task_version = current_version.get("version_number", 1)
+
+        # 构造写入数据：ts_code, trade_date, factor_id, factor_value, quality_flag, task_version, run_id, data_version, created_at
+        # 不可变模式：使用列表推导式和条件表达式构建列列表
+        base_cols = [
             pl.col("ts_code"),
             pl.col("trade_date"),
             pl.lit(factor_id).alias("factor_id"),
             pl.col("factor_value").cast(pl.Float64),
         ]
-        if "quality_flag" in df.columns:
-            select_cols.append(pl.col("quality_flag").cast(pl.Int32))
+
+        quality_col = (
+            pl.col("quality_flag").cast(pl.Int32)
+            if "quality_flag" in df.columns
+            else pl.lit(0).alias("quality_flag")
+        )
+
+        version_cols = [
+            pl.lit(task_version).alias("task_version"),
+            pl.lit(run_id).alias("run_id"),
+            pl.lit(f"v{task_version}").alias("data_version"),
+            pl.lit(datetime.now()).alias("created_at")
+        ]
+
+        # 使用不可变列表拼接（返回新列表）
+        select_cols = [*base_cols, quality_col, *version_cols]
 
         write_df = df.select(select_cols)
 
@@ -716,8 +745,8 @@ class ProductionEngine:
                 )
                 if not df_existing.is_empty():
                     existing = df_existing.to_dicts()[0]
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"查询现有因子元数据失败: {e}")
 
             # 合并 params：保留 DB 中用户设置的 preprocess，其余用代码定义覆盖
             db_pp = self._get_factor_preprocess(factor_id)
@@ -768,8 +797,8 @@ class ProductionEngine:
             )
             if not df.is_empty() and df["last_computed_date"][0]:
                 return df["last_computed_date"][0]
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"获取因子最后计算日期失败: {e}")
         return None
 
     def _get_factor_preprocess(self, factor_id: str) -> dict:
@@ -785,8 +814,8 @@ class ProductionEngine:
                 if isinstance(params, str):
                     params = json.loads(params)
                 return params.get("preprocess", {})
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"读取因子预处理配置失败: {e}")
         return {}
 
     # ==================== 工具方法 ====================

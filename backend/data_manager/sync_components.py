@@ -37,7 +37,7 @@ class SyncConfigManager:
         if self._cache is not None:
             return self._cache
         try:
-            df = self._db.query("SELECT * FROM sync_task_config")
+            df = self._db.query("SELECT * FROM sync_task_config WHERE is_current = true")
             if df.is_empty():
                 self._cache = []
                 return self._cache

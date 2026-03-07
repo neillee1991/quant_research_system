@@ -14,11 +14,19 @@ import dayjs from 'dayjs';
 import ReactECharts from 'echarts-for-react';
 import Editor from '@monaco-editor/react';
 import { productionApi, dataApi, DEFAULT_PREPROCESS } from '../api';
-import type { PreprocessOptions, DataFieldMapping } from '../api';
 import { useThemeStore } from '../store';
 import { formatCode } from '../utils/codeFormatter';
+import { VersionHistory, VersionBadge } from '../components/VersionHistory';
+import type {
+  PreprocessOptions,
+  DataFieldMapping,
+  FactorDefinition,
+  FactorRunRecord,
+  FactorValue,
+  FactorAnalysisResult,
+} from '../types';
 
-const formatRunParams = (record: any): string => {
+const formatRunParams = (record: FactorRunRecord): string => {
   const parts: string[] = [];
   const start = record.start_date || '';
   const end = record.end_date || '';
@@ -38,46 +46,57 @@ const formatRunParams = (record: any): string => {
 };
 
 // ==================== 因子详情/编辑 统一 SideSheet ====================
+interface FactorCodeInfo {
+  filename: string;
+  code: string;
+}
+
+interface DataConfigLabel {
+  source_label: string;
+  values?: Record<string, string>;
+}
+
 interface FactorDrawerProps {
-  factor: any;
+  factor: FactorDefinition | null;
   open: boolean;
   initialTab?: string;
   onClose: () => void;
   onSaved: () => void;
 }
+
 const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, onClose, onSaved }) => {
   const { mode } = useThemeStore();
   const factorId = factor?.factor_id;
-  const [activeTab, setActiveTab] = useState('edit');
+  const [activeTab, setActiveTab] = useState<string>('edit');
   // 编辑 - use individual useState instead of Form.useForm()
-  const [editDesc, setEditDesc] = useState('');
-  const [editCategory, setEditCategory] = useState('');
-  const [editComputeMode, setEditComputeMode] = useState('');
+  const [editDesc, setEditDesc] = useState<string>('');
+  const [editCategory, setEditCategory] = useState<string>('');
+  const [editComputeMode, setEditComputeMode] = useState<string>('');
   const [editDependsOn, setEditDependsOn] = useState<string[]>([]);
   const [editWindow, setEditWindow] = useState<number | undefined>(undefined);
   const [editLookbackDays, setEditLookbackDays] = useState<number>(60);
-  const [editSaving, setEditSaving] = useState(false);
+  const [editSaving, setEditSaving] = useState<boolean>(false);
   // 预处理
   const [ppEdit, setPpEdit] = useState<PreprocessOptions>({ ...DEFAULT_PREPROCESS });
   // 代码
-  const [code, setCode] = useState<{ filename: string; code: string } | null>(null);
-  const [editedCode, setEditedCode] = useState('');
-  const [codeChanged, setCodeChanged] = useState(false);
-  const [codeLoading, setCodeLoading] = useState(false);
-  const [codeSaving, setCodeSaving] = useState(false);
+  const [code, setCode] = useState<FactorCodeInfo | null>(null);
+  const [editedCode, setEditedCode] = useState<string>('');
+  const [codeChanged, setCodeChanged] = useState<boolean>(false);
+  const [codeLoading, setCodeLoading] = useState<boolean>(false);
+  const [codeSaving, setCodeSaving] = useState<boolean>(false);
   // 统计 & 数据
-  const [stats, setStats] = useState<any>(null);
-  const [statsLoading, setStatsLoading] = useState(false);
-  const [factorData, setFactorData] = useState<any[]>([]);
-  const [dataLoading, setDataLoading] = useState(false);
+  const [stats, setStats] = useState<FactorAnalysisResult | null>(null);
+  const [statsLoading, setStatsLoading] = useState<boolean>(false);
+  const [factorData, setFactorData] = useState<FactorValue[]>([]);
+  const [dataLoading, setDataLoading] = useState<boolean>(false);
   const [dataFilter, setDataFilter] = useState<{ ts_code?: string; start_date?: string; end_date?: string }>({});
   // 计算日志
-  const [history, setHistory] = useState<any[]>([]);
-  const [historyLoading, setHistoryLoading] = useState(false);
+  const [history, setHistory] = useState<FactorRunRecord[]>([]);
+  const [historyLoading, setHistoryLoading] = useState<boolean>(false);
   // 数据源注解
-  const [dataConfigLabels, setDataConfigLabels] = useState<Record<string, { source_label: string; values?: Record<string, string> }>>({});
+  const [dataConfigLabels, setDataConfigLabels] = useState<Record<string, DataConfigLabel>>({});
   // 编辑器引用
-  const codeEditorRef = useRef<any>(null);
+  const codeEditorRef = useRef<unknown>(null);
 
   // 格式化代码
   const handleFormatCode = async () => {
@@ -107,22 +126,27 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
     setEditComputeMode(factor.compute_mode || '');
     const rawDeps = factor.depends_on;
     setEditDependsOn(Array.isArray(rawDeps) ? rawDeps : (rawDeps ? (() => { try { return JSON.parse(rawDeps); } catch { return []; } })() : []));
-    setEditWindow(factor.params?.window ?? undefined);
-    setEditLookbackDays(factor.params?.lookback_days ?? 60);
+    const params = factor.params as any;
+    setEditWindow(params?.window ?? undefined);
+    setEditLookbackDays(params?.lookback_days ?? 60);
     // 预处理
-    const pp = factor.params?.preprocess || {};
+    const pp = params?.preprocess || {};
     console.log('[FactorDrawer] 加载因子配置:', { factor_id: factor.factor_id, params: factor.params, preprocess: pp });
     setPpEdit({ ...DEFAULT_PREPROCESS, ...pp });
     // 统计
     setStatsLoading(true);
-    productionApi.getFactorStats(factorId).then(r => setStats(r.data?.data)).catch(() => {}).finally(() => setStatsLoading(false));
+    if (factorId) {
+      productionApi.getFactorStats(factorId).then(r => setStats(r.data?.data)).catch(() => {}).finally(() => setStatsLoading(false));
+    }
     // 代码 - 直接加载
     setCodeLoading(true);
-    productionApi.getFactorCode(factorId).then(res => {
-      const d = res.data?.data;
-      setCode(d);
-      setEditedCode(d?.code || '');
-    }).catch(() => setCode(null)).finally(() => setCodeLoading(false));
+    if (factorId) {
+      productionApi.getFactorCode(factorId).then(res => {
+        const d = res.data?.data;
+        setCode(d);
+        setEditedCode(d?.code || '');
+      }).catch(() => setCode(null)).finally(() => setCodeLoading(false));
+    }
     // 数据源注解
     productionApi.getResolvedDataConfig().then(r => setDataConfigLabels(r.data?.data || {})).catch(() => {});
   }, [factor, open, initialTab, factorId]);
@@ -155,6 +179,10 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
     if (!factor) return;
     setEditSaving(true);
     try {
+      if (!factorId) {
+        Toast.error('因子ID不能为空');
+        return;
+      }
       const newParams = {
         ...(factor.params || {}),
         preprocess: ppEdit,
@@ -216,7 +244,25 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
 
   return (
     <SideSheet
-      title={<span style={{ color: 'var(--color-primary)' }}>{factorId}</span>}
+      title={
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <span style={{ color: 'var(--color-primary)' }}>{factorId}</span>
+          <Button
+            icon={<IconHistory />}
+            size="small"
+            theme="borderless"
+            onClick={() => {
+              // 触发版本历史显示
+              const event = new CustomEvent('showVersionHistory', {
+                detail: { taskType: 'factor', taskId: factorId }
+              });
+              window.dispatchEvent(event);
+            }}
+          >
+            版本历史
+          </Button>
+        </div>
+      }
       visible={open} onCancel={onClose} width={780}
     >
       <Tabs activeKey={activeTab} onChange={setActiveTab} size="small">
@@ -441,6 +487,35 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
 };
 
 // ==================== 代码测试面板 ====================
+interface TestLog {
+  level: string;
+  phase: string;
+  message: string;
+}
+
+interface TestStats {
+  total_rows?: number;
+  stock_count?: number;
+  factor_mean?: number;
+  factor_std?: number;
+  null_count?: number;
+}
+
+interface TestResultData {
+  ts_code: string;
+  trade_date: string;
+  factor_value: number | null;
+  [key: string]: unknown;
+}
+
+interface TestResult {
+  stats?: TestStats;
+  preview?: TestResultData[];
+  truncated?: boolean;
+  stocks?: string[];
+  dates?: string[];
+}
+
 const CODE_TEMPLATE = `"""自定义因子"""
 import polars as pl
 from engine.production.registry import factor
@@ -467,16 +542,16 @@ def compute_custom(df: pl.DataFrame, params: dict) -> pl.DataFrame:
 
 const CodeTestPanel: React.FC<{ code: string; dependsOn?: string[]; preprocess?: PreprocessOptions }> = ({ code, dependsOn, preprocess }) => {
   const [dateRange, setDateRange] = useState<[string, string]>(['', '']);
-  const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState<any>(null);
+  const [testing, setTesting] = useState<boolean>(false);
+  const [testResult, setTestResult] = useState<TestResult | null>(null);
   const [testError, setTestError] = useState<string | null>(null);
-  const [testLogs, setTestLogs] = useState<any[]>([]);
-  const [testStdout, setTestStdout] = useState('');
+  const [testLogs, setTestLogs] = useState<TestLog[]>([]);
+  const [testStdout, setTestStdout] = useState<string>('');
   const [filterStock, setFilterStock] = useState<string | undefined>(undefined);
   const [filterDate, setFilterDate] = useState<string | undefined>(undefined);
-  const [showLogs, setShowLogs] = useState(true);
+  const [showLogs, setShowLogs] = useState<boolean>(true);
 
-  const handleTest = async () => {
+  const handleTest = async (): Promise<void> => {
     if (!code.trim()) { Toast.warning('请先编写因子代码'); return; }
     if (!dateRange[0] || !dateRange[1]) { Toast.warning('请选择测试日期范围'); return; }
     setTesting(true);
@@ -505,13 +580,14 @@ const CodeTestPanel: React.FC<{ code: string; dependsOn?: string[]; preprocess?:
         setTestLogs(d.data?.logs || []);
         setTestStdout(d.data?.stdout || '');
       }
-    } catch (e: any) {
-      setTestError(e.response?.data?.detail || e.message || '测试请求失败');
+    } catch (e) {
+      const error = e as { response?: { data?: { detail?: string } }; message?: string };
+      setTestError(error.response?.data?.detail || error.message || '测试请求失败');
     }
     setTesting(false);
   };
 
-  const filteredPreview: any[] = testResult?.preview?.filter((row: any) => {
+  const filteredPreview: TestResultData[] = testResult?.preview?.filter((row) => {
     if (filterStock && row.ts_code !== filterStock) return false;
     if (filterDate && row.trade_date !== filterDate) return false;
     return true;
@@ -567,7 +643,7 @@ const CodeTestPanel: React.FC<{ code: string; dependsOn?: string[]; preprocess?:
               padding: '6px 8px', maxHeight: 200, overflowY: 'auto',
               fontFamily: 'monospace', fontSize: 11, lineHeight: '18px',
             }}>
-              {testLogs.map((log: any, i: number) => (
+              {testLogs.map((log, i: number) => (
                 <div key={i} style={{ color: logColorMap[log.level] || '#94a3b8' }}>
                   <span style={{ color: phaseColorMap[log.phase] || 'var(--text-muted)', marginRight: 6 }}>
                     [{log.phase}]
@@ -608,7 +684,7 @@ const CodeTestPanel: React.FC<{ code: string; dependsOn?: string[]; preprocess?:
             </div>
             <div style={{ flex: 1 }}>
               <div style={{ color: 'var(--text-secondary)', fontSize: 11 }}>空值</div>
-              <div style={{ fontSize: 14, color: testResult.stats?.null_count > 0 ? 'var(--color-loss)' : 'var(--color-gain)' }}>{testResult.stats?.null_count}</div>
+              <div style={{ fontSize: 14, color: (testResult.stats?.null_count ?? 0) > 0 ? 'var(--color-loss)' : 'var(--color-gain)' }}>{testResult.stats?.null_count ?? 0}</div>
             </div>
           </div>
           {testResult.truncated && <Banner type="warning" description="结果已截断，仅显示前 2000 行" closeIcon={null} style={{ marginBottom: 8, fontSize: 12 }} />}
@@ -624,7 +700,7 @@ const CodeTestPanel: React.FC<{ code: string; dependsOn?: string[]; preprocess?:
             </span>
           </div>
           <Table dataSource={filteredPreview} columns={resultColumns}
-            rowKey={(r: any) => `${r.ts_code}-${r.trade_date}`}
+            rowKey={(r: any) => `${r?.ts_code}-${r?.trade_date}`}
             size="small" pagination={{ pageSize: 10 }}
             scroll={{ y: 240 }} />
         </div>
@@ -636,57 +712,80 @@ const CodeTestPanel: React.FC<{ code: string; dependsOn?: string[]; preprocess?:
 // ==================== 因子管理 Tab ====================
 const FactorManageTab: React.FC = () => {
   const { mode } = useThemeStore();
-  const [factors, setFactors] = useState<any[]>([]);
-  const [history, setHistory] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [factors, setFactors] = useState<FactorDefinition[]>([]);
+  const [history, setHistory] = useState<FactorRunRecord[]>([]);
+  const [loading, setLoading] = useState<boolean>(false);
   const [runLoading, setRunLoading] = useState<string | null>(null);
   const [selectedFactor, setSelectedFactor] = useState<string | null>(null);
   const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
-  const [batchLoading, setBatchLoading] = useState(false);
-  const [createModal, setCreateModal] = useState(false);
-  const [createCode, setCreateCode] = useState(CODE_TEMPLATE);
+  const [batchLoading, setBatchLoading] = useState<boolean>(false);
+  const [createModal, setCreateModal] = useState<boolean>(false);
+  const [createCode, setCreateCode] = useState<string>(CODE_TEMPLATE);
   const [createPreprocess, setCreatePreprocess] = useState<PreprocessOptions>({ ...DEFAULT_PREPROCESS });
-  const [drawerState, setDrawerState] = useState<{ open: boolean; factor: any; tab?: string }>({ open: false, factor: null });
+  const [drawerState, setDrawerState] = useState<{ open: boolean; factor: FactorDefinition | null; tab?: string }>({ open: false, factor: null });
   const [fullRunModal, setFullRunModal] = useState<{ visible: boolean; factorId: string | null; computeMode: string }>({ visible: false, factorId: null, computeMode: 'incremental' });
   const [fullRunDates, setFullRunDates] = useState<[dayjs.Dayjs | null, dayjs.Dayjs | null]>([null, null]);
   // Create form state (replaces Form.useForm)
-  const [createFactorId, setCreateFactorId] = useState('');
-  const [createDesc, setCreateDesc] = useState('');
-  const [createCategory, setCreateCategory] = useState('custom');
-  const [createComputeMode, setCreateComputeMode] = useState('incremental');
+  const [createFactorId, setCreateFactorId] = useState<string>('');
+  const [createDesc, setCreateDesc] = useState<string>('');
+  const [createCategory, setCreateCategory] = useState<string>('custom');
+  const [createComputeMode, setCreateComputeMode] = useState<string>('incremental');
   const [createDependsOn, setCreateDependsOn] = useState<string[]>(['sync_daily_data']);
   const [createWindow, setCreateWindow] = useState<number | undefined>(undefined);
   const [createLookbackDays, setCreateLookbackDays] = useState<number>(60);
-  const createEditorRef = useRef<any>(null);
+  const createEditorRef = useRef<unknown>(null);
+
+  // 版本控制状态
+  const [versionHistoryVisible, setVersionHistoryVisible] = useState(false);
+  const [versionFactorId, setVersionFactorId] = useState<string>('');
+
+  // 监听版本历史事件
+  useEffect(() => {
+    const handleShowVersionHistory = (event: CustomEvent<{ taskType: string; taskId: string }>) => {
+      const { taskType, taskId } = event.detail;
+      if (taskType === 'factor') {
+        setVersionFactorId(taskId);
+        setVersionHistoryVisible(true);
+      }
+    };
+    window.addEventListener('showVersionHistory', handleShowVersionHistory as EventListener);
+    return () => window.removeEventListener('showVersionHistory', handleShowVersionHistory as EventListener);
+  }, []);
 
   // 格式化创建代码
-  const handleFormatCreateCode = async () => {
+  const handleFormatCreateCode = async (): Promise<void> => {
     try {
       const formatted = await formatCode(createCode, 'python');
       setCreateCode(formatted);
       Toast.success('代码格式化成功');
-    } catch (error: any) {
-      Toast.error(error.message || '格式化失败');
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : '格式化失败';
+      Toast.error(errorMessage);
     }
   };
   // 批量计算模态框
-  const [batchCalcModalVisible, setBatchCalcModalVisible] = useState(false);
+  const [batchCalcModalVisible, setBatchCalcModalVisible] = useState<boolean>(false);
   const [batchCalcDates, setBatchCalcDates] = useState<[dayjs.Dayjs | null, dayjs.Dayjs | null]>([null, null]);
 
-  const loadFactors = useCallback(async () => {
+  const loadFactors = useCallback(async (): Promise<void> => {
     setLoading(true);
     try {
       const res = await productionApi.listFactors();
       setFactors(res.data?.data || []);
-    } catch { Toast.error('加载因子列表失败'); }
+    } catch (error) {
+      console.error('Failed to load factors:', error);
+      Toast.error('加载因子列表失败');
+    }
     setLoading(false);
   }, []);
 
-  const loadHistory = useCallback(async (factorId?: string) => {
+  const loadHistory = useCallback(async (factorId?: string): Promise<void> => {
     try {
       const res = await productionApi.getProductionHistory(factorId, 30);
       setHistory(res.data?.data || []);
-    } catch { /* ignore */ }
+    } catch (error) {
+      console.error('Failed to load history:', error);
+    }
   }, []);
 
   useEffect(() => { loadFactors(); loadHistory(); }, [loadFactors, loadHistory]);
@@ -695,7 +794,8 @@ const FactorManageTab: React.FC = () => {
     setRunLoading(factorId);
     try {
       const factor = factors.find(f => f.factor_id === factorId);
-      const pp = factor?.params?.preprocess || undefined;
+      const params = factor?.params as any;
+      const pp = params?.preprocess || undefined;
       await productionApi.runProduction(factorId, runMode, undefined, startDate, endDate, pp);
       Toast.success(`因子 ${factorId} ${runMode === 'incremental' ? '增量' : '全量'}计算完成`);
       loadFactors();
@@ -1193,10 +1293,22 @@ const FactorManageTab: React.FC = () => {
           const list = res.data?.data || [];
           setFactors(list);
           if (drawerState.factor) {
-            const updated = list.find((f: any) => f.factor_id === drawerState.factor.factor_id);
+            const updated = list.find((f: any) => f.factor_id === drawerState.factor?.factor_id);
             if (updated) setDrawerState(prev => ({ ...prev, factor: updated }));
           }
         }} />
+
+      {/* 版本历史 SideSheet */}
+      <VersionHistory
+        visible={versionHistoryVisible}
+        onClose={() => setVersionHistoryVisible(false)}
+        taskType="factor"
+        taskId={versionFactorId}
+        onRollback={(version: number) => {
+          Toast.success(`已切换到版本 ${version}`);
+          loadFactors();
+        }}
+      />
     </div>
   );
 };
@@ -1527,14 +1639,14 @@ const DataConfigTab: React.FC = () => {
   };
 
   const updateMapping = (idx: number, field: Partial<DataFieldMapping>) => {
-    setMappings(prev => prev.map((m, i) => i === idx ? { ...m, ...field } : m));
+    setMappings(prev => prev.map((m, i) => i === idx ? { ...m, ...field } as DataFieldMapping : m));
     setChanged(true);
   };
 
   const handleSave = async () => {
     setSaving(true);
     try {
-      await productionApi.updateDataConfig(mappings);
+      await productionApi.updateDataConfig(mappings as any);
       Toast.success('配置已保存');
       setChanged(false);
     } catch (e: any) {

@@ -40,10 +40,10 @@ class QuantException(Exception):
 class DataException(QuantException):
     """数据相关异常基类"""
 
-    def __init__(self, message: str, **kwargs):
+    def __init__(self, message: str, status_code: int = status.HTTP_500_INTERNAL_SERVER_ERROR, **kwargs):
         super().__init__(
             message,
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=status_code,
             **kwargs
         )
 
@@ -88,10 +88,10 @@ class DataValidationError(DataException):
 class SyncException(QuantException):
     """同步相关异常基类"""
 
-    def __init__(self, message: str, **kwargs):
+    def __init__(self, message: str, status_code: int = status.HTTP_500_INTERNAL_SERVER_ERROR, **kwargs):
         super().__init__(
             message,
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=status_code,
             **kwargs
         )
 
@@ -134,10 +134,10 @@ class RateLimitExceededError(SyncException):
 class BacktestException(QuantException):
     """回测相关异常基类"""
 
-    def __init__(self, message: str, **kwargs):
+    def __init__(self, message: str, status_code: int = status.HTTP_500_INTERNAL_SERVER_ERROR, **kwargs):
         super().__init__(
             message,
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=status_code,
             **kwargs
         )
 
@@ -169,10 +169,10 @@ class InsufficientDataError(BacktestException):
 class FactorException(QuantException):
     """因子相关异常基类"""
 
-    def __init__(self, message: str, **kwargs):
+    def __init__(self, message: str, status_code: int = status.HTTP_500_INTERNAL_SERVER_ERROR, **kwargs):
         super().__init__(
             message,
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=status_code,
             **kwargs
         )
 
@@ -203,10 +203,10 @@ class UnsupportedFactorError(FactorException):
 class MLException(QuantException):
     """机器学习相关异常基类"""
 
-    def __init__(self, message: str, **kwargs):
+    def __init__(self, message: str, status_code: int = status.HTTP_500_INTERNAL_SERVER_ERROR, **kwargs):
         super().__init__(
             message,
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=status_code,
             **kwargs
         )
 

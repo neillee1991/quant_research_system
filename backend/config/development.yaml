@@ -1,0 +1,188 @@
+# 开发环境配置
+# 环境: development
+# 更新日期: 2026-03-07
+
+# 应用配置
+app:
+  name: "Quant Research System (Dev)"
+  environment: "development"
+  debug: true
+  log_level: "DEBUG"
+
+# 服务端口
+server:
+  host: "0.0.0.0"
+  port: 8000
+  workers: 1
+  timeout: 300
+  keepalive: 65
+
+# CORS 配置
+cors:
+  origins:
+    - "*"  # 开发环境允许所有来源
+  allow_credentials: true
+  allow_methods: ["*"]
+  allow_headers: ["*"]
+
+# DolphinDB 配置
+database:
+  host: "${DOLPHINDB_HOST:-localhost}"
+  port: 8848
+  user: "${DOLPHINDB_USER:-admin}"
+  password: "${DOLPHINDB_PASSWORD:-123456}"
+  db_path: "dfs://quant"
+  pool_size: 10
+  timeout: 30
+  retry_times: 3
+  retry_delay: 2
+
+# 数据采集配置
+collector:
+  tushare_token: "${TUSHARE_TOKEN}"
+  calls_per_minute: 60
+  retry_times: 3
+  retry_delay: 2
+  timeout: 30
+  batch_size: 100
+
+# Prefect 配置
+prefect:
+  api_url: "${PREFECT_API_URL:-http://localhost:4200/api}"
+  work_pool: "dev-pool"
+  concurrency_limit: 2
+
+# 回测配置
+backtest:
+  initial_capital: 1000000.0
+  commission_rate: 0.0003
+  slippage_rate: 0.0001
+  min_position_size: 0.01
+  max_position_size: 0.2
+
+# 机器学习配置
+ml:
+  n_trials: 10
+  cv_folds: 3
+  test_size: 0.2
+  random_state: 42
+  n_jobs: 2
+
+# 数据同步配置
+sync:
+  default_start_date: "20230101"
+  incremental_days: 1
+  full_sync_interval: 30
+
+# 因子计算配置
+factor:
+  lookback_days: 60
+  min_periods: 20
+  batch_size: 50
+  parallel_workers: 1
+
+# 缓存配置
+cache:
+  enabled: false  # 开发环境禁用缓存
+  ttl: 300
+  max_size: 100
+
+# 日志配置
+logging:
+  level: "DEBUG"
+  format: "text"
+  rotation: "100 MB"
+  retention: "3 days"
+  compression: "gz"
+
+  files:
+    app: "logs/app.log"
+    access: "logs/access.log"
+    error: "logs/error.log"
+
+  modules:
+    store: "DEBUG"
+    engine: "DEBUG"
+    data_manager: "DEBUG"
+    app: "DEBUG"
+
+# 监控配置
+monitoring:
+  enabled: false  # 开发环境禁用监控
+  metrics_port: 9090
+  health_check_interval: 120
+
+  prometheus:
+    enabled: false
+    port: 9090
+    path: "/metrics"
+
+  performance:
+    slow_query_threshold: 30.0
+    slow_api_threshold: 5.0
+
+# 告警配置
+alerting:
+  enabled: false  # 开发环境禁用告警
+  channels: []
+  rules: {}
+
+# 安全配置
+security:
+  api_key_enabled: false
+  jwt_enabled: false
+
+  rate_limit:
+    enabled: false  # 开发环境禁用速率限制
+    requests_per_minute: 10000
+    burst: 1000
+
+  ip_whitelist:
+    enabled: false
+    ips: []
+
+# 性能优化
+performance:
+  connection_pool:
+    min_size: 2
+    max_size: 10
+    timeout: 30
+
+  query:
+    max_rows: 10000
+    timeout: 120
+    cache_enabled: false
+
+  concurrency:
+    max_workers: 2
+    queue_size: 100
+
+# 备份配置
+backup:
+  enabled: false  # 开发环境禁用自动备份
+  schedule: "0 4 * * *"
+  retention_days: 3
+  path: "backups"
+  compress: false
+
+# 功能开关
+features:
+  data_sync: true
+  factor_calculation: true
+  backtest: true
+  ml_training: true
+  api_docs: true  # 开发环境开启 API 文档
+
+# 资源限制
+limits:
+  max_request_size: 52428800  # 50MB
+  max_response_size: 104857600  # 100MB
+  max_concurrent_requests: 100
+  max_query_time: 600
+
+# 开发工具
+dev_tools:
+  hot_reload: true
+  profiling: true
+  sql_echo: true
+  pretty_errors: true

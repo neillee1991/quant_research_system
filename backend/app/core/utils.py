@@ -122,17 +122,16 @@ class DateUtils:
         end_date: str,
         format_str: str = DATE_FORMAT_YYYYMMDD
     ) -> list[str]:
-        """获取日期范围"""
+        """获取日期范围（不可变模式：使用列表推导式）"""
         start = datetime.strptime(start_date, format_str)
         end = datetime.strptime(end_date, format_str)
 
-        dates = []
-        current = start
-        while current <= end:
-            dates.append(current.strftime(format_str))
-            current += timedelta(days=1)
-
-        return dates
+        # 不可变模式：使用列表推导式替代 append
+        total_days = (end - start).days + 1
+        return [
+            (start + timedelta(days=i)).strftime(format_str)
+            for i in range(total_days)
+        ]
 
     @staticmethod
     def add_days(date_str: str, days: int, format_str: str = DATE_FORMAT_YYYYMMDD) -> str:
@@ -274,25 +273,29 @@ class QueryBuilder:
 
     @staticmethod
     def build_where_clause(filters: dict[str, Any]) -> tuple[str, list]:
-        """构建 WHERE 子句，返回 (clause_str, params_list) 元组
+        """构建 WHERE 子句，返回 (clause_str, params_list) 元组（不可变模式）
 
         使用 %s 占位符，避免 SQL 注入。
+        不可变模式：使用推导式替代 append/extend
         """
         if not filters:
             return "", []
 
-        conditions = []
-        params = []
-        for key, value in filters.items():
+        # 不可变模式：使用生成器和列表推导式
+        def process_filter(key: str, value: Any) -> tuple[str, list]:
+            """处理单个过滤条件，返回 (condition_str, params_list)"""
             if isinstance(value, (list, tuple)):
                 placeholders = ", ".join(["%s"] * len(value))
-                conditions.append(f"{key} IN ({placeholders})")
-                params.extend(value)
+                return f"{key} IN ({placeholders})", list(value)
             elif value is None:
-                conditions.append(f"{key} IS NULL")
+                return f"{key} IS NULL", []
             else:
-                conditions.append(f"{key} = %s")
-                params.append(value)
+                return f"{key} = %s", [value]
+
+        # 使用列表推导式构建条件和参数
+        results = [process_filter(k, v) for k, v in filters.items()]
+        conditions = [cond for cond, _ in results]
+        params = [p for _, params_list in results for p in params_list]
 
         clause = "WHERE " + " AND ".join(conditions) if conditions else ""
         return clause, params

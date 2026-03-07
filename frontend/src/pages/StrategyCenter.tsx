@@ -4,23 +4,29 @@ import FlowEditor from '../components/FlowEditor';
 import EquityCurveChart from '../components/Charts/EquityCurveChart';
 import { useBacktestStore } from '../store';
 import { mlApi } from '../api';
+import type { MLJobStatus, MLWeights, EquityPoint, BacktestMetrics } from '../types';
 
 const StrategyCenter: React.FC = () => {
   // 回测状态
   const { result, loading } = useBacktestStore();
-  const metrics = result?.metrics;
-  const equity = result?.equity_curve || [];
+  const metrics: BacktestMetrics | undefined = result?.metrics;
+  const equity: EquityPoint[] = result?.equity_curve || [];
 
   // ML 状态
-  const [tsCode, setTsCode] = useState('000001.SZ');
-  const [task, setTask] = useState('full');
+  const [tsCode, setTsCode] = useState<string>('000001.SZ');
+  const [task, setTask] = useState<'full' | 'incremental'>('full');
   const [jobId, setJobId] = useState<string | null>(null);
-  const [status, setStatus] = useState<any>(null);
-  const [weights, setWeights] = useState<Record<string, number>>({});
-  const [polling, setPolling] = useState(false);
+  const [status, setStatus] = useState<MLJobStatus | null>(null);
+  const [weights, setWeights] = useState<MLWeights>({});
+  const [polling, setPolling] = useState<boolean>(false);
 
   useEffect(() => {
-    mlApi.getWeights().then((r) => setWeights(r.data.weights || {}));
+    mlApi.getWeights().then((r) => {
+      const weightsData = r.data.weights || {};
+      setWeights(weightsData);
+    }).catch((error) => {
+      console.error('Failed to load weights:', error);
+    });
   }, []);
 
   useEffect(() => {
@@ -63,19 +69,24 @@ const StrategyCenter: React.FC = () => {
     };
   }, [jobId, polling]);
 
-  const handleStartTraining = async () => {
+  const handleStartTraining = async (): Promise<void> => {
     try {
       const r = await mlApi.train({ ts_code: tsCode, task });
       setJobId(r.data.job_id);
       setPolling(true);
-      setStatus({ status: 'queued' });
+      setStatus({
+        job_id: r.data.job_id,
+        status: 'queued',
+        created_at: new Date().toISOString()
+      });
       Toast.info(`训练任务 ${r.data.job_id} 已启动`);
-    } catch {
+    } catch (error) {
+      console.error('Failed to start training:', error);
       Toast.error('启动训练失败');
     }
   };
 
-  const getStatusColor = (s: string) => {
+  const getStatusColor = (s: string): string => {
     switch (s) {
       case 'done': return 'var(--color-gain)';
       case 'failed': return 'var(--color-loss)';
@@ -84,7 +95,7 @@ const StrategyCenter: React.FC = () => {
     }
   };
 
-  const getStatusText = (s: string) => {
+  const getStatusText = (s: string): string => {
     switch (s) {
       case 'done': return '完成';
       case 'failed': return '失败';
@@ -94,12 +105,12 @@ const StrategyCenter: React.FC = () => {
     }
   };
 
-  const getStatusTagColor = (s: string) => {
+  const getStatusTagColor = (s: string): 'green' | 'red' | 'blue' | 'grey' => {
     switch (s) {
-      case 'done': return 'green' as const;
-      case 'failed': return 'red' as const;
-      case 'running': return 'blue' as const;
-      default: return 'grey' as const;
+      case 'done': return 'green';
+      case 'failed': return 'red';
+      case 'running': return 'blue';
+      default: return 'grey';
     }
   };
 
@@ -328,7 +339,7 @@ const StrategyCenter: React.FC = () => {
                 }}>任务类型</div>
                 <Select
                   value={task}
-                  onChange={(v) => setTask(v as string)}
+                  onChange={(v) => setTask(v as 'full' | 'incremental')}
                   style={{ width: 180 }}
                   size="small"
                   optionList={[

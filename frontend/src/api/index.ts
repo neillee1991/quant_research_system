@@ -1,4 +1,5 @@
 import axios from 'axios';
+import type { DataFieldMapping } from '../types/factor';
 
 // 因子计算预处理选项
 export interface PreprocessOptions {
@@ -56,6 +57,8 @@ export const dataApi = {
   getTaskConfig: (taskId: string) => api.get(`/data/sync/task/${taskId}/config`),
   updateTaskConfig: (taskId: string, config: any) => api.put(`/data/sync/task/${taskId}/config`, config),
   createTask: (config: any) => api.post('/data/sync/tasks', config),
+  createSyncTask: (config: any) => api.post('/data/sync/tasks', config),
+  updateSyncTask: (taskId: string, config: any) => api.put(`/data/sync/task/${taskId}/config`, config),
   createSyncTaskTable: (taskId: string) => api.post(`/data/sync/task/${taskId}/create-table`),
   deleteTask: (taskId: string, dropTable?: boolean) => api.delete(`/data/sync/tasks/${taskId}`, { params: { drop_table: dropTable } }),
 
@@ -120,15 +123,6 @@ export const mlApi = {
   getStatus: (jobId: string) => api.get(`/ml/status/${jobId}`),
   getWeights: () => api.get('/ml/weights'),
 };
-
-export interface DataFieldMapping {
-  field_key: string;
-  description: string;
-  table_name: string;
-  column_name: string;
-  extra_config: string;
-  updated_at?: string;
-}
 
 export const productionApi = {
   // 因子 CRUD
@@ -233,6 +227,40 @@ export const flowApi = {
   delete: (name: string) => api.delete(`/flows/${name}`),
   run: (name: string, targetDate?: string) =>
     longRunningApi.post(`/flows/${name}/run`, null, { params: { target_date: targetDate } }),
+};
+
+// Version Control API
+export interface VersionRecord {
+  version: number;
+  changed_by: string;
+  change_reason: string;
+  created_at: string;
+  config?: any;
+}
+
+export interface VersionHistoryResponse {
+  task_id: string;
+  task_type: string;
+  current_version: number;
+  versions: VersionRecord[];
+}
+
+export const versionApi = {
+  // Get version history for a task
+  getHistory: (taskType: 'sync' | 'factor' | 'etl', taskId: string) =>
+    api.get<VersionHistoryResponse>(`/${taskType}/tasks/${taskId}/versions`),
+
+  // Get specific version config
+  getVersion: (taskType: 'sync' | 'factor' | 'etl', taskId: string, version: number) =>
+    api.get(`/${taskType}/tasks/${taskId}/versions/${version}`),
+
+  // Rollback to a specific version
+  rollback: (taskType: 'sync' | 'factor' | 'etl', taskId: string, version: number, reason?: string) =>
+    api.post(`/${taskType}/tasks/${taskId}/versions/${version}/rollback`, { reason }),
+
+  // Compare two versions
+  diff: (taskType: 'sync' | 'factor' | 'etl', taskId: string, v1: number, v2: number) =>
+    api.get(`/${taskType}/tasks/${taskId}/versions/diff`, { params: { v1, v2 } }),
 };
 
 export default api;

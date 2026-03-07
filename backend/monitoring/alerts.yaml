@@ -1,0 +1,498 @@
+# 监控告警配置 v2.0
+# 用途: 定义系统监控指标和告警规则
+# 更新日期: 2026-03-07
+
+# 全局配置
+global:
+  evaluation_interval: 30s  # 评估间隔
+  scrape_interval: 15s      # 采集间隔
+
+# 告警通知渠道
+notification_channels:
+  # 邮件通知
+  - name: email_ops
+    type: email
+    enabled: true
+    config:
+      recipients:
+        - ops@example.com
+        - devops@example.com
+      smtp_host: smtp.example.com
+      smtp_port: 587
+      from: alerts@example.com
+
+  # 钉钉通知
+  - name: dingtalk_ops
+    type: dingtalk
+    enabled: true
+    config:
+      webhook_url: "${DINGTALK_WEBHOOK_URL}"
+      at_mobiles: []
+      at_all: false
+
+  # 企业微信通知
+  - name: wechat_ops
+    type: wechat
+    enabled: false
+    config:
+      webhook_url: "${WECHAT_WEBHOOK_URL}"
+
+  # Webhook 通知
+  - name: webhook_custom
+    type: webhook
+    enabled: true
+    config:
+      url: "${CUSTOM_WEBHOOK_URL}"
+      method: POST
+      headers:
+        Content-Type: application/json
+
+# 告警规则组
+alert_groups:
+  # 1. API 服务告警
+  - name: api_service
+    interval: 30s
+    rules:
+      # 错误率告警
+      - alert: HighErrorRate
+        expr: |
+          (sum(rate(http_requests_total{status=~"5.."}[5m]))
+          / sum(rate(http_requests_total[5m]))) > 0.01
+        for: 5m
+        severity: critical
+        labels:
+          category: api
+          component: backend
+        annotations:
+          summary: "API 错误率过高"
+          description: "过去5分钟 API 错误率 {{ $value | humanizePercentage }}，超过 1% 阈值"
+        channels:
+          - email_ops
+          - dingtalk_ops
+
+      # 响应时间告警
+      - alert: SlowAPIResponse
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(http_request_duration_seconds_bucket[5m])) by (le)
+          ) > 5
+        for: 5m
+        severity: warning
+        labels:
+          category: api
+          component: backend
+        annotations:
+          summary: "API 响应时间过长"
+          description: "P95 响应时间 {{ $value }}s，超过 5s 阈值"
+        channels:
+          - email_ops
+
+      # API 不可用告警
+      - alert: APIDown
+        expr: up{job="api"} == 0
+        for: 1m
+        severity: critical
+        labels:
+          category: api
+          component: backend
+        annotations:
+          summary: "API 服务不可用"
+          description: "API 服务已停止响应超过 1 分钟"
+        channels:
+          - email_ops
+          - dingtalk_ops
+
+      # 请求量异常告警
+      - alert: AbnormalRequestRate
+        expr: |
+          abs(rate(http_requests_total[5m])
+          - rate(http_requests_total[5m] offset 1h))
+          / rate(http_requests_total[5m] offset 1h) > 0.5
+        for: 10m
+        severity: warning
+        labels:
+          category: api
+          component: backend
+        annotations:
+          summary: "API 请求量异常"
+          description: "请求量与1小时前相比变化超过 50%"
+        channels:
+          - email_ops
+
+  # 2. 数据库告警
+  - name: database
+    interval: 30s
+    rules:
+      # 数据库连接失败
+      - alert: DatabaseConnectionFailed
+        expr: dolphindb_connection_status == 0
+        for: 2m
+        severity: critical
+        labels:
+          category: database
+          component: dolphindb
+        annotations:
+          summary: "DolphinDB 连接失败"
+          description: "无法连接到 DolphinDB 数据库"
+        channels:
+          - email_ops
+          - dingtalk_ops
+
+      # 慢查询告警
+      - alert: SlowQuery
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(database_query_duration_seconds_bucket[5m])) by (le)
+          ) > 10
+        for: 5m
+        severity: warning
+        labels:
+          category: database
+          component: dolphindb
+        annotations:
+          summary: "数据库查询过慢"
+          description: "P95 查询时间 {{ $value }}s，超过 10s 阈值"
+        channels:
+          - email_ops
+
+      # 连接池耗尽
+      - alert: ConnectionPoolExhausted
+        expr: |
+          dolphindb_connection_pool_active
+          / dolphindb_connection_pool_max > 0.9
+        for: 5m
+        severity: warning
+        labels:
+          category: database
+          component: dolphindb
+        annotations:
+          summary: "数据库连接池接近耗尽"
+          description: "连接池使用率 {{ $value | humanizePercentage }}"
+        channels:
+          - email_ops
+
+  # 3. 因子计算告警
+  - name: factor_calculation
+    interval: 60s
+    rules:
+      # 因子计算失败
+      - alert: FactorCalculationFailed
+        expr: |
+          sum(rate(factor_calculation_failed_total[10m]))
+          / sum(rate(factor_calculation_total[10m])) > 0.1
+        for: 10m
+        severity: critical
+        labels:
+          category: factor
+          component: engine
+        annotations:
+          summary: "因子计算失败率过高"
+          description: "过去10分钟因子计算失败率 {{ $value | humanizePercentage }}"
+        channels:
+          - email_ops
+          - dingtalk_ops
+
+      # 因子计算耗时过长
+      - alert: SlowFactorCalculation
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(factor_calculation_duration_seconds_bucket[10m])) by (le)
+          ) > 60
+        for: 10m
+        severity: warning
+        labels:
+          category: factor
+          component: engine
+        annotations:
+          summary: "因子计算耗时过长"
+          description: "P95 计算时间 {{ $value }}s，超过 60s 阈值"
+        channels:
+          - email_ops
+
+      # 因子值异常
+      - alert: AbnormalFactorValues
+        expr: factor_null_ratio > 0.5
+        for: 5m
+        severity: warning
+        labels:
+          category: factor
+          component: engine
+        annotations:
+          summary: "因子值空值率过高"
+          description: "因子 {{ $labels.factor_name }} 空值率 {{ $value | humanizePercentage }}"
+        channels:
+          - email_ops
+
+  # 4. 数据同步告警
+  - name: data_sync
+    interval: 60s
+    rules:
+      # 数据同步失败
+      - alert: DataSyncFailed
+        expr: |
+          sum(rate(data_sync_failed_total[10m]))
+          / sum(rate(data_sync_total[10m])) > 0.1
+        for: 10m
+        severity: critical
+        labels:
+          category: sync
+          component: data_manager
+        annotations:
+          summary: "数据同步失败率过高"
+          description: "过去10分钟数据同步失败率 {{ $value | humanizePercentage }}"
+        channels:
+          - email_ops
+          - dingtalk_ops
+
+      # 数据同步延迟
+      - alert: DataSyncDelayed
+        expr: |
+          (time() - data_sync_last_success_timestamp) > 7200
+        for: 10m
+        severity: warning
+        labels:
+          category: sync
+          component: data_manager
+        annotations:
+          summary: "数据同步延迟"
+          description: "任务 {{ $labels.task_name }} 已超过 2 小时未成功同步"
+        channels:
+          - email_ops
+
+  # 5. 系统资源告警
+  - name: system_resources
+    interval: 30s
+    rules:
+      # CPU 使用率过高
+      - alert: HighCPUUsage
+        expr: |
+          100 - (avg by (instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 5m
+        severity: warning
+        labels:
+          category: system
+          component: host
+        annotations:
+          summary: "CPU 使用率过高"
+          description: "实例 {{ $labels.instance }} CPU 使用率 {{ $value | humanize }}%"
+        channels:
+          - email_ops
+
+      # 内存使用率过高
+      - alert: HighMemoryUsage
+        expr: |
+          (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) > 0.8
+        for: 5m
+        severity: warning
+        labels:
+          category: system
+          component: host
+        annotations:
+          summary: "内存使用率过高"
+          description: "实例 {{ $labels.instance }} 内存使用率 {{ $value | humanizePercentage }}"
+        channels:
+          - email_ops
+
+      # 磁盘使用率过高
+      - alert: HighDiskUsage
+        expr: |
+          (1 - (node_filesystem_avail_bytes / node_filesystem_size_bytes)) > 0.85
+        for: 5m
+        severity: critical
+        labels:
+          category: system
+          component: host
+        annotations:
+          summary: "磁盘使用率过高"
+          description: "实例 {{ $labels.instance }} 磁盘 {{ $labels.mountpoint }} 使用率 {{ $value | humanizePercentage }}"
+        channels:
+          - email_ops
+          - dingtalk_ops
+
+      # 磁盘 I/O 过高
+      - alert: HighDiskIO
+        expr: |
+          rate(node_disk_io_time_seconds_total[5m]) > 0.8
+        for: 10m
+        severity: warning
+        labels:
+          category: system
+          component: host
+        annotations:
+          summary: "磁盘 I/O 负载过高"
+          description: "实例 {{ $labels.instance }} 磁盘 {{ $labels.device }} I/O 负载过高"
+        channels:
+          - email_ops
+
+      # 网络流量异常
+      - alert: HighNetworkTraffic
+        expr: |
+          rate(node_network_receive_bytes_total[5m]) > 100000000
+        for: 10m
+        severity: warning
+        labels:
+          category: system
+          component: network
+        annotations:
+          summary: "网络接收流量过高"
+          description: "实例 {{ $labels.instance }} 网络接收流量 {{ $value | humanize }}B/s"
+        channels:
+          - email_ops
+
+  # 6. 应用进程告警
+  - name: application
+    interval: 30s
+    rules:
+      # 进程不存在
+      - alert: ProcessDown
+        expr: namedprocess_namegroup_num_procs{groupname="python"} == 0
+        for: 2m
+        severity: critical
+        labels:
+          category: application
+          component: backend
+        annotations:
+          summary: "应用进程已停止"
+          description: "Backend 进程已停止运行"
+        channels:
+          - email_ops
+          - dingtalk_ops
+
+      # 进程重启频繁
+      - alert: FrequentRestarts
+        expr: |
+          rate(process_start_time_seconds[10m]) > 0.1
+        for: 10m
+        severity: warning
+        labels:
+          category: application
+          component: backend
+        annotations:
+          summary: "应用进程频繁重启"
+          description: "过去10分钟进程重启次数异常"
+        channels:
+          - email_ops
+
+      # 文件描述符使用率过高
+      - alert: HighFileDescriptorUsage
+        expr: |
+          process_open_fds / process_max_fds > 0.8
+        for: 5m
+        severity: warning
+        labels:
+          category: application
+          component: backend
+        annotations:
+          summary: "文件描述符使用率过高"
+          description: "文件描述符使用率 {{ $value | humanizePercentage }}"
+        channels:
+          - email_ops
+
+  # 7. Prefect 工作流告警
+  - name: prefect_workflow
+    interval: 60s
+    rules:
+      # 工作流失败
+      - alert: WorkflowFailed
+        expr: |
+          sum(rate(prefect_flow_run_failed_total[10m]))
+          / sum(rate(prefect_flow_run_total[10m])) > 0.1
+        for: 10m
+        severity: warning
+        labels:
+          category: workflow
+          component: prefect
+        annotations:
+          summary: "Prefect 工作流失败率过高"
+          description: "过去10分钟工作流失败率 {{ $value | humanizePercentage }}"
+        channels:
+          - email_ops
+
+      # 工作流执行时间过长
+      - alert: LongRunningWorkflow
+        expr: |
+          prefect_flow_run_duration_seconds > 3600
+        for: 10m
+        severity: warning
+        labels:
+          category: workflow
+          component: prefect
+        annotations:
+          summary: "工作流执行时间过长"
+          description: "工作流 {{ $labels.flow_name }} 已运行 {{ $value | humanizeDuration }}"
+        channels:
+          - email_ops
+
+# 告警抑制规则
+inhibit_rules:
+  # API 服务不可用时，抑制其他 API 相关告警
+  - source_match:
+      alert: APIDown
+    target_match:
+      category: api
+    equal:
+      - instance
+
+  # 数据库连接失败时，抑制其他数据库相关告警
+  - source_match:
+      alert: DatabaseConnectionFailed
+    target_match:
+      category: database
+    equal:
+      - instance
+
+  # 进程停止时，抑制其他应用相关告警
+  - source_match:
+      alert: ProcessDown
+    target_match:
+      category: application
+    equal:
+      - instance
+
+# 告警分组规则
+route:
+  group_by: ['alertname', 'severity']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+
+  # 根据严重程度路由
+  routes:
+    # 严重告警立即发送
+    - match:
+        severity: critical
+      group_wait: 10s
+      repeat_interval: 1h
+      receiver: all_channels
+
+    # 警告告警延迟发送
+    - match:
+        severity: warning
+      group_wait: 5m
+      repeat_interval: 4h
+      receiver: email_only
+
+# 接收器配置
+receivers:
+  - name: all_channels
+    channels:
+      - email_ops
+      - dingtalk_ops
+      - webhook_custom
+
+  - name: email_only
+    channels:
+      - email_ops
+
+# 健康检查端点
+health_check:
+  enabled: true
+  port: 9093
+  path: /health
+
+# 指标导出配置
+metrics_export:
+  enabled: true
+  port: 9090
+  path: /metrics
+  interval: 15s

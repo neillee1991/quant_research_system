@@ -1,0 +1,66 @@
+# 预处理配置文件
+# 定义不同场景下的数据预处理策略
+
+preprocess_profiles:
+  # 默认配置 - 平衡的预处理策略
+  default:
+    adjust_price: forward        # 前复权
+    filter_st: true              # 过滤ST股票
+    filter_new_stock: true       # 过滤新股
+    new_stock_days: 60           # 新股上市后60天内过滤
+    handle_suspension: true      # 处理停牌
+    mark_limit: true             # 标记涨跌停
+
+  # 保守配置 - 更严格的过滤条件
+  conservative:
+    adjust_price: forward
+    filter_st: true
+    filter_new_stock: true
+    new_stock_days: 120          # 新股上市后120天内过滤
+    handle_suspension: true
+    mark_limit: true
+
+  # 激进配置 - 最少的过滤
+  aggressive:
+    adjust_price: none           # 不复权
+    filter_st: false             # 不过滤ST
+    filter_new_stock: false      # 不过滤新股
+    new_stock_days: 0
+    handle_suspension: false     # 不处理停牌
+    mark_limit: false            # 不标记涨跌停
+
+  # 研究配置 - 用于学术研究
+  research:
+    adjust_price: backward       # 后复权（保持最新价格不变）
+    filter_st: true
+    filter_new_stock: true
+    new_stock_days: 90
+    handle_suspension: true
+    mark_limit: true
+
+  # 回测配置 - 用于策略回测
+  backtest:
+    adjust_price: forward
+    filter_st: true
+    filter_new_stock: true
+    new_stock_days: 60
+    handle_suspension: true
+    mark_limit: true             # 回测时需要标记涨跌停以避免不可交易
+
+  # 实盘配置 - 用于实盘交易
+  live:
+    adjust_price: none           # 实盘不需要复权
+    filter_st: true
+    filter_new_stock: true
+    new_stock_days: 60
+    handle_suspension: false     # 实盘需要看到停牌状态
+    mark_limit: true
+
+# 字段说明
+field_descriptions:
+  adjust_price: "复权方式: forward(前复权), backward(后复权), none(不复权)"
+  filter_st: "是否过滤ST股票"
+  filter_new_stock: "是否过滤新股"
+  new_stock_days: "新股上市后多少天内过滤"
+  handle_suspension: "是否处理停牌（停牌期间因子值置空）"
+  mark_limit: "是否标记涨跌停"

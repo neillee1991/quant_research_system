@@ -21,6 +21,10 @@ def main():
         db_client.seed_sync_task_config()
         print("✓ 同步任务配置种子数据已写入")
 
+        # 写入默认 ETL 任务配置
+        db_client.seed_etl_task_config()
+        print("✓ ETL 任务配置种子数据已写入")
+
         # 写入因子数据配置
         db_client.seed_factor_data_config()
         print("✓ 因子数据配置种子数据已写入")

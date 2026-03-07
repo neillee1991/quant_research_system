@@ -623,38 +623,54 @@ def get_task_config(task_id: str):
 @router.put("/data/sync/task/{task_id}/config")
 def update_task_config(task_id: str, config: dict):
     """
-    更新指定任务的配置
+    更新指定任务的配置（使用版本控制）
 
     - **task_id**: 任务ID
     """
     try:
         # 确认任务存在
-        existing = db_client.query("SELECT * FROM sync_task_config WHERE task_id = %s", (task_id,))
+        existing = db_client.query(
+            "SELECT * FROM sync_task_config WHERE task_id = %s AND is_current = true",
+            (task_id,)
+        )
         if existing.is_empty():
             raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
 
-        # 构建更新行 — 基于 existing 的第一行，覆盖需要更新的字段
-        now = datetime.now()
-        first = existing.head(1)
-        row = first.with_columns(
-            pl.lit(config.get("task_id", task_id)).alias("task_id"),
-            pl.lit(config.get("api_name", "")).alias("api_name"),
-            pl.lit(config.get("description", "")).alias("description"),
-            pl.lit(config.get("sync_type", "incremental")).alias("sync_type"),
-            pl.lit(json.dumps(config.get("params", {}), ensure_ascii=False)).alias("params_json"),
-            pl.lit(config.get("date_field", "")).alias("date_field"),
-            pl.lit(json.dumps(config.get("primary_keys", []))).alias("primary_keys_json"),
-            pl.lit(config.get("table_name", "")).alias("table_name"),
-            pl.lit(json.dumps(config.get("schema", {}), ensure_ascii=False)).alias("schema_json"),
-            pl.lit(config.get("enabled", True)).alias("enabled"),
-            pl.lit(config.get("api_limit", 5000)).alias("api_limit"),
-            pl.lit(now).alias("updated_at"),
+        # 获取当前配置并合并更新
+        current_row = existing.to_dicts()[0]
+
+        # 构建新配置数据（移除版本控制字段）
+        config_data = {
+            "api_name": config.get("api_name", current_row.get("api_name", "")),
+            "description": config.get("description", current_row.get("description", "")),
+            "sync_type": config.get("sync_type", current_row.get("sync_type", "incremental")),
+            "params_json": json.dumps(config.get("params", {}), ensure_ascii=False) if "params" in config else current_row.get("params_json", "{}"),
+            "date_field": config.get("date_field", current_row.get("date_field", "")),
+            "primary_keys_json": json.dumps(config.get("primary_keys", [])) if "primary_keys" in config else current_row.get("primary_keys_json", "[]"),
+            "table_name": config.get("table_name", current_row.get("table_name", "")),
+            "schema_json": json.dumps(config.get("schema", {}), ensure_ascii=False) if "schema" in config else current_row.get("schema_json", "{}"),
+            "source": config.get("source", current_row.get("source", "tushare")),
+            "api_limit": config.get("api_limit", current_row.get("api_limit", 5000)),
+        }
+
+        # 使用版本控制创建新版本
+        version = db_client.create_task_version(
+            task_type="sync",
+            task_id=task_id,
+            config_data=config_data,
+            changed_by="api",
+            change_reason="更新同步任务配置"
         )
-        db_client.upsert("sync_task_config", row, ["task_id"])
+
+        # 重新加载配置
         sync_engine.config_manager.reload()
 
-        logger.info(f"Updated config for task {task_id}")
-        return {"status": "success", "message": f"Task {task_id} config updated"}
+        logger.info(f"Updated config for task {task_id}, new version: {version}")
+        return {
+            "status": "success",
+            "message": f"Task {task_id} config updated",
+            "version": version
+        }
     except HTTPException:
         raise
     except Exception as e:
@@ -1007,7 +1023,8 @@ def _etl_execute_and_write(task_id: str, script: str, task_config: dict):
 def list_etl_tasks():
     """列出所有 ETL 任务，附带最新同步状态"""
     try:
-        df = db_client.query("SELECT * FROM etl_task_config")
+        # 只查询当前版本的任务
+        df = db_client.query("SELECT * FROM etl_task_config WHERE is_current = true")
         if df.is_empty():
             return {"tasks": [], "total": 0}
         tasks = df.to_dicts()
@@ -1078,30 +1095,44 @@ def create_etl_task(config: dict):
 
 @router.put("/data/etl/task/{task_id}")
 def update_etl_task(task_id: str, config: dict):
-    """更新 ETL 任务"""
+    """更新 ETL 任务（使用版本控制）"""
     try:
-        existing = db_client.query("SELECT * FROM etl_task_config WHERE task_id = %s", (task_id,))
+        # 确认任务存在
+        existing = db_client.query(
+            "SELECT * FROM etl_task_config WHERE task_id = %s AND is_current = true",
+            (task_id,)
+        )
         if existing.is_empty():
             raise HTTPException(status_code=404, detail=f"ETL task {task_id} not found")
 
-        now = datetime.now()
-        # 保留原始 created_at
-        created_at = existing["created_at"][0] if "created_at" in existing.columns else now
-        row = pl.DataFrame({
-            "task_id": [config.get("task_id", task_id)],
-            "description": [config.get("description", "")],
-            "script": [config.get("script", "")],
-            "sync_type": [config.get("sync_type", "incremental")],
-            "date_field": [config.get("date_field", "")],
-            "primary_keys_json": [json.dumps(config.get("primary_keys", []))],
-            "table_name": [config.get("table_name", task_id)],
-            "enabled": [config.get("enabled", True)],
-            "created_at": [created_at],
-            "updated_at": [now],
-        })
-        db_client.upsert("etl_task_config", row, ["task_id"])
-        logger.info(f"Updated ETL task {task_id}")
-        return {"status": "success", "message": f"ETL task {task_id} updated"}
+        # 获取当前配置并合并更新
+        current_row = existing.to_dicts()[0]
+
+        # 构建新配置数据（移除版本控制字段）
+        config_data = {
+            "description": config.get("description", current_row.get("description", "")),
+            "script": config.get("script", current_row.get("script", "")),
+            "sync_type": config.get("sync_type", current_row.get("sync_type", "incremental")),
+            "date_field": config.get("date_field", current_row.get("date_field", "")),
+            "primary_keys_json": json.dumps(config.get("primary_keys", [])) if "primary_keys" in config else current_row.get("primary_keys_json", "[]"),
+            "table_name": config.get("table_name", current_row.get("table_name", task_id)),
+        }
+
+        # 使用版本控制创建新版本
+        version = db_client.create_task_version(
+            task_type="etl",
+            task_id=task_id,
+            config_data=config_data,
+            changed_by="api",
+            change_reason="更新 ETL 任务配置"
+        )
+
+        logger.info(f"Updated ETL task {task_id}, new version: {version}")
+        return {
+            "status": "success",
+            "message": f"ETL task {task_id} updated",
+            "version": version
+        }
     except HTTPException:
         raise
     except Exception as e:
