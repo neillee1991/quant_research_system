@@ -29,15 +29,8 @@ load_config() {
     BACKEND_PORT="8000"
     FRONTEND_PORT="3000"
 
-    # 从 docker-compose.yml 解析 DolphinDB 数据卷路径
+    # 默认 DolphinDB 数据目录
     DOLPHINDB_DATA_DIR="/Users/lisheng/Code/application/dolphin"
-    if [ -f "$SCRIPT_DIR/docker-compose.yml" ]; then
-        local vol_line
-        vol_line=$(grep -A5 'dolphindb:' "$SCRIPT_DIR/docker-compose.yml" | grep '/data' | head -1 | sed 's/.*- //' | sed 's/:.*//' | xargs 2>/dev/null)
-        if [ -n "$vol_line" ] && [ "$vol_line" != "prefect_data" ]; then
-            DOLPHINDB_DATA_DIR="$vol_line"
-        fi
-    fi
 
     # 如果 .env 存在，覆盖默认值
     if [ -f "$SCRIPT_DIR/.env" ]; then
@@ -52,6 +45,7 @@ load_config() {
                 DOLPHINDB_PORT)     DOLPHINDB_PORT="$value" ;;
                 DOLPHINDB_USER)     DOLPHINDB_USER="$value" ;;
                 DOLPHINDB_PASSWORD) DOLPHINDB_PASSWORD="$value" ;;
+                DOLPHINDB_DATA_DIR) DOLPHINDB_DATA_DIR="$value" ;;
                 PREFECT_API_URL)    PREFECT_API_URL="$value" ;;
                 REACT_APP_API_BASE_URL) REACT_APP_API_BASE_URL="$value" ;;
                 REACT_APP_PREFECT_URL)  REACT_APP_PREFECT_URL="$value" ;;
@@ -368,7 +362,14 @@ init_database() {
     cd "$SCRIPT_DIR/backend"
     source .venv/bin/activate
 
+    # 步骤 6a: 创建 DolphinDB 数据库（dfs://quant）
     python database/init_dolphindb.py
+
+    # 步骤 6b: 创建元数据表并写入种子任务配置
+    # ensure_meta_tables() 创建 sync_task_config 等维度表
+    # seed_sync_task_config() 写入默认同步任务定义
+    # seed_factor_data_config() 写入因子数据配置
+    python init_meta_tables.py
     print_success "数据库初始化完成"
 }
 

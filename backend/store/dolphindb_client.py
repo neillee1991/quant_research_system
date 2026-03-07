@@ -59,7 +59,7 @@ class DolphinDBClient:
             raise
 
     def _ensure_connected(self):
-        """确保连接可用，断线自动重连"""
+        """确保连接可用，断线自动重连（必须在持有 _lock 的情况下调用）"""
         try:
             # 简单心跳检测
             self._session.run("1+1")
@@ -97,12 +97,11 @@ class DolphinDBClient:
             return f"{value.strftime('%Y.%m.%dT%H:%M:%S')}"
         if isinstance(value, date):
             return f"{value.strftime('%Y.%m.%d')}"
-        # 字符串类型：检查是否为 YYYYMMDD 日期
-        s = str(value)
-        if re.match(r"^\d{8}$", s):
-            converted = DolphinDBClient._convert_date_format(s)
-            return converted
+        # 检查是否是 YYYYMMDD 格式的日期字符串，转换为 DolphinDB DATE 字面量
+        if isinstance(value, str) and re.match(r"^\d{8}$", value):
+            return f"{value[:4]}.{value[4:6]}.{value[6:8]}"
         # 普通字符串，转义双引号
+        s = str(value)
         s = s.replace("\\", "\\\\").replace('"', '\\"')
         return f'"{s}"'
 
@@ -527,6 +526,7 @@ class DolphinDBClient:
             "array(BOOL,0) as mark_limit,"
             "array(STRING,0) as adjust_price,"
             "array(STRING,0) as preprocess,"
+            "array(STRING,0) as run_id,"
             "array(STRING,0) as error_message,"
             "array(TIMESTAMP,0) as created_at)",
             ["factor_id", "created_at"],
@@ -982,6 +982,110 @@ class DolphinDBClient:
         self.upsert("sync_task_config", seed_df, ["task_id"])
         logger.info(f"已写入 {len(tasks)} 条默认同步任务配置")
 
+    def seed_etl_task_config(self) -> None:
+        """
+        如果 etl_task_config 表为空，则写入默认 ETL 任务定义。
+        仅在首次启动时生效，后续可通过 API 增删改。
+        """
+        try:
+            count = self.query("SELECT count(*) as cnt FROM etl_task_config")
+            if not count.is_empty() and count["cnt"][0] > 0:
+                logger.info("etl_task_config 已有数据，跳过 seed")
+                return
+        except Exception:
+            pass
+
+        now = datetime.now()
+        db_meta = self._db_path
+
+        # etl_index_member: 合并申万+中信行业成员（当前有效分类 is_new=Y）
+        script_index_member = (
+            f't_sw = select l1_code, l1_name, l2_code, l2_name, l3_code, l3_name, '
+            f'ts_code, in_date, out_date, "sw" as source '
+            f'from loadTable("{db_meta}", "sync_sw_index_member_Y"); '
+            f't_ci = select l1_code, l1_name, l2_code, l2_name, l3_code, l3_name, '
+            f'ts_code, in_date, out_date, "ci" as source '
+            f'from loadTable("{db_meta}", "sync_ci_index_member_Y"); '
+            f'unionAll([t_sw, t_ci], false)'
+        )
+
+        # etl_index_member_daily: 每只股票每个交易日所属行业（左关联行情表）
+        script_index_member_daily = (
+            f'daily = select trade_date, ts_code '
+            f'from loadTable("dfs://quant_ts", "sync_daily_data"); '
+            f'etl = select ts_code, source, l1_code, l1_name, l2_code, l2_name, l3_code, l3_name, '
+            f'in_date, out_date '
+            f'from loadTable("{db_meta}", "etl_index_member"); '
+            f'joined = lj(daily, etl, `ts_code); '
+            f'select trade_date, ts_code, source, l1_code, l1_name, l2_code, l2_name, l3_code, l3_name '
+            f'from joined '
+            f'where isNull(in_date) '
+            f'or (trade_date >= temporalParse(in_date, "yyyyMMdd") '
+            f'and (isNull(out_date) or out_date = "" '
+            f'or trade_date < temporalParse(out_date, "yyyyMMdd")))'
+        )
+
+        # etl_stock_daily_info: 行情 + 行业 + 基本面合并宽表
+        script_stock_daily_info = (
+            f'daily = select trade_date, ts_code, open, high, low, close, pre_close, '
+            f'pct_chg, vol, amount '
+            f'from loadTable("dfs://quant_ts", "sync_daily_data"); '
+            f'basic = select trade_date, ts_code, pe_ttm, pb, total_mv, circ_mv, turnover_rate '
+            f'from loadTable("dfs://quant_ts", "sync_daily_basic"); '
+            f'ind = select trade_date, ts_code, source, l1_code, l1_name, l2_code, l2_name, l3_code, l3_name '
+            f'from loadTable("{db_meta}", "etl_index_member_daily"); '
+            f't1 = lj(daily, basic, `trade_date`ts_code); '
+            f'lj(t1, ind, `trade_date`ts_code)'
+        )
+
+        tasks = [
+            {
+                "task_id": "etl_index_member",
+                "description": "合并申万+中信行业成员表（当前有效分类）",
+                "script": script_index_member,
+                "sync_type": "full",
+                "date_field": "",
+                "primary_keys": ["ts_code", "source", "l3_code"],
+                "table_name": "etl_index_member",
+                "enabled": True,
+            },
+            {
+                "task_id": "etl_index_member_daily",
+                "description": "每只股票每个交易日所属行业（行情左关联行业成员）",
+                "script": script_index_member_daily,
+                "sync_type": "full",
+                "date_field": "trade_date",
+                "primary_keys": ["trade_date", "ts_code", "source", "l3_code"],
+                "table_name": "etl_index_member_daily",
+                "enabled": True,
+            },
+            {
+                "task_id": "etl_stock_daily_info",
+                "description": "行情+基本面+行业宽表（每日全量刷新）",
+                "script": script_stock_daily_info,
+                "sync_type": "full",
+                "date_field": "trade_date",
+                "primary_keys": ["trade_date", "ts_code", "source"],
+                "table_name": "etl_stock_daily_info",
+                "enabled": True,
+            },
+        ]
+
+        seed_df = pl.DataFrame({
+            "task_id": [t["task_id"] for t in tasks],
+            "description": [t["description"] for t in tasks],
+            "script": [t["script"] for t in tasks],
+            "sync_type": [t["sync_type"] for t in tasks],
+            "date_field": [t["date_field"] for t in tasks],
+            "primary_keys_json": [json.dumps(t["primary_keys"]) for t in tasks],
+            "table_name": [t["table_name"] for t in tasks],
+            "enabled": [t["enabled"] for t in tasks],
+            "created_at": [now] * len(tasks),
+            "updated_at": [now] * len(tasks),
+        })
+        self.upsert("etl_task_config", seed_df, ["task_id"])
+        logger.info(f"已写入 {len(tasks)} 条默认 ETL 任务配置")
+
     def seed_factor_data_config(self) -> None:
         """
         如果 factor_data_config 表为空，则写入默认字段映射。
@@ -1034,6 +1138,243 @@ class DolphinDBClient:
         })
         self.upsert("factor_data_config", seed_df, ["field_key"])
         logger.info(f"已写入 {len(mappings)} 条默认因子数据配置")
+
+    def seed_factor_metadata(self) -> None:
+        """
+        如果 factor_metadata 表为空，则写入默认种子因子定义。
+        仅在首次启动时生效，后续可通过 API 增删改。
+        """
+        import json
+        try:
+            count = self.query("SELECT count(*) as cnt FROM factor_metadata")
+            if not count.is_empty() and count["cnt"][0] > 0:
+                logger.info("factor_metadata 已有数据，跳过 seed")
+                return
+        except Exception:
+            pass
+
+        now = datetime.now()
+        factors = [
+            # ==================== 技术因子（依赖 sync_daily_data）====================
+            {
+                "factor_id": "factor_ma_5",
+                "description": "5日移动平均线",
+                "category": "technical",
+                "compute_mode": "incremental",
+                "storage_target": "factor_values",
+                "depends_on": json.dumps(["sync_daily_data"]),
+                "params": json.dumps({"window": 5}),
+                "code": (
+                    "import polars as pl\n"
+                    "def compute(df, params):\n"
+                    "    window = params.get('window', 5)\n"
+                    "    return (\n"
+                    "        df.sort(['ts_code', 'trade_date'])\n"
+                    "        .with_columns(\n"
+                    "            pl.col('close').rolling_mean(window_size=window)\n"
+                    "            .over('ts_code')\n"
+                    "            .alias('factor_value')\n"
+                    "        )\n"
+                    "        .select(['ts_code', 'trade_date', 'factor_value'])\n"
+                    "    )\n"
+                ),
+            },
+            {
+                "factor_id": "factor_ma_20",
+                "description": "20日移动平均线",
+                "category": "technical",
+                "compute_mode": "incremental",
+                "storage_target": "factor_values",
+                "depends_on": json.dumps(["sync_daily_data"]),
+                "params": json.dumps({"window": 20}),
+                "code": (
+                    "import polars as pl\n"
+                    "def compute(df, params):\n"
+                    "    window = params.get('window', 20)\n"
+                    "    return (\n"
+                    "        df.sort(['ts_code', 'trade_date'])\n"
+                    "        .with_columns(\n"
+                    "            pl.col('close').rolling_mean(window_size=window)\n"
+                    "            .over('ts_code')\n"
+                    "            .alias('factor_value')\n"
+                    "        )\n"
+                    "        .select(['ts_code', 'trade_date', 'factor_value'])\n"
+                    "    )\n"
+                ),
+            },
+            {
+                "factor_id": "factor_momentum_20",
+                "description": "20日价格动量（当日收盘价 / 20日前收盘价 - 1）",
+                "category": "momentum",
+                "compute_mode": "incremental",
+                "storage_target": "factor_values",
+                "depends_on": json.dumps(["sync_daily_data"]),
+                "params": json.dumps({"window": 20}),
+                "code": (
+                    "import polars as pl\n"
+                    "def compute(df, params):\n"
+                    "    window = params.get('window', 20)\n"
+                    "    return (\n"
+                    "        df.sort(['ts_code', 'trade_date'])\n"
+                    "        .with_columns(\n"
+                    "            (pl.col('close') / pl.col('close').shift(window).over('ts_code') - 1)\n"
+                    "            .alias('factor_value')\n"
+                    "        )\n"
+                    "        .select(['ts_code', 'trade_date', 'factor_value'])\n"
+                    "    )\n"
+                ),
+            },
+            {
+                "factor_id": "factor_volatility_20",
+                "description": "20日收益率波动率（年化）",
+                "category": "technical",
+                "compute_mode": "incremental",
+                "storage_target": "factor_values",
+                "depends_on": json.dumps(["sync_daily_data"]),
+                "params": json.dumps({"window": 20}),
+                "code": (
+                    "import polars as pl\n"
+                    "def compute(df, params):\n"
+                    "    window = params.get('window', 20)\n"
+                    "    return (\n"
+                    "        df.sort(['ts_code', 'trade_date'])\n"
+                    "        .with_columns(\n"
+                    "            pl.col('close').pct_change().over('ts_code').alias('ret')\n"
+                    "        )\n"
+                    "        .with_columns(\n"
+                    "            (pl.col('ret').rolling_std(window_size=window).over('ts_code') * (252 ** 0.5))\n"
+                    "            .alias('factor_value')\n"
+                    "        )\n"
+                    "        .select(['ts_code', 'trade_date', 'factor_value'])\n"
+                    "    )\n"
+                ),
+            },
+            {
+                "factor_id": "factor_volatility_10",
+                "description": "10日收益率波动率（年化）",
+                "category": "technical",
+                "compute_mode": "incremental",
+                "storage_target": "factor_values",
+                "depends_on": json.dumps(["sync_daily_data"]),
+                "params": json.dumps({"window": 10}),
+                "code": (
+                    "import polars as pl\n"
+                    "def compute(df, params):\n"
+                    "    window = params.get('window', 10)\n"
+                    "    return (\n"
+                    "        df.sort(['ts_code', 'trade_date'])\n"
+                    "        .with_columns(\n"
+                    "            pl.col('close').pct_change().over('ts_code').alias('ret')\n"
+                    "        )\n"
+                    "        .with_columns(\n"
+                    "            (pl.col('ret').rolling_std(window_size=window).over('ts_code') * (252 ** 0.5))\n"
+                    "            .alias('factor_value')\n"
+                    "        )\n"
+                    "        .select(['ts_code', 'trade_date', 'factor_value'])\n"
+                    "    )\n"
+                ),
+            },
+            {
+                "factor_id": "factor_rsi_14",
+                "description": "14日相对强弱指数（RSI，Wilder EWM法）",
+                "category": "technical",
+                "compute_mode": "incremental",
+                "storage_target": "factor_values",
+                "depends_on": json.dumps(["sync_daily_data"]),
+                "params": json.dumps({"window": 14}),
+                "code": (
+                    "import polars as pl\n"
+                    "def compute(df, params):\n"
+                    "    window = params.get('window', 14)\n"
+                    "    alpha = 1.0 / window\n"
+                    "    return (\n"
+                    "        df.sort(['ts_code', 'trade_date'])\n"
+                    "        .with_columns(\n"
+                    "            pl.col('close').diff().over('ts_code').alias('delta')\n"
+                    "        )\n"
+                    "        .with_columns(\n"
+                    "            pl.when(pl.col('delta') > 0).then(pl.col('delta')).otherwise(0.0).alias('gain'),\n"
+                    "            pl.when(pl.col('delta') < 0).then(-pl.col('delta')).otherwise(0.0).alias('loss'),\n"
+                    "        )\n"
+                    "        .with_columns(\n"
+                    "            pl.col('gain').ewm_mean(alpha=alpha, adjust=False).over('ts_code').alias('avg_gain'),\n"
+                    "            pl.col('loss').ewm_mean(alpha=alpha, adjust=False).over('ts_code').alias('avg_loss'),\n"
+                    "        )\n"
+                    "        .with_columns(\n"
+                    "            (100.0 - 100.0 / (1.0 + pl.col('avg_gain') / (pl.col('avg_loss') + 1e-10)))\n"
+                    "            .alias('factor_value')\n"
+                    "        )\n"
+                    "        .select(['ts_code', 'trade_date', 'factor_value'])\n"
+                    "    )\n"
+                ),
+            },
+            # ==================== 估值因子（依赖 sync_daily_basic）====================
+            {
+                "factor_id": "factor_pe_rank",
+                "description": "PE百分位排名（截面，0~1）",
+                "category": "value",
+                "compute_mode": "incremental",
+                "storage_target": "factor_values",
+                "depends_on": json.dumps(["sync_daily_basic"]),
+                "params": json.dumps({}),
+                "code": (
+                    "import polars as pl\n"
+                    "def compute(df, params):\n"
+                    "    return (\n"
+                    "        df.sort(['trade_date', 'ts_code'])\n"
+                    "        .with_columns(\n"
+                    "            pl.col('pe_ttm').rank(method='average').over('trade_date').alias('_rank'),\n"
+                    "            pl.col('pe_ttm').count().over('trade_date').alias('_total'),\n"
+                    "        )\n"
+                    "        .with_columns(\n"
+                    "            (pl.col('_rank') / pl.col('_total')).alias('factor_value')\n"
+                    "        )\n"
+                    "        .select(['ts_code', 'trade_date', 'factor_value'])\n"
+                    "    )\n"
+                ),
+            },
+            {
+                "factor_id": "factor_pb_rank",
+                "description": "PB百分位排名（截面，0~1）",
+                "category": "value",
+                "compute_mode": "incremental",
+                "storage_target": "factor_values",
+                "depends_on": json.dumps(["sync_daily_basic"]),
+                "params": json.dumps({}),
+                "code": (
+                    "import polars as pl\n"
+                    "def compute(df, params):\n"
+                    "    return (\n"
+                    "        df.sort(['trade_date', 'ts_code'])\n"
+                    "        .with_columns(\n"
+                    "            pl.col('pb').rank(method='average').over('trade_date').alias('_rank'),\n"
+                    "            pl.col('pb').count().over('trade_date').alias('_total'),\n"
+                    "        )\n"
+                    "        .with_columns(\n"
+                    "            (pl.col('_rank') / pl.col('_total')).alias('factor_value')\n"
+                    "        )\n"
+                    "        .select(['ts_code', 'trade_date', 'factor_value'])\n"
+                    "    )\n"
+                ),
+            },
+        ]
+
+        seed_df = pl.DataFrame({
+            "factor_id": [f["factor_id"] for f in factors],
+            "description": [f["description"] for f in factors],
+            "category": [f["category"] for f in factors],
+            "compute_mode": [f["compute_mode"] for f in factors],
+            "storage_target": [f["storage_target"] for f in factors],
+            "depends_on": [f["depends_on"] for f in factors],
+            "params": [f["params"] for f in factors],
+            "code": [f["code"] for f in factors],
+            "last_computed_date": [""] * len(factors),
+            "last_computed_at": [now] * len(factors),
+            "created_at": [now] * len(factors),
+            "updated_at": [now] * len(factors),
+        })
+        self.upsert("factor_metadata", seed_df, ["factor_id"])
+        logger.info(f"已写入 {len(factors)} 条默认种子因子定义")
 
     def _resolve_db_path(self, table_name: str) -> str:
         """根据表名返回所属数据库路径"""
@@ -1111,7 +1452,7 @@ class DolphinDBClient:
         for col in date_cols:
             if col in df.columns and df[col].dtype == pl.Utf8:
                 df = df.with_columns(
-                    pl.col(col).str.to_date("%Y%m%d").alias(col)
+                    pl.col(col).str.to_date("%Y%m%d", strict=False).alias(col)
                 )
 
         pdf = df.select(select_columns).to_pandas() if select_columns else df.to_pandas()
@@ -1259,9 +1600,11 @@ class DolphinDBClient:
         从 meta 数据库的 sync_log 表中查询指定数据源和类型的最后同步日期
         """
         try:
+            safe_source = self._escape_value(source)
+            safe_data_type = self._escape_value(data_type)
             sql = (
                 f'SELECT last_date FROM loadTable("{self._db_path}", "sync_log") '
-                f'WHERE source = "{source}" AND data_type = "{data_type}" LIMIT 1'
+                f'WHERE source = {safe_source} AND data_type = {safe_data_type} LIMIT 1'
             )
             with self._lock:
                 self._ensure_connected()
@@ -1299,10 +1642,12 @@ class DolphinDBClient:
             )
             with self._lock:
                 self._ensure_connected()
+                safe_source = self._escape_value(source)
+                safe_data_type = self._escape_value(data_type)
                 # 先删除旧记录
                 self._session.run(
                     f'sync_log_handle = loadTable("{self._db_path}", "sync_log");'
-                    f'delete from sync_log_handle where source = "{source}" and data_type = "{data_type}"'
+                    f'delete from sync_log_handle where source = {safe_source} and data_type = {safe_data_type}'
                 )
                 # 再插入新记录
                 tmp_var = f"sync_log_{threading.current_thread().ident}"
@@ -1334,5 +1679,21 @@ class DolphinDBClient:
                     self._session = None
 
 
-# 单例实例
-db_client = DolphinDBClient()
+# 单例实例（延迟初始化，避免 import 时连接失败导致整个应用启动失败）
+_db_client_instance: Optional["DolphinDBClient"] = None
+
+
+def _get_db_client() -> "DolphinDBClient":
+    global _db_client_instance
+    if _db_client_instance is None:
+        _db_client_instance = DolphinDBClient()
+    return _db_client_instance
+
+
+class _DBClientProxy:
+    """Lazy proxy so existing `db_client.xxx` call sites continue to work."""
+    def __getattr__(self, name):
+        return getattr(_get_db_client(), name)
+
+
+db_client = _DBClientProxy()

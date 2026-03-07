@@ -105,10 +105,13 @@ class DataProcessor:
             .alias("_is_gap")
         )
 
-        # 用 rolling sum 向后扩散 gap 标记：如果最近 window 行内有 gap，则标记为需要置空
+        # 向前扩散 gap 标记：gap 行及其后 window-1 行置空
+        # rolling_sum 是向后看的，先 reverse，rolling_sum，再 reverse 回来实现向前传播
         df = df.with_columns(
             pl.col("_is_gap")
+            .reverse()
             .rolling_sum(window_size=window, min_periods=1)
+            .reverse()
             .over("ts_code")
             .alias("_near_gap")
         )

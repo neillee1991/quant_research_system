@@ -7,7 +7,12 @@ class BaseOperator(ABC):
 
     name: str = ""
     description: str = ""
-    params: dict = {}
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        # Give each subclass its own params dict to avoid shared mutable state
+        if 'params' not in cls.__dict__:
+            cls.params = {}
 
     @abstractmethod
     def compute(self, df: pl.DataFrame, **kwargs) -> pl.DataFrame:

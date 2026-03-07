@@ -318,8 +318,10 @@ class ProductionEngine:
                 for c in price_cols
             ])
 
-            # 清理临时列
-            df = df.drop([adj_column, "_base_adj"])
+            # 清理临时列（只删除确实存在的列）
+            cols_to_drop = [c for c in [adj_column, "_base_adj"] if c in df.columns]
+            if cols_to_drop:
+                df = df.drop(cols_to_drop)
             logger.debug(f"{'前' if adjust_type == 'forward' else '后'}复权处理完成")
             return df
         except Exception as e:
@@ -533,10 +535,13 @@ class ProductionEngine:
                     result = result.join(status_df, on=["ts_code", "trade_date"], how="left")
                     result = result.with_columns(pl.col("is_suspend").fill_null(0))
 
-                    # 用 rolling_sum 向后扩散：停牌日及其后 window 行内置空
+                    # 向前扩散：停牌日及其后 window-1 行置空
+                    # rolling_sum 是向后看的，所以先 reverse，rolling_sum，再 reverse 回来
                     result = result.with_columns(
                         pl.col("is_suspend")
+                        .reverse()
                         .rolling_sum(window_size=window, min_periods=1)
+                        .reverse()
                         .over("ts_code")
                         .alias("_near_susp")
                     )
@@ -813,7 +818,7 @@ class ProductionEngine:
             # 列顺序必须与 factor_task_run 表定义一致：
             # factor_id, mode, status, start_date, end_date, rows_affected,
             # duration_seconds, filter_st, filter_new_stock, new_stock_days,
-            # handle_suspension, mark_limit, adjust_price, preprocess, error_message, created_at
+            # handle_suspension, mark_limit, adjust_price, preprocess, run_id, error_message, created_at
             meta_db = self.db._db_path
             with self.db._lock:
                 self.db._ensure_connected()
@@ -834,7 +839,8 @@ class ProductionEngine:
                     f'[{mark_limit}] as mark_limit, '
                     f'["{adjust_price}"] as adjust_price, '
                     f'["{opts_str}"] as preprocess, '
-                    f'["{run_id}"] as error_message, '
+                    f'["{run_id}"] as run_id, '
+                    f'[""] as error_message, '
                     f'ts_val as created_at'
                     f');'
                     f'ptr = loadTable("{meta_db}", "factor_task_run");'
@@ -856,12 +862,20 @@ class ProductionEngine:
         elapsed = (datetime.now() - started_at).total_seconds()
         try:
             meta_db = self.db._db_path
-            err = (error_msg or "").replace("\\", "\\\\").replace('"', '\\"')[:500] if error_msg else ""
+            if error_msg:
+                err = (error_msg
+                       .replace("\\", "\\\\")
+                       .replace('"', '\\"')
+                       .replace(";", "")
+                       .replace("`", "")
+                       [:500])
+            else:
+                err = ""
             self.db.execute(
                 f'ptr = loadTable("{meta_db}", "factor_task_run");'
                 f'update ptr set status = "{status}", rows_affected = {rows}, '
                 f'duration_seconds = {elapsed}, error_message = "{err}" '
-                f'where error_message = "{run_id}"'
+                f'where run_id = "{run_id}"'
             )
         except Exception as e:
             import traceback

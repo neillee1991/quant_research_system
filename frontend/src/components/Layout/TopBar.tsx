@@ -6,6 +6,7 @@ import { useThemeStore } from '../../store';
 
 const routeNameMap: Record<string, string> = {
   '/': '数据中心',
+  '/market': '行情中心',
   '/factor': '因子中心',
   '/strategy': '策略中心',
   '/scheduler': '调度中心',

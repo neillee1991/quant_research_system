@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect } from 'react';
 import ReactFlow, {
   Background,
   Controls,
@@ -32,6 +32,14 @@ const FlowEditor: React.FC = () => {
   const [localNodes, setLocalNodes, onNodesChange] = useNodesState(nodes);
   const [localEdges, setLocalEdges, onEdgesChange] = useEdgesState(edges);
   const { setResult, setLoading } = useBacktestStore();
+
+  useEffect(() => {
+    setNodes(localNodes);
+  }, [localNodes, setNodes]);
+
+  useEffect(() => {
+    setEdges(localEdges);
+  }, [localEdges, setEdges]);
 
   const onConnect = useCallback(
     (params: Connection | Edge) => setLocalEdges((eds) => addEdge(params, eds)),

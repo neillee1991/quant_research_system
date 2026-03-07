@@ -192,7 +192,7 @@ class FlowParser:
         return df
 
     def _topo_sort(self, nodes: dict, edges: list) -> list[str]:
-        """Kahn's algorithm topological sort."""
+        """Kahn's algorithm topological sort. Raises ValueError if a cycle is detected."""
         from collections import deque, defaultdict
         in_degree = {nid: 0 for nid in nodes}
         adj = defaultdict(list)
@@ -209,4 +209,9 @@ class FlowParser:
                 in_degree[neighbor] -= 1
                 if in_degree[neighbor] == 0:
                     queue.append(neighbor)
+
+        if len(order) != len(nodes):
+            cycle_nodes = set(nodes.keys()) - set(order)
+            raise ValueError(f"图中存在环: {cycle_nodes}")
+
         return order

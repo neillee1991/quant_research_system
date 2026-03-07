@@ -7,7 +7,7 @@ interface Props {
 }
 
 let idCounter = 100;
-const uid = () => String(++idCounter);
+const uid = () => crypto.randomUUID();
 
 const Toolbar: React.FC<Props> = ({ onAddNode }) => {
   const addDataInput = () =>

@@ -1,5 +1,4 @@
 import polars as pl
-import numpy as np
 
 
 class TechnicalFactors:
@@ -23,7 +22,9 @@ class TechnicalFactors:
         loss = (-delta).clip(lower_bound=0)
         avg_gain = gain.ewm_mean(span=window, adjust=False)
         avg_loss = loss.ewm_mean(span=window, adjust=False)
-        rs = avg_gain / avg_loss.replace(0, 1e-10)
+        # fill_nan(0) then add epsilon to avoid division by zero
+        safe_loss = avg_loss.fill_nan(0.0) + 1e-10
+        rs = avg_gain / safe_loss
         return 100 - (100 / (1 + rs))
 
     @staticmethod
@@ -62,10 +63,12 @@ class TechnicalFactors:
 
     @staticmethod
     def atr(high: pl.Series, low: pl.Series, close: pl.Series, window: int = 14) -> pl.Series:
-        """Average True Range."""
-        prev_close = close.shift(1)
-        tr = pl.Series([max(h - l, abs(h - pc), abs(l - pc))
-                        for h, l, pc in zip(high, low, prev_close.fill_null(close[0]))])
+        """Average True Range (vectorized with Polars)."""
+        prev_close = close.shift(1).fill_null(close)
+        hl = high - low
+        hpc = (high - prev_close).abs()
+        lpc = (low - prev_close).abs()
+        tr = pl.max_horizontal([hl, hpc, lpc])
         return tr.ewm_mean(span=window, adjust=False)
 
     @staticmethod

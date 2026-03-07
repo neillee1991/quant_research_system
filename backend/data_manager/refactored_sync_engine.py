@@ -127,5 +127,21 @@ class RefactoredSyncEngine:
         self.config_manager.update_task(task_id, updates)
 
 
-# 全局实例（保持向后兼容）
-sync_engine = RefactoredSyncEngine()
+# 全局实例（延迟初始化，避免 import 时连接失败导致整个应用启动失败）
+_sync_engine_instance: Optional[RefactoredSyncEngine] = None
+
+
+def _get_sync_engine() -> RefactoredSyncEngine:
+    global _sync_engine_instance
+    if _sync_engine_instance is None:
+        _sync_engine_instance = RefactoredSyncEngine()
+    return _sync_engine_instance
+
+
+class _LazyProxy:
+    """Lazy proxy so existing `sync_engine.xxx` call sites continue to work."""
+    def __getattr__(self, name):
+        return getattr(_get_sync_engine(), name)
+
+
+sync_engine = _LazyProxy()

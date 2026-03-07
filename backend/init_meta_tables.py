@@ -3,7 +3,8 @@
 手动初始化 DolphinDB 元数据表
 """
 import sys
-sys.path.insert(0, '/Users/bytedance/code/quant_research_system/backend')
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from store.dolphindb_client import db_client
 from app.core.logger import logger
@@ -23,6 +24,10 @@ def main():
         # 写入因子数据配置
         db_client.seed_factor_data_config()
         print("✓ 因子数据配置种子数据已写入")
+
+        # 写入默认种子因子定义
+        db_client.seed_factor_metadata()
+        print("✓ 种子因子定义已写入")
 
         print("\n所有元数据表初始化完成！")
 

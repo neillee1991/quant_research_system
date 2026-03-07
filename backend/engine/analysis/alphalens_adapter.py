@@ -264,9 +264,11 @@ class AlphalensAdapter:
     def _serialize_ic_ts(self, ic: pd.DataFrame) -> List[Dict]:
         """序列化 IC 时间序列"""
         ic_reset = ic.reset_index()
+        # The index column name may vary (e.g. 'date', 'Date', or the first column)
+        date_col = ic_reset.columns[0]
         return [
             {
-                'date': row['date'].strftime('%Y%m%d'),
+                'date': row[date_col].strftime('%Y%m%d') if hasattr(row[date_col], 'strftime') else str(row[date_col]),
                 **{f'ic_{col}': float(row[col]) if not pd.isna(row[col]) else None
                    for col in ic.columns}
             }

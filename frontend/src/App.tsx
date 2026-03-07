@@ -1,5 +1,5 @@
 import React from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AppLayout } from './components/Layout';
 import MarketCenter from './pages/MarketCenter';
 import DataCenter from './pages/DataCenter';
@@ -19,6 +19,7 @@ const App: React.FC = () => (
         <Route path="/strategy" element={<StrategyCenter />} />
         <Route path="/scheduler" element={<SchedulerCenter />} />
         <Route path="/index-pool" element={<IndexPoolCenter />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </AppLayout>
   </BrowserRouter>

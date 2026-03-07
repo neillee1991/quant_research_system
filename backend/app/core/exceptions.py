@@ -279,6 +279,6 @@ async def general_exception_handler(request: Request, exc: Exception) -> JSONRes
         content={
             "error": "InternalServerError",
             "message": "An unexpected error occurred",
-            "detail": str(exc) if logger.level == "DEBUG" else "Internal server error"
+            "detail": str(exc) if logger.isEnabledFor(10) else "Internal server error"
         }
     )

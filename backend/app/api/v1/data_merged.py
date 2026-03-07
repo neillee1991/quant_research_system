@@ -15,6 +15,7 @@ from data_manager.refactored_sync_engine import sync_engine
 from app.core.config import settings
 from app.core.logger import logger
 from app.core.utils import DateUtils
+from app.core.cache import api_cache
 
 
 # Polars 类型名 -> DolphinDB 类型名（用于 ETL 自动建表和脚本测试）
@@ -82,10 +83,16 @@ def _check_shared_and_drop_table(
     # 查询两张配置表中引用该表的其他任务
     shared_tasks = []
     for config_table in ("sync_task_config", "etl_task_config"):
-        exclude_clause = f" AND task_id != '{exclude_task_id}'" if config_table == exclude_config_table else ""
-        others = db_client.query(
-            f"SELECT task_id FROM {config_table} WHERE table_name = '{table_name}'{exclude_clause}"
-        )
+        if config_table == exclude_config_table:
+            others = db_client.query(
+                f"SELECT task_id FROM {config_table} WHERE table_name = %s AND task_id != %s",
+                (table_name, exclude_task_id)
+            )
+        else:
+            others = db_client.query(
+                f"SELECT task_id FROM {config_table} WHERE table_name = %s",
+                (table_name,)
+            )
         if not others.is_empty():
             shared_tasks += others["task_id"].to_list()
 
@@ -104,11 +111,16 @@ def _check_shared_and_drop_table(
 @router.get("/data/stocks")
 def list_stocks():
     """获取股票列表"""
+    cached = api_cache.get("data:stocks")
+    if cached is not None:
+        return cached
     try:
         if not db_client.table_exists("sync_stock_basic"):
             return {"stocks": []}
         df = db_client.query("SELECT ts_code FROM sync_stock_basic ORDER BY ts_code")
-        return {"stocks": df["ts_code"].to_list() if not df.is_empty() else []}
+        result = {"stocks": df["ts_code"].to_list() if not df.is_empty() else []}
+        api_cache.set("data:stocks", result, ttl=300)
+        return result
     except Exception as e:
         logger.error(f"Failed to list stocks: {e}")
         return {"stocks": []}
@@ -149,6 +161,9 @@ def list_sync_tasks():
 
     返回系统中配置的所有数据同步任务，包括任务状态、同步类型等信息
     """
+    cached = api_cache.get("data:sync:tasks")
+    if cached is not None:
+        return cached
     try:
         tasks = sync_engine.get_all_tasks()
         task_list = [
@@ -162,7 +177,9 @@ def list_sync_tasks():
             )
             for t in tasks
         ]
-        return SyncTaskListResponse(tasks=task_list, total=len(task_list))
+        result = SyncTaskListResponse(tasks=task_list, total=len(task_list))
+        api_cache.set("data:sync:tasks", result, ttl=60)
+        return result
     except Exception as e:
         logger.error(f"Failed to list sync tasks: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -269,9 +286,12 @@ def get_sync_status(
             conditions.append("data_type = %s")
             params.append(data_type)
         if start_date:
-            # 使用 date() 提取日期部分进行比较，DolphinDB 日期格式: YYYY.MM.DD
+            if not start_date.isdigit() or len(start_date) != 8:
+                raise HTTPException(status_code=400, detail="start_date must be YYYYMMDD")
             conditions.append(f"date(created_at) >= {start_date[:4]}.{start_date[4:6]}.{start_date[6:8]}")
         if end_date:
+            if not end_date.isdigit() or len(end_date) != 8:
+                raise HTTPException(status_code=400, detail="end_date must be YYYYMMDD")
             conditions.append(f"date(created_at) <= {end_date[:4]}.{end_date[4:6]}.{end_date[6:8]}")
 
         where_clause = " AND ".join(conditions) if conditions else ""
@@ -332,6 +352,66 @@ def get_task_status(task_id: str):
         raise
     except Exception as e:
         logger.error(f"Failed to get task status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/data/sync/tasks/status-batch")
+def get_all_task_statuses():
+    """
+    批量获取所有任务的状态和调度信息（替代前端 N+1 循环请求）
+
+    一次请求返回所有任务的 status + schedule + table_latest_date，
+    避免前端对每个任务分别调用 /status/{task_id} 和 /scheduler/task/{task_id}。
+    """
+    try:
+        tasks = sync_engine.get_all_tasks()
+        if not tasks:
+            return {"status": "success", "data": {}}
+
+        # 批量查各表最新日期（一条 SQL 替代 N 次查询）
+        table_latest: dict[str, str | None] = {}
+        try:
+            table_date_pairs: list[tuple[str, str]] = []
+            for t in tasks:
+                tbl = t.get("table_name", "")
+                date_field = t.get("date_field", "trade_date") or "trade_date"
+                if tbl:
+                    table_date_pairs.append((tbl, date_field))
+
+            # 去重，按表名分组（同一张表可能被多个任务引用）
+            seen: set[str] = set()
+            for tbl, date_field in table_date_pairs:
+                if tbl in seen:
+                    continue
+                seen.add(tbl)
+                try:
+                    db_path = db_client._resolve_db_path(tbl)
+                    df = db_client.query(
+                        f'SELECT MAX({date_field}) as max_date FROM loadTable("{db_path}", "{tbl}")'
+                    )
+                    table_latest[tbl] = df["max_date"][0] if not df.is_empty() and df["max_date"][0] else None
+                except Exception:
+                    table_latest[tbl] = None
+        except Exception as e:
+            logger.warning(f"Batch latest-date query failed: {e}")
+
+        # 组装结果
+        result: dict[str, dict] = {}
+        for t in tasks:
+            task_id = t["task_id"]
+            tbl = t.get("table_name", "")
+            status_info = sync_engine.get_task_status(task_id)
+            status_info["table_latest_date"] = table_latest.get(tbl)
+            result[task_id] = {
+                **status_info,
+                "schedule": t.get("schedule"),
+                "cron_expression": t.get("cron_expression"),
+                "enabled": t.get("enabled", False),
+            }
+
+        return {"status": "success", "data": result}
+    except Exception as e:
+        logger.error(f"Failed to get batch task statuses: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -549,7 +629,7 @@ def update_task_config(task_id: str, config: dict):
     """
     try:
         # 确认任务存在
-        existing = db_client.query(f"SELECT * FROM sync_task_config WHERE task_id = '{task_id}'")
+        existing = db_client.query("SELECT * FROM sync_task_config WHERE task_id = %s", (task_id,))
         if existing.is_empty():
             raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
 
@@ -597,7 +677,7 @@ def create_task(config: dict):
                 raise HTTPException(status_code=400, detail=f"Missing required field: {field}")
 
         # 检查任务ID是否已存在
-        existing = db_client.query(f"SELECT task_id FROM sync_task_config WHERE task_id = '{config['task_id']}'")
+        existing = db_client.query("SELECT task_id FROM sync_task_config WHERE task_id = %s", (config['task_id'],))
         if not existing.is_empty():
             raise HTTPException(status_code=400, detail=f"Task {config['task_id']} already exists")
 
@@ -620,6 +700,7 @@ def create_task(config: dict):
         })
         db_client.upsert("sync_task_config", row, ["task_id"])
         sync_engine.config_manager.reload()
+        api_cache.invalidate("data:sync:tasks")
 
         logger.info(f"Created new task {config['task_id']}")
         return {"status": "success", "message": f"Task {config['task_id']} created"}
@@ -640,7 +721,7 @@ def delete_task(task_id: str, drop_table: bool = False):
     """
     try:
         # 确认任务存在并获取表名
-        existing = db_client.query(f"SELECT task_id, table_name FROM sync_task_config WHERE task_id = '{task_id}'")
+        existing = db_client.query("SELECT task_id, table_name FROM sync_task_config WHERE task_id = %s", (task_id,))
         if existing.is_empty():
             raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
 
@@ -651,8 +732,10 @@ def delete_task(task_id: str, drop_table: bool = False):
             table_dropped = _check_shared_and_drop_table(table_name, task_id, "sync_task_config")
 
         # 从数据库删除配置
-        db_client.execute(f"DELETE FROM sync_task_config WHERE task_id = '{task_id}'")
+        db_client.execute("DELETE FROM sync_task_config WHERE task_id = %s", (task_id,))
         sync_engine.config_manager.reload()
+        api_cache.invalidate("data:sync:tasks")
+        api_cache.invalidate("data:tables")
 
         msg = f"Task {task_id} deleted"
         if table_dropped:
@@ -748,12 +831,17 @@ def list_tables():
 
     返回 DolphinDB 中所有已知表的名称、行数和列信息
     """
+    cached = api_cache.get("data:tables")
+    if cached is not None:
+        return cached
     try:
         tables_info = db_client.list_tables()
-        return {
+        result = {
             "tables": tables_info,
             "total": len(tables_info)
         }
+        api_cache.set("data:tables", result, ttl=120)
+        return result
     except Exception as e:
         logger.error(f"Failed to list tables: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -775,9 +863,13 @@ def execute_query(
     - 不允许 DROP, DELETE, UPDATE, INSERT 等修改操作
     """
     try:
+        import re as _re
         # 安全检查：只允许 SELECT 查询
         sql_upper = sql.strip().upper()
-        dangerous_keywords = ['DROP', 'DELETE', 'UPDATE', 'INSERT', 'ALTER', 'CREATE', 'TRUNCATE']
+        dangerous_keywords = [
+            'DROP', 'DELETE', 'UPDATE', 'INSERT', 'ALTER', 'CREATE', 'TRUNCATE',
+            'DROPTABLE', 'DROPDATABASE', 'DROPPARTITION', 'EXEC', 'EXECUTE',
+        ]
 
         if not sql_upper.startswith('SELECT'):
             raise HTTPException(
@@ -786,7 +878,7 @@ def execute_query(
             )
 
         for keyword in dangerous_keywords:
-            if keyword in sql_upper:
+            if _re.search(rf'\b{keyword}\b', sql_upper):
                 raise HTTPException(
                     status_code=400,
                     detail=f"Dangerous keyword '{keyword}' is not allowed"
@@ -957,7 +1049,7 @@ def create_etl_task(config: dict):
         if not task_id:
             raise HTTPException(status_code=400, detail="Missing required field: task_id")
 
-        existing = db_client.query(f"SELECT task_id FROM etl_task_config WHERE task_id = '{task_id}'")
+        existing = db_client.query("SELECT task_id FROM etl_task_config WHERE task_id = %s", (task_id,))
         if not existing.is_empty():
             raise HTTPException(status_code=400, detail=f"ETL task {task_id} already exists")
 
@@ -988,7 +1080,7 @@ def create_etl_task(config: dict):
 def update_etl_task(task_id: str, config: dict):
     """更新 ETL 任务"""
     try:
-        existing = db_client.query(f"SELECT * FROM etl_task_config WHERE task_id = '{task_id}'")
+        existing = db_client.query("SELECT * FROM etl_task_config WHERE task_id = %s", (task_id,))
         if existing.is_empty():
             raise HTTPException(status_code=404, detail=f"ETL task {task_id} not found")
 
@@ -1021,7 +1113,7 @@ def update_etl_task(task_id: str, config: dict):
 def delete_etl_task(task_id: str, drop_table: bool = False):
     """删除 ETL 任务"""
     try:
-        existing = db_client.query(f"SELECT task_id FROM etl_task_config WHERE task_id = '{task_id}'")
+        existing = db_client.query("SELECT task_id FROM etl_task_config WHERE task_id = %s", (task_id,))
         if existing.is_empty():
             raise HTTPException(status_code=404, detail=f"ETL task {task_id} not found")
 
@@ -1030,7 +1122,7 @@ def delete_etl_task(task_id: str, drop_table: bool = False):
             # 容错：table_name 列可能不存在（旧表结构，启动后 ensure_meta_tables 会补列）
             table_name = None
             try:
-                res = db_client.query(f"SELECT table_name FROM etl_task_config WHERE task_id = '{task_id}'")
+                res = db_client.query("SELECT table_name FROM etl_task_config WHERE task_id = %s", (task_id,))
                 if not res.is_empty() and "table_name" in res.columns:
                     table_name = res["table_name"][0]
             except Exception:
@@ -1038,7 +1130,7 @@ def delete_etl_task(task_id: str, drop_table: bool = False):
             if table_name:
                 table_dropped = _check_shared_and_drop_table(table_name, task_id, "etl_task_config")
 
-        db_client.execute(f"DELETE FROM etl_task_config WHERE task_id = '{task_id}'")
+        db_client.execute("DELETE FROM etl_task_config WHERE task_id = %s", (task_id,))
         msg = f"ETL task {task_id} deleted"
         if table_dropped:
             msg += f", table dropped"
@@ -1056,11 +1148,11 @@ def get_etl_task_status(task_id: str):
     """获取 ETL 任务的最新数据日期和上次同步时间"""
     try:
         sql = (
-            f'SELECT last_date, updated_at '
-            f'FROM loadTable("{db_client._db_path}", "sync_log") '
-            f'WHERE source = "etl" AND data_type = "{task_id}" LIMIT 1'
+            'SELECT last_date, updated_at '
+            'FROM sync_log '
+            'WHERE source = %s AND data_type = %s LIMIT 1'
         )
-        df = db_client.query(sql)
+        df = db_client.query(sql, ("etl", task_id))
         if df.is_empty():
             return {"last_date": None, "last_sync_time": None}
         row = df.to_dicts()[0]
@@ -1077,7 +1169,7 @@ def get_etl_task_status(task_id: str):
 def run_etl_task(task_id: str):
     """执行 ETL 任务脚本，{date} 替换为当天日期"""
     try:
-        df = db_client.query(f"SELECT * FROM etl_task_config WHERE task_id = '{task_id}'")
+        df = db_client.query("SELECT * FROM etl_task_config WHERE task_id = %s", (task_id,))
         if df.is_empty():
             raise HTTPException(status_code=404, detail=f"ETL task {task_id} not found")
 
@@ -1158,7 +1250,7 @@ def backfill_etl_task(
 ):
     """回溯执行 ETL 任务，逐天替换 {date} 执行脚本并写入目标表"""
     try:
-        df = db_client.query(f"SELECT * FROM etl_task_config WHERE task_id = '{task_id}'")
+        df = db_client.query("SELECT * FROM etl_task_config WHERE task_id = %s", (task_id,))
         if df.is_empty():
             raise HTTPException(status_code=404, detail=f"ETL task {task_id} not found")
 
@@ -1256,12 +1348,16 @@ def get_etl_table_schema(task_id: str):
     """获取 ETL 目标表的字段名和类型"""
     try:
         # 查表名
-        res = db_client.query(f"SELECT table_name FROM etl_task_config WHERE task_id = '{task_id}'")
+        res = db_client.query("SELECT table_name FROM etl_task_config WHERE task_id = %s", (task_id,))
         table_name = res["table_name"][0] if not res.is_empty() and "table_name" in res.columns else task_id
         if not table_name:
             table_name = task_id
 
         db_path = db_client._db_path
+        # Validate table_name is alphanumeric to prevent injection in DolphinDB script
+        import re as _re
+        if not _re.match(r'^[a-zA-Z0-9_]+$', table_name):
+            return {"fields": []}
         exists = db_client._session.run(f"existsTable('{db_path}', '{table_name}')")
         if not exists:
             return {"fields": []}
@@ -1293,11 +1389,17 @@ def get_etl_logs(
     """获取 ETL 任务同步日志"""
     try:
         conditions = ["source = 'etl'"]
+        params = []
         if task_id:
-            conditions.append(f"data_type = '{task_id}'")
+            conditions.append("data_type = %s")
+            params.append(task_id)
         if start_date:
+            if not start_date.isdigit() or len(start_date) != 8:
+                raise HTTPException(status_code=400, detail="start_date must be YYYYMMDD")
             conditions.append(f"date(created_at) >= {start_date[:4]}.{start_date[4:6]}.{start_date[6:8]}")
         if end_date:
+            if not end_date.isdigit() or len(end_date) != 8:
+                raise HTTPException(status_code=400, detail="end_date must be YYYYMMDD")
             conditions.append(f"date(created_at) <= {end_date[:4]}.{end_date[4:6]}.{end_date[6:8]}")
 
         where_clause = " AND ".join(conditions)
@@ -1308,7 +1410,7 @@ def get_etl_logs(
             ORDER BY created_at DESC
             LIMIT {limit}
         """
-        df = db_client.query(sql)
+        df = db_client.query(sql, tuple(params) if params else None)
         return {
             "logs": df.to_dicts() if not df.is_empty() else [],
             "count": len(df)

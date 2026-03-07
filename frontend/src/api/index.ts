@@ -52,6 +52,7 @@ export const dataApi = {
   syncAllTasks: (targetDate?: string) =>
     longRunningApi.post('/data/sync/all', null, { params: { target_date: targetDate } }),
   getTaskStatus: (taskId: string) => api.get(`/data/sync/status/${taskId}`),
+  getTaskStatusBatch: () => api.get('/data/sync/tasks/status-batch'),
   getTaskConfig: (taskId: string) => api.get(`/data/sync/task/${taskId}/config`),
   updateTaskConfig: (taskId: string, config: any) => api.put(`/data/sync/task/${taskId}/config`, config),
   createTask: (config: any) => api.post('/data/sync/tasks', config),

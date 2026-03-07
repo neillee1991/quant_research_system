@@ -1,13 +1,14 @@
 import React, { useRef } from 'react';
-import { Handle, Position, NodeProps } from 'reactflow';
+import { Handle, Position, NodeProps, useReactFlow } from 'reactflow';
 import { Card, Form, Toast } from '@douyinfe/semi-ui';
 import Editor from '@monaco-editor/react';
 import { useThemeStore } from '../../../store';
 import { formatCode } from '../../../utils/codeFormatter';
 
-const SignalNode: React.FC<NodeProps> = ({ data }) => {
+const SignalNode: React.FC<NodeProps> = ({ id, data }) => {
   const { mode } = useThemeStore();
   const editorRef = useRef<any>(null);
+  const { setNodes } = useReactFlow();
 
   const handleFormat = async () => {
     if (!editorRef.current) return;
@@ -19,6 +20,12 @@ const SignalNode: React.FC<NodeProps> = ({ data }) => {
     } catch (error: any) {
       Toast.error(error.message || '格式化失败');
     }
+  };
+
+  const handleValueChange = (values: Record<string, any>) => {
+    setNodes(nodes => nodes.map(n =>
+      n.id === id ? { ...n, data: { ...n.data, ...values } } : n
+    ));
   };
 
   return (
@@ -45,6 +52,11 @@ const SignalNode: React.FC<NodeProps> = ({ data }) => {
                 keybindings: [monaco.KeyMod.Shift | monaco.KeyMod.Alt | monaco.KeyCode.KeyF],
                 run: () => handleFormat(),
               });
+              editor.onDidChangeModelContent(() => {
+                setNodes(nodes => nodes.map(n =>
+                  n.id === id ? { ...n, data: { ...n.data, condition: editor.getValue() } } : n
+                ));
+              });
             }}
             options={{
               minimap: { enabled: false },
@@ -63,7 +75,7 @@ const SignalNode: React.FC<NodeProps> = ({ data }) => {
           />
         </div>
       </div>
-      <Form layout="vertical" labelPosition="top">
+      <Form layout="vertical" labelPosition="top" onValueChange={handleValueChange}>
         <Form.Input
           field="signal_col"
           label="Signal Column"

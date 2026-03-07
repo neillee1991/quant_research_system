@@ -53,6 +53,9 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
   const [editDesc, setEditDesc] = useState('');
   const [editCategory, setEditCategory] = useState('');
   const [editComputeMode, setEditComputeMode] = useState('');
+  const [editDependsOn, setEditDependsOn] = useState<string[]>([]);
+  const [editWindow, setEditWindow] = useState<number | undefined>(undefined);
+  const [editLookbackDays, setEditLookbackDays] = useState<number>(60);
   const [editSaving, setEditSaving] = useState(false);
   // 预处理
   const [ppEdit, setPpEdit] = useState<PreprocessOptions>({ ...DEFAULT_PREPROCESS });
@@ -102,6 +105,10 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
     setEditDesc(factor.description || '');
     setEditCategory(factor.category || '');
     setEditComputeMode(factor.compute_mode || '');
+    const rawDeps = factor.depends_on;
+    setEditDependsOn(Array.isArray(rawDeps) ? rawDeps : (rawDeps ? (() => { try { return JSON.parse(rawDeps); } catch { return []; } })() : []));
+    setEditWindow(factor.params?.window ?? undefined);
+    setEditLookbackDays(factor.params?.lookback_days ?? 60);
     // 预处理
     const pp = factor.params?.preprocess || {};
     console.log('[FactorDrawer] 加载因子配置:', { factor_id: factor.factor_id, params: factor.params, preprocess: pp });
@@ -148,8 +155,13 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
     if (!factor) return;
     setEditSaving(true);
     try {
-      const newParams = { ...(factor.params || {}), preprocess: ppEdit };
-      const values = { description: editDesc, category: editCategory, compute_mode: editComputeMode, params: newParams };
+      const newParams = {
+        ...(factor.params || {}),
+        preprocess: ppEdit,
+        lookback_days: editLookbackDays,
+        ...(editWindow !== undefined ? { window: editWindow } : {}),
+      };
+      const values = { description: editDesc, category: editCategory, compute_mode: editComputeMode, depends_on: editDependsOn, params: newParams };
       console.log('[FactorDrawer] 保存预处理配置:', ppEdit);
       await productionApi.updateFactor(factorId, values);
       Toast.success('保存成功');
@@ -228,6 +240,45 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
                     <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>计算模式</div>
                     <Select size="small" style={{ width: '100%' }} value={editComputeMode} onChange={v => setEditComputeMode(v as string)}
                       optionList={[{ label: '增量', value: 'incremental' }, { label: '全量', value: 'full' }]} />
+                  </div>
+                </div>
+                <div style={{ marginTop: 8 }}>
+                  <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>数据依赖</div>
+                  <Select
+                    size="small" multiple style={{ width: '100%' }}
+                    value={editDependsOn}
+                    onChange={v => setEditDependsOn(v as string[])}
+                    optionList={[
+                      { label: 'sync_daily_data（日线行情 OHLCV）', value: 'sync_daily_data' },
+                      { label: 'sync_daily_basic（每日指标 PE/PB/市值）', value: 'sync_daily_basic' },
+                      { label: 'sync_adj_factor（复权因子）', value: 'sync_adj_factor' },
+                      { label: 'sync_moneyflow（资金流向）', value: 'sync_moneyflow' },
+                      { label: 'sync_stk_limit（涨跌停价格）', value: 'sync_stk_limit' },
+                      { label: 'sync_suspend_d（停牌信息）', value: 'sync_suspend_d' },
+                      { label: 'sync_stock_st（ST 状态）', value: 'sync_stock_st' },
+                      { label: 'sync_stock_basic（股票基本信息）', value: 'sync_stock_basic' },
+                    ]}
+                  />
+                </div>
+                <div style={{ display: 'flex', gap: 16, marginTop: 8 }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>
+                      计算窗口 window
+                      <span style={{ color: 'var(--text-muted)', marginLeft: 4 }}>（滚动窗口大小，如 MA/RSI 的 N 天）</span>
+                    </div>
+                    <InputNumber size="small" min={1} max={500} style={{ width: '100%' }}
+                      placeholder="不填则由代码内部决定"
+                      value={editWindow}
+                      onChange={v => setEditWindow(v as number | undefined)} />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>
+                      向前回溯天数 lookback_days
+                      <span style={{ color: 'var(--text-muted)', marginLeft: 4 }}>（增量计算时额外加载的历史数据天数，默认 60）</span>
+                    </div>
+                    <InputNumber size="small" min={1} max={1000} style={{ width: '100%' }}
+                      value={editLookbackDays}
+                      onChange={v => setEditLookbackDays((v as number) || 60)} />
                   </div>
                 </div>
                 {/* 统计概览 */}
@@ -322,8 +373,7 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
                 <Spin spinning={codeLoading}>
                   {code ? (
                     <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                        <Tag color="blue">{code.filename}</Tag>
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginBottom: 8 }}>
                         <div style={{ display: 'flex', gap: 8 }}>
                           <Button size="small" icon={<IconCode />} onClick={handleFormatCode}>格式化</Button>
                           <Button size="small" theme="solid" icon={<IconSave />} disabled={!codeChanged}
@@ -488,6 +538,7 @@ const CodeTestPanel: React.FC<{ code: string; dependsOn?: string[]; preprocess?:
         <span style={{ color: 'var(--text-secondary)', fontSize: 12, whiteSpace: 'nowrap' }}>测试区间:</span>
         <DatePicker type="dateRange" size="small" style={{ flex: 1 }}
           defaultPickerValue={dayjs().subtract(1, 'month').toDate()}
+          disabledDate={(current) => current ? dayjs(current).isAfter(dayjs().endOf('day')) : false}
           onChange={(date, dateStr) => {
             const strs = dateStr as unknown as string[];
             if (strs && Array.isArray(strs) && strs[0] && strs[1]) {
@@ -603,6 +654,9 @@ const FactorManageTab: React.FC = () => {
   const [createDesc, setCreateDesc] = useState('');
   const [createCategory, setCreateCategory] = useState('custom');
   const [createComputeMode, setCreateComputeMode] = useState('incremental');
+  const [createDependsOn, setCreateDependsOn] = useState<string[]>(['sync_daily_data']);
+  const [createWindow, setCreateWindow] = useState<number | undefined>(undefined);
+  const [createLookbackDays, setCreateLookbackDays] = useState<number>(60);
   const createEditorRef = useRef<any>(null);
 
   // 格式化创建代码
@@ -678,14 +732,19 @@ const FactorManageTab: React.FC = () => {
         description: createDesc,
         category: createCategory,
         compute_mode: createComputeMode,
+        depends_on: createDependsOn,
       };
-      const params = { preprocess: createPreprocess };
+      const params = {
+        preprocess: createPreprocess,
+        lookback_days: createLookbackDays,
+        ...(createWindow !== undefined ? { window: createWindow } : {}),
+      };
       await productionApi.createFactor({ ...values, params, code: createCode || undefined });
       Toast.success(`因子 ${values.factor_id} 创建成功`);
       setCreateModal(false);
       setCreateFactorId(''); setCreateDesc(''); setCreateCategory('custom'); setCreateComputeMode('incremental');
       setCreateCode(CODE_TEMPLATE);
-      setCreatePreprocess({ ...DEFAULT_PREPROCESS });
+      setCreatePreprocess({ ...DEFAULT_PREPROCESS }); setCreateDependsOn(['sync_daily_data']); setCreateWindow(undefined); setCreateLookbackDays(60);
       loadFactors();
     } catch (e: any) {
       if (e.response) Toast.error(e.response?.data?.detail || '创建失败');
@@ -713,6 +772,9 @@ const FactorManageTab: React.FC = () => {
     setCreateCategory(factor.category || 'custom');
     setCreateComputeMode(factor.compute_mode || 'incremental');
     setCreatePreprocess(factor.params?.preprocess ? { ...DEFAULT_PREPROCESS, ...factor.params.preprocess } : { ...DEFAULT_PREPROCESS });
+    setCreateDependsOn(Array.isArray(factor.depends_on) ? factor.depends_on : (factor.depends_on ? JSON.parse(factor.depends_on) : ['sync_daily_data']));
+    setCreateWindow(factor.params?.window ?? undefined);
+    setCreateLookbackDays(factor.params?.lookback_days ?? 60);
     // 异步加载因子代码
     try {
       const res = await productionApi.getFactorCode(factor.factor_id);
@@ -935,6 +997,20 @@ const FactorManageTab: React.FC = () => {
               ]} />
           </div>
         </div>
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>数据依赖 <span style={{ color: 'var(--color-loss)' }}>*</span></div>
+          <Select
+            size="small" multiple style={{ width: '100%' }}
+            value={createDependsOn}
+            onChange={v => setCreateDependsOn(v as string[])}
+            optionList={[
+              { label: 'sync_daily_data（日线行情 OHLCV）', value: 'sync_daily_data' },
+              { label: 'sync_daily_basic（每日指标 PE/PB/市值）', value: 'sync_daily_basic' },
+              { label: 'sync_adj_factor（复权因子）', value: 'sync_adj_factor' },
+              { label: 'sync_moneyflow（资金流向）', value: 'sync_moneyflow' },
+            ]}
+          />
+        </div>
         <div style={{ display: 'flex', gap: 16, marginBottom: 8 }}>
           <Checkbox checked={createPreprocess.filter_st} onChange={(e) => setCreatePreprocess(p => ({ ...p, filter_st: !!e.target.checked }))}>过滤 ST</Checkbox>
           <Checkbox checked={createPreprocess.filter_new_stock} onChange={(e) => setCreatePreprocess(p => ({ ...p, filter_new_stock: !!e.target.checked }))}>过滤新股</Checkbox>
@@ -948,6 +1024,27 @@ const FactorManageTab: React.FC = () => {
               onChange={(v) => setCreatePreprocess(p => ({ ...p, new_stock_days: (v as number) || 60 }))} />
           </div>
         )}
+        <div style={{ display: 'flex', gap: 16, marginBottom: 8, marginTop: 8 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>
+              计算窗口 window
+              <span style={{ color: 'var(--text-muted)', marginLeft: 4 }}>（滚动窗口大小，如 MA/RSI 的 N 天）</span>
+            </div>
+            <InputNumber size="small" min={1} max={500} style={{ width: '100%' }}
+              placeholder="不填则由代码内部决定"
+              value={createWindow}
+              onChange={v => setCreateWindow(v as number | undefined)} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>
+              向前回溯天数 lookback_days
+              <span style={{ color: 'var(--text-muted)', marginLeft: 4 }}>（增量计算时额外加载的历史数据天数，默认 60）</span>
+            </div>
+            <InputNumber size="small" min={1} max={1000} style={{ width: '100%' }}
+              value={createLookbackDays}
+              onChange={v => setCreateLookbackDays((v as number) || 60)} />
+          </div>
+        </div>
         <div style={{ marginTop: 8 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
             <div style={{ color: 'var(--text-secondary)', fontSize: 12 }}>因子计算代码</div>

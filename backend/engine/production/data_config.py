@@ -1,9 +1,12 @@
 """因子数据配置加载器 - 从 factor_data_config 表读取字段映射"""
 import json
+import time
 from typing import Optional, Dict, Any, List
 import polars as pl
 
 from app.core.logger import logger
+
+_CACHE_TTL_SECONDS = 300  # 5 分钟后自动失效
 
 
 # 内置默认值（当 DB 中无配置时的 fallback）
@@ -27,10 +30,11 @@ class DataConfigLoader:
     def __init__(self, db_client):
         self.db = db_client
         self._cache: Optional[Dict[str, Dict[str, Any]]] = None
+        self._cache_ts: float = 0.0
 
     def load(self) -> Dict[str, Dict[str, Any]]:
-        """从 DB 加载配置，带内存缓存"""
-        if self._cache is not None:
+        """从 DB 加载配置，带 TTL 缓存"""
+        if self._cache is not None and (time.time() - self._cache_ts) < _CACHE_TTL_SECONDS:
             return self._cache
         try:
             df = self.db.query("SELECT * FROM factor_data_config")
@@ -49,10 +53,12 @@ class DataConfigLoader:
                         "extra_config": extra_parsed,
                     }
             self._cache = config
+            self._cache_ts = time.time()
             return config
         except Exception as e:
             logger.warning(f"加载 factor_data_config 失败 ({e})，使用内置默认值")
             self._cache = dict(_DEFAULTS)
+            self._cache_ts = time.time()
             return self._cache
 
     def get(self, field_key: str) -> Dict[str, Any]:

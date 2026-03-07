@@ -32,7 +32,17 @@ class DataService:
             filters["industry"] = industry
 
         try:
-            df = self.repository.query("sync_stock_basic", filters=filters)
+            conditions = []
+            params: list = []
+            if market:
+                conditions.append("market = %s")
+                params.append(market)
+            if industry:
+                conditions.append("industry = %s")
+                params.append(industry)
+            where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+            sql = f"SELECT * FROM sync_stock_basic{where} ORDER BY ts_code"
+            df = self.repository.query(sql, tuple(params) if params else None)
             if df.is_empty():
                 raise DataNotFoundError("sync_stock_basic", f"market={market}, industry={industry}")
             return df
@@ -48,29 +58,28 @@ class DataService:
         limit: Optional[int] = None
     ) -> pl.DataFrame:
         """获取日线数据"""
-        filters = {}
-
-        if ts_code:
-            filters["ts_code"] = ts_code
-
         if start_date:
             self._validate_date(start_date)
-            filters["trade_date"] = (">=", start_date)
-
         if end_date:
             self._validate_date(end_date)
-            if "trade_date" in filters:
-                # 需要范围查询，暂时简化处理
-                pass
-            else:
-                filters["trade_date"] = ("<=", end_date)
 
         try:
-            df = self.repository.query(
-                "sync_daily_data",
-                filters=filters,
-                limit=min(limit or DEFAULT_QUERY_LIMIT, MAX_QUERY_LIMIT)
-            )
+            conditions = []
+            params: list = []
+            if ts_code:
+                conditions.append("ts_code = %s")
+                params.append(ts_code)
+            if start_date:
+                conditions.append("trade_date >= %s")
+                params.append(start_date)
+            if end_date:
+                conditions.append("trade_date <= %s")
+                params.append(end_date)
+
+            where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+            lim = min(limit or DEFAULT_QUERY_LIMIT, MAX_QUERY_LIMIT)
+            sql = f"SELECT * FROM sync_daily_data{where} ORDER BY trade_date LIMIT {lim}"
+            df = self.repository.query(sql, tuple(params) if params else None)
 
             if df.is_empty():
                 raise DataNotFoundError(
@@ -91,24 +100,28 @@ class DataService:
         factors: Optional[List[str]] = None
     ) -> pl.DataFrame:
         """获取因子数据"""
-        filters = {}
-
-        if ts_code:
-            filters["ts_code"] = ts_code
-
         if start_date:
             self._validate_date(start_date)
-
         if end_date:
             self._validate_date(end_date)
 
         try:
-            # 从 sync_daily_basic 表获取因子数据
-            df = self.repository.query(
-                "sync_daily_basic",
-                columns=factors if factors else None,
-                filters=filters
-            )
+            conditions = []
+            params: list = []
+            if ts_code:
+                conditions.append("ts_code = %s")
+                params.append(ts_code)
+            if start_date:
+                conditions.append("trade_date >= %s")
+                params.append(start_date)
+            if end_date:
+                conditions.append("trade_date <= %s")
+                params.append(end_date)
+
+            cols = ", ".join(factors) if factors else "*"
+            where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+            sql = f"SELECT {cols} FROM sync_daily_basic{where} ORDER BY trade_date"
+            df = self.repository.query(sql, tuple(params) if params else None)
 
             if df.is_empty():
                 raise DataNotFoundError(

@@ -122,7 +122,7 @@ class VectorEngine:
 
         metrics = {
             "total_return": self._safe_float(portfolio.total_return()),
-            "annualized_return": self._safe_float(stats.get("Total Return [%]", 0)) / 100,
+            "annualized_return": self._safe_float(stats.get("Annualized Return [%]", 0)) / 100,
             "sharpe_ratio": self._safe_float(portfolio.sharpe_ratio()),
             "sortino_ratio": self._safe_float(portfolio.sortino_ratio()),
             "calmar_ratio": self._safe_float(portfolio.calmar_ratio()),

@@ -2,14 +2,31 @@
 因子分析引擎
 支持传统 Polars 实现和 Alphalens 框架两种分析方式
 """
+import math
 import polars as pl
 import json
+import numpy as np
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
 
 from app.core.logger import logger
 from engine.analysis.alphalens_adapter import AlphalensAdapter
 from engine.production.data_config import DataConfigLoader
+
+
+def _sanitize_for_json(obj):
+    """递归清理 NaN/Inf 值，确保 JSON 序列化安全"""
+    if isinstance(obj, dict):
+        return {k: _sanitize_for_json(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_sanitize_for_json(v) for v in obj]
+    if isinstance(obj, (float, np.floating)):
+        if math.isnan(obj) or math.isinf(obj):
+            return None
+        return float(obj)
+    if isinstance(obj, (np.integer,)):
+        return int(obj)
+    return obj
 
 
 class FactorAnalyzer:
@@ -167,10 +184,9 @@ class FactorAnalyzer:
     # ==================== IC 分析 ====================
 
     def _calc_ic_series(self, merged: pl.DataFrame, period: int) -> Optional[pl.DataFrame]:
-        """计算指定持有期的 IC 时间序列（Rank IC）"""
+        """计算指定持有期的 IC 时间序列（Rank IC），向量化实现"""
         sorted_df = merged.sort(["ts_code", "trade_date"])
 
-        # 计算远期收益率：period 天后的收益
         with_fwd = (
             sorted_df
             .with_columns(
@@ -185,33 +201,45 @@ class FactorAnalyzer:
         if with_fwd.is_empty():
             return None
 
-        # 按日期计算截面 Rank IC（Spearman 相关系数）
-        ic_list = []
-        dates = with_fwd["trade_date"].unique().sort()
+        # 截面排名（向量化，使用 .over("trade_date")）
+        with_ranks = with_fwd.with_columns([
+            pl.col("factor_value").rank().over("trade_date").alias("_rank_f"),
+            pl.col("fwd_return").rank().over("trade_date").alias("_rank_r"),
+            pl.col("factor_value").count().over("trade_date").alias("_n"),
+        ])
 
-        for dt in dates:
-            cross = with_fwd.filter(pl.col("trade_date") == dt)
-            if len(cross) < 30:
-                continue
-
-            rank_factor = cross["factor_value"].rank()
-            rank_return = cross["fwd_return"].rank()
-
-            n = len(cross)
-            mean_f = rank_factor.mean()
-            mean_r = rank_return.mean()
-            cov = ((rank_factor - mean_f) * (rank_return - mean_r)).sum()
-            std_f = ((rank_factor - mean_f) ** 2).sum() ** 0.5
-            std_r = ((rank_return - mean_r) ** 2).sum() ** 0.5
-
-            if std_f > 0 and std_r > 0:
-                ic = cov / (std_f * std_r)
-                ic_list.append({"trade_date": dt, "ic": float(ic)})
-
-        if not ic_list:
+        # 过滤截面样本数 < 30 的日期
+        with_ranks = with_ranks.filter(pl.col("_n") >= 30)
+        if with_ranks.is_empty():
             return None
 
-        return pl.DataFrame(ic_list)
+        # 截面均值（向量化）
+        with_ranks = with_ranks.with_columns([
+            pl.col("_rank_f").mean().over("trade_date").alias("_mean_f"),
+            pl.col("_rank_r").mean().over("trade_date").alias("_mean_r"),
+        ]).with_columns([
+            (pl.col("_rank_f") - pl.col("_mean_f")).alias("_df"),
+            (pl.col("_rank_r") - pl.col("_mean_r")).alias("_dr"),
+        ])
+
+        # 按日期聚合计算 Spearman 相关系数
+        ic_df = (
+            with_ranks
+            .group_by("trade_date")
+            .agg([
+                (pl.col("_df") * pl.col("_dr")).sum().alias("_cov"),
+                (pl.col("_df") ** 2).sum().alias("_ss_f"),
+                (pl.col("_dr") ** 2).sum().alias("_ss_r"),
+            ])
+            .with_columns(
+                (pl.col("_cov") / ((pl.col("_ss_f") * pl.col("_ss_r")) ** 0.5 + 1e-10)).alias("ic")
+            )
+            .select(["trade_date", "ic"])
+            .drop_nulls(subset=["ic"])
+            .sort("trade_date")
+        )
+
+        return ic_df if not ic_df.is_empty() else None
 
     # ==================== 分层收益 ====================
 
@@ -236,11 +264,11 @@ class FactorAnalyzer:
             if with_fwd.is_empty():
                 continue
 
-            # 按日期截面分层
+            # 按日期截面分层（1-based: 1 ~ quantiles）
             with_q = with_fwd.with_columns(
                 (pl.col("factor_value").rank().over("trade_date")
                  / pl.col("factor_value").count().over("trade_date")
-                 * quantiles).cast(pl.Int32).clip(0, quantiles - 1).alias("quantile")
+                 * quantiles).ceil().cast(pl.Int32).clip(1, quantiles).alias("quantile")
             )
 
             # 各层各日平均收益
@@ -257,42 +285,71 @@ class FactorAnalyzer:
     # ==================== 换手率 ====================
 
     def _calc_turnover(self, merged: pl.DataFrame, quantiles: int) -> Optional[Dict[str, float]]:
-        """计算各层换手率"""
+        """计算各层换手率（向量化实现）"""
         sorted_df = merged.sort(["ts_code", "trade_date"])
 
         with_q = sorted_df.with_columns(
             (pl.col("factor_value").rank().over("trade_date")
              / pl.col("factor_value").count().over("trade_date")
-             * quantiles).cast(pl.Int32).clip(0, quantiles - 1).alias("quantile")
+             * quantiles).ceil().cast(pl.Int32).clip(1, quantiles).alias("quantile")
         )
 
         dates = with_q["trade_date"].unique().sort()
         if len(dates) < 2:
             return None
 
-        turnover_by_q = {q: [] for q in range(quantiles)}
+        # 向量化：对每个 (ts_code, quantile) 组合，检测 quantile 是否在相邻日期发生变化
+        # 先按 ts_code, trade_date 排序，计算前一天的 quantile
+        with_prev = (
+            with_q
+            .sort(["ts_code", "trade_date"])
+            .with_columns(
+                pl.col("quantile").shift(1).over("ts_code").alias("_prev_q"),
+                pl.col("trade_date").shift(1).over("ts_code").alias("_prev_date"),
+            )
+            # 只保留有前一天数据的行（排除每只股票的第一行）
+            .drop_nulls(subset=["_prev_q", "_prev_date"])
+        )
 
-        prev_groups = {}
-        for dt in dates:
-            cross = with_q.filter(pl.col("trade_date") == dt)
-            curr_groups = {}
-            for q in range(quantiles):
-                stocks = set(cross.filter(pl.col("quantile") == q)["ts_code"].to_list())
-                curr_groups[q] = stocks
-
-                if q in prev_groups and prev_groups[q]:
-                    prev = prev_groups[q]
-                    if prev and stocks:
-                        overlap = len(prev & stocks)
-                        total = max(len(prev), len(stocks))
-                        turnover_by_q[q].append(1.0 - overlap / total if total > 0 else 0.0)
-
-            prev_groups = curr_groups
+        if with_prev.is_empty():
+            return None
 
         result = {}
-        for q in range(quantiles):
-            vals = turnover_by_q[q]
-            result[f"Q{q+1}"] = sum(vals) / len(vals) if vals else 0.0
+        for q in range(1, quantiles + 1):
+            # 当天在 q 层或前一天在 q 层的行
+            in_q_today = with_prev.filter(pl.col("quantile") == q)
+            in_q_prev = with_prev.filter(pl.col("_prev_q") == q)
+
+            if in_q_today.is_empty() and in_q_prev.is_empty():
+                result[f"Q{q}"] = 0.0
+                continue
+
+            # 按日期计算换手率：1 - overlap / max(today_count, prev_count)
+            today_counts = (
+                in_q_today.group_by("trade_date")
+                .agg(pl.col("ts_code").alias("today_stocks"))
+            )
+            prev_counts = (
+                in_q_prev.group_by("trade_date")
+                .agg(pl.col("ts_code").alias("prev_stocks"))
+            )
+
+            joined = today_counts.join(prev_counts, on="trade_date", how="outer")
+            if joined.is_empty():
+                result[f"Q{q}"] = 0.0
+                continue
+
+            turnovers = []
+            for row in joined.to_dicts():
+                today_set = set(row.get("today_stocks") or [])
+                prev_set = set(row.get("prev_stocks") or [])
+                if not today_set and not prev_set:
+                    continue
+                overlap = len(today_set & prev_set)
+                total = max(len(today_set), len(prev_set))
+                turnovers.append(1.0 - overlap / total if total > 0 else 0.0)
+
+            result[f"Q{q}"] = sum(turnovers) / len(turnovers) if turnovers else 0.0
 
         return result
 
@@ -342,7 +399,7 @@ class FactorAnalyzer:
                         "avg_return": round(float(r["avg_return"]), 6),
                         "std_return": round(float(r["std_return"]), 6),
                         "sharpe": round(
-                            float(r["avg_return"]) / float(r["std_return"]), 4
+                            float(r["avg_return"]) / float(r["std_return"]) * (252 ** 0.5), 4
                         ) if r["std_return"] and float(r["std_return"]) > 0 else 0.0,
                     }
                     for r in q_summary.to_dicts()
@@ -498,7 +555,7 @@ class FactorAnalyzer:
 
             elapsed = (datetime.now() - started_at).total_seconds()
             logger.info(f"Alphalens analysis for {factor_id} completed in {elapsed:.1f}s")
-            return results
+            return _sanitize_for_json(results)
 
         except Exception as e:
             logger.error(f"Alphalens analysis failed for {factor_id}: {e}")

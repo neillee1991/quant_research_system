@@ -282,11 +282,12 @@ const DataCenter: React.FC = () => {
   }, []);
 
   const loadInitialData = async () => {
-    const [stocksRes, tasksRes, tablesRes, etlRes] = await Promise.all([
+    const [stocksRes, tasksRes, tablesRes, etlRes, statusBatchRes] = await Promise.all([
       dataApi.listStocks().catch(() => ({ data: { stocks: [] } })),
       dataApi.listSyncTasks().catch(() => ({ data: { tasks: [] } })),
       dataApi.listTables().catch(() => ({ data: { tables: [] } })),
       dataApi.listEtlTasks().catch(() => ({ data: { tasks: [] } })),
+      dataApi.getTaskStatusBatch().catch(() => ({ data: { data: {} } })),
     ]);
 
     setStocks(stocksRes.data.stocks || []);
@@ -294,10 +295,17 @@ const DataCenter: React.FC = () => {
     setTables(tablesRes.data.tables || []);
     setEtlTasks(etlRes.data.tasks || []);
 
-    const tasks = tasksRes.data.tasks || [];
-    for (const task of tasks) {
-      loadTaskStatus(task.task_id);
-      loadTaskScheduleInfo(task.task_id);
+    // 批量填充状态和调度信息，替代 N+1 循环
+    const batchData: Record<string, any> = statusBatchRes.data?.data || {};
+    if (Object.keys(batchData).length > 0) {
+      const statuses: Record<string, any> = {};
+      const schedules: Record<string, any> = {};
+      for (const [taskId, info] of Object.entries(batchData)) {
+        statuses[taskId] = info;
+        schedules[taskId] = { data: { schedule: (info as any).schedule, cron_expression: (info as any).cron_expression, enabled: (info as any).enabled } };
+      }
+      setTaskStatuses(statuses);
+      setScheduleInfo(schedules);
     }
 
     loadSyncLogs();

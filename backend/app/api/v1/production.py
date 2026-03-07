@@ -1,6 +1,7 @@
 """生产系统 API：因子分析、生产任务"""
 import json
 import os
+import re
 from datetime import datetime, timedelta
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -14,12 +15,20 @@ from data_manager.refactored_sync_engine import sync_engine as _sync_engine
 from app.core.config import settings
 from app.core.logger import logger
 from app.core.utils import DateUtils, safe_json_parse
+from app.core.cache import api_cache
 
 router = APIRouter()
 analyzer = FactorAnalyzer(db_client)
 prod_engine = ProductionEngine(db_client)
 
 FACTORS_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "..", "engine", "production", "factors")
+
+_SAFE_FACTOR_ID_RE = re.compile(r'^[a-zA-Z0-9_\-]+$')
+
+
+def _validate_factor_id(factor_id: str):
+    if not _SAFE_FACTOR_ID_RE.match(factor_id):
+        raise HTTPException(status_code=400, detail=f"Invalid factor_id: '{factor_id}'")
 
 
 # ==================== 因子分析 ====================
@@ -194,6 +203,10 @@ class BatchRunRequest(BaseModel):
 @router.get("/production/factors")
 async def list_registered_factors():
     """列出所有因子（合并装饰器注册 + 数据库手动注册）"""
+    cached = api_cache.get("production:factors")
+    if cached is not None:
+        return cached
+
     discover_factors(db_client=db_client)
 
     # 装饰器注册的因子
@@ -282,7 +295,7 @@ async def list_registered_factors():
         })
 
     result = {"status": "success", "data": merged}
-
+    api_cache.set("production:factors", result, ttl=60)
     return result
 
 
@@ -312,7 +325,7 @@ async def create_factor(req: FactorCreateRequest):
             "updated_at": [now],
         })
         db_client.upsert("factor_metadata", new_df, ["factor_id"])
-
+        api_cache.invalidate("production:factors")
         return {"status": "success", "data": {"factor_id": req.factor_id}}
     except HTTPException:
         raise
@@ -371,6 +384,7 @@ async def update_factor(factor_id: str, req: FactorUpdateRequest):
             "updated_at": pl.Datetime,
         })
         db_client.upsert("factor_metadata", update_df, ["factor_id"])
+        api_cache.invalidate("production:factors")
 
         # 清除因子列表缓存
         logger.debug(f"Cleared factor list cache after updating {factor_id}")
@@ -384,6 +398,7 @@ async def update_factor(factor_id: str, req: FactorUpdateRequest):
 @router.delete("/production/factors/{factor_id}")
 async def delete_factor(factor_id: str, delete_data: bool = False):
     """删除因子元数据、代码文件和注册表条目，可选删除因子值数据"""
+    _validate_factor_id(factor_id)
     try:
         db_client.execute("DELETE FROM factor_metadata WHERE factor_id = %s", (factor_id,))
         if delete_data:
@@ -398,6 +413,7 @@ async def delete_factor(factor_id: str, delete_data: bool = False):
 
         # 从内存注册表中移除
         unregister_factor(factor_id)
+        api_cache.invalidate("production:factors")
 
         # 清除因子列表缓存
         logger.debug(f"Cleared factor list cache after deleting {factor_id}")
@@ -635,7 +651,16 @@ async def test_factor_code(req: FactorTestRequest):
     mock_registry.factor = mock_factor_decorator
 
     namespace = {
-        "__builtins__": __builtins__,
+        "__builtins__": {
+            # Allow only safe builtins needed for factor computation
+            "__import__": __import__,
+            "abs": abs, "all": all, "any": any, "bool": bool, "dict": dict,
+            "enumerate": enumerate, "filter": filter, "float": float,
+            "int": int, "isinstance": isinstance, "len": len, "list": list,
+            "map": map, "max": max, "min": min, "range": range, "round": round,
+            "set": set, "sorted": sorted, "str": str, "sum": sum, "tuple": tuple,
+            "type": type, "zip": zip, "None": None, "True": True, "False": False,
+        },
         "pl": __import__("polars"),
         "polars": __import__("polars"),
         "print": lambda *a, **kw: stdout_capture.write(" ".join(str(x) for x in a) + kw.get("end", "\n")),
@@ -885,10 +910,15 @@ class DataConfigUpdateRequest(BaseModel):
 @router.get("/production/data-config")
 async def get_data_config():
     """获取所有字段映射配置"""
+    cached = api_cache.get("production:data-config")
+    if cached is not None:
+        return cached
     try:
         df = db_client.query("SELECT * FROM factor_data_config ORDER BY field_key")
         rows = df.to_dicts() if not df.is_empty() else []
-        return {"status": "success", "data": rows}
+        result = {"status": "success", "data": rows}
+        api_cache.set("production:data-config", result, ttl=120)
+        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -907,6 +937,7 @@ async def update_data_config(req: DataConfigUpdateRequest):
             "updated_at": [now] * len(req.mappings),
         })
         db_client.upsert("factor_data_config", update_df, ["field_key"])
+        api_cache.invalidate("production:data-config")
         return {"status": "success", "message": f"已更新 {len(req.mappings)} 条配置"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -915,6 +946,9 @@ async def update_data_config(req: DataConfigUpdateRequest):
 @router.get("/production/data-config/resolved")
 async def get_resolved_data_config():
     """返回简化的 field_key → source_label + values 字典，供前端注解显示"""
+    cached = api_cache.get("production:data-config:resolved")
+    if cached is not None:
+        return cached
     try:
         df = db_client.query("SELECT field_key, table_name, column_name, extra_config FROM factor_data_config")
         result = {}
@@ -949,7 +983,9 @@ async def get_resolved_data_config():
                 except Exception:
                     pass
                 result[fk] = {"table_name": tbl, "column_name": col, "source_label": source_label, "values": values}
-        return {"status": "success", "data": result}
+        result_resp = {"status": "success", "data": result}
+        api_cache.set("production:data-config:resolved", result_resp, ttl=120)
+        return result_resp
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

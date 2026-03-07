@@ -18,7 +18,9 @@ async def lifespan(app: FastAPI):
     try:
         db_client.ensure_meta_tables()
         db_client.seed_sync_task_config()
+        db_client.seed_etl_task_config()
         db_client.seed_factor_data_config()
+        db_client.seed_factor_metadata()
     except Exception as e:
         logger.error(f"维度表初始化失败: {e}")
     yield
@@ -41,12 +43,14 @@ def create_app() -> FastAPI:
     origins = settings.cors_origins
     if origins == "*":
         allow_origins = ["*"]
+        allow_credentials = False  # wildcard origin is incompatible with credentials
     else:
         allow_origins = [o.strip() for o in origins.split(",") if o.strip()]
+        allow_credentials = True
     app.add_middleware(
         CORSMiddleware,
         allow_origins=allow_origins,
-        allow_credentials=True,
+        allow_credentials=allow_credentials,
         allow_methods=["*"],
         allow_headers=["*"],
     )

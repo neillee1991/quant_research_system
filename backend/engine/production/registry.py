@@ -185,15 +185,59 @@ def discover_factors(factors_dir: str = None, db_client=None, force_refresh: boo
                 after_import = set(_factor_registry.keys())
                 new_factors = after_import - before_import
 
-                # 如果新导入的因子已在数据库中，发出警告
+                # 如果新导入的因子已在数据库中，恢复 DB 版本（DB 优先）
                 for fid in new_factors:
                     if fid in db_loaded_factors:
                         logger.warning(f"Factor {fid} loaded from both DB and file {fname}, using DB version")
-                        # 注意：由于 DB 先加载，文件导入会覆盖，这里需要恢复 DB 版本
-                        # 但实际上 @factor 装饰器会覆盖，所以我们应该跳过文件导入
+                        # 恢复 DB 版本：从 db_loaded_factors 对应的注册项中取回
+                        # db_loaded_factors 是 set，需要从 _factor_registry 的备份恢复
+                        # 由于 DB 版本已被文件覆盖，需要重新从 DB 加载该因子
+                        if db_client is not None:
+                            try:
+                                _restore_factor_from_db(db_client, fid)
+                            except Exception as restore_err:
+                                logger.warning(f"Failed to restore DB version of {fid}: {restore_err}")
 
             except Exception as e:
                 logger.warning(f"Failed to import factor module {module_name}: {e}")
+
+
+def _restore_factor_from_db(db_client, factor_id: str):
+    """从数据库重新加载单个因子，覆盖文件版本（DB 优先）"""
+    import json
+    df = db_client.query(
+        "SELECT factor_id, description, category, compute_mode, storage_target, depends_on, params, code "
+        "FROM factor_metadata WHERE factor_id = %s AND code IS NOT NULL AND code != ''",
+        (factor_id,)
+    )
+    if df.is_empty():
+        return
+    row = df.to_dicts()[0]
+    code = row.get("code", "")
+    if not code:
+        return
+    depends_on = json.loads(row.get("depends_on") or "[]")
+    params = json.loads(row.get("params") or "{}")
+    namespace = {}
+    exec(code, namespace)  # nosec - code from trusted DB, same as load_factors_from_db
+    compute_func = next(
+        (obj for name, obj in namespace.items() if callable(obj) and (name.startswith("compute") or name == "main")),
+        None
+    )
+    if compute_func is None:
+        return
+    storage = StorageConfig(target=row.get("storage_target") or "factor_values")
+    definition = FactorDefinition(
+        factor_id=factor_id,
+        func=compute_func,
+        description=row.get("description") or "",
+        category=row.get("category") or "custom",
+        compute_mode=row.get("compute_mode") or "incremental",
+        depends_on=depends_on,
+        params=params,
+        storage=storage,
+    )
+    _factor_registry[factor_id] = definition
 
 
 def load_factors_from_db(db_client):

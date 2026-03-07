@@ -189,9 +189,9 @@ const StrategyCenter: React.FC = () => {
               }}>
                 {[
                   { title: '夏普比率', value: metrics.sharpe_ratio, precision: 4, color: 'var(--color-primary)', gradient: 'var(--gradient-primary)' },
-                  { title: '最大回撤', value: (metrics.max_drawdown * 100).toFixed(2) + '%', color: 'var(--color-loss)', gradient: 'var(--gradient-loss)' },
-                  { title: '年化收益', value: (metrics.annualized_return * 100).toFixed(2) + '%', color: 'var(--color-gain)', gradient: 'var(--gradient-gain)' },
-                  { title: '胜率', value: (metrics.win_rate * 100).toFixed(1) + '%', color: 'var(--color-accent)', gradient: 'var(--gradient-accent)' },
+                  { title: '最大回撤', value: ((metrics.max_drawdown ?? 0) * 100).toFixed(2) + '%', color: 'var(--color-loss)', gradient: 'var(--gradient-loss)' },
+                  { title: '年化收益', value: ((metrics.annualized_return ?? 0) * 100).toFixed(2) + '%', color: 'var(--color-gain)', gradient: 'var(--gradient-gain)' },
+                  { title: '胜率', value: ((metrics.win_rate ?? 0) * 100).toFixed(1) + '%', color: 'var(--color-accent)', gradient: 'var(--gradient-accent)' },
                   { title: '盈亏比', value: metrics.profit_factor, precision: 2, color: 'var(--color-primary)', gradient: 'var(--gradient-primary)' },
                   { title: '交易次数', value: metrics.n_trades, color: 'var(--text-secondary)', gradient: 'var(--gradient-primary)' },
                 ].map((m, idx) => (

@@ -273,24 +273,29 @@ class QueryBuilder:
     """SQL 查询构建器"""
 
     @staticmethod
-    def build_where_clause(filters: dict[str, Any]) -> str:
-        """构建 WHERE 子句"""
+    def build_where_clause(filters: dict[str, Any]) -> tuple[str, list]:
+        """构建 WHERE 子句，返回 (clause_str, params_list) 元组
+
+        使用 %s 占位符，避免 SQL 注入。
+        """
         if not filters:
-            return ""
+            return "", []
 
         conditions = []
+        params = []
         for key, value in filters.items():
-            if isinstance(value, str):
-                conditions.append(f"{key} = '{value}'")
-            elif isinstance(value, (list, tuple)):
-                values_str = ", ".join(f"'{v}'" if isinstance(v, str) else str(v) for v in value)
-                conditions.append(f"{key} IN ({values_str})")
+            if isinstance(value, (list, tuple)):
+                placeholders = ", ".join(["%s"] * len(value))
+                conditions.append(f"{key} IN ({placeholders})")
+                params.extend(value)
             elif value is None:
                 conditions.append(f"{key} IS NULL")
             else:
-                conditions.append(f"{key} = {value}")
+                conditions.append(f"{key} = %s")
+                params.append(value)
 
-        return "WHERE " + " AND ".join(conditions) if conditions else ""
+        clause = "WHERE " + " AND ".join(conditions) if conditions else ""
+        return clause, params
 
     @staticmethod
     def build_select_query(
@@ -299,13 +304,17 @@ class QueryBuilder:
         filters: Optional[dict[str, Any]] = None,
         order_by: Optional[str] = None,
         limit: Optional[int] = None
-    ) -> str:
-        """构建 SELECT 查询"""
+    ) -> tuple[str, list]:
+        """构建 SELECT 查询，返回 (sql, params) 元组"""
         cols = ", ".join(columns) if columns else "*"
         query = f"SELECT {cols} FROM {table}"
 
+        params: list = []
         if filters:
-            query += " " + QueryBuilder.build_where_clause(filters)
+            where_clause, where_params = QueryBuilder.build_where_clause(filters)
+            if where_clause:
+                query += " " + where_clause
+                params.extend(where_params)
 
         if order_by:
             query += f" ORDER BY {order_by}"
@@ -313,4 +322,4 @@ class QueryBuilder:
         if limit:
             query += f" LIMIT {limit}"
 
-        return query
+        return query, params

@@ -33,7 +33,7 @@ const TaskSelector: React.FC<TaskSelectorProps> = ({ selectedTasks, onChange }) 
           productionApi.listFactors(),
         ]);
         setSyncTasks(syncRes.data.tasks || []);
-        setFactorTasks(factorRes.data || []);
+        setFactorTasks(factorRes.data?.data || []);
       } catch (e) {
         console.error('Failed to fetch tasks:', e);
       } finally {

@@ -128,9 +128,16 @@ class SyncLogManager:
             """
             result = self.repository.query(sql, params=("tushare_config", task_id))
             if not result.is_empty():
+                updated_at_val = result["updated_at"][0]
+                updated_at_str = None
+                if updated_at_val is not None:
+                    try:
+                        updated_at_str = updated_at_val.strftime("%Y-%m-%d %H:%M:%S")
+                    except AttributeError:
+                        updated_at_str = str(updated_at_val)
                 return {
                     "last_date": result["last_date"][0],
-                    "updated_at": result["updated_at"][0].strftime("%Y-%m-%d %H:%M:%S") if result["updated_at"][0] else None
+                    "updated_at": updated_at_str
                 }
         except Exception as e:
             logger.warning(f"Failed to get last sync info for {task_id}: {e}")
@@ -507,7 +514,7 @@ class SyncTaskExecutor(ISyncTaskExecutor):
                 self.log_manager.update_sync_log(task_id, date_str, 0, "failed", str(e), params=params_str)
 
         logger.info(f"Incremental sync completed for {task_id}: {total_rows} total rows")
-        return True
+        return total_rows > 0 or len(dates) == 0
 
     def _format_params(
         self,

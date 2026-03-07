@@ -1,7 +1,7 @@
 """
 Flow 配置管理 API
 """
-import os
+import re
 from pathlib import Path
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Query
@@ -14,6 +14,13 @@ router = APIRouter()
 
 # Flow 配置目录
 FLOWS_DIR = Path(__file__).parent.parent.parent.parent.parent / "config" / "flows"
+
+_SAFE_NAME_RE = re.compile(r'^[a-zA-Z0-9_\-]+$')
+
+
+def _validate_flow_name(name: str):
+    if not _SAFE_NAME_RE.match(name):
+        raise HTTPException(status_code=400, detail=f"Invalid flow name: '{name}'")
 
 
 class TaskConfig(BaseModel):
@@ -42,6 +49,7 @@ class FlowListItem(BaseModel):
 
 def _load_flow(name: str) -> dict:
     """加载单个 Flow 配置"""
+    _validate_flow_name(name)
     file_path = FLOWS_DIR / f"{name}.yaml"
     if not file_path.exists():
         raise HTTPException(status_code=404, detail=f"Flow '{name}' not found")
@@ -51,6 +59,7 @@ def _load_flow(name: str) -> dict:
 
 def _save_flow(config: dict):
     """保存 Flow 配置"""
+    _validate_flow_name(config['name'])
     FLOWS_DIR.mkdir(parents=True, exist_ok=True)
     file_path = FLOWS_DIR / f"{config['name']}.yaml"
     with open(file_path, "w", encoding="utf-8") as f:
