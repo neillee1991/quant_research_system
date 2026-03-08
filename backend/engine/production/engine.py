@@ -162,7 +162,7 @@ class ProductionEngine:
             logger.info(f"Factor {factor_id} computed {len(result)} rows")
 
             # 5. 存储结果
-            rows = self._save_results(factor_id, result, definition.storage, run_id)
+            rows = self._save_results(factor_id, result, definition.storage, run_id, compute_mode)
 
             # 6. 更新因子元数据
             self._update_metadata(factor_id, definition, calc_end, rows)
@@ -646,21 +646,16 @@ class ProductionEngine:
         return result
 
     def _save_results(self, factor_id: str, df: pl.DataFrame,
-                      storage: StorageConfig, run_id: str = "") -> int:
+                      storage: StorageConfig, run_id: str = "", compute_mode: str = "incremental") -> int:
         """保存因子计算结果"""
         if storage.target == "factor_values":
-            return self._save_to_unified_table(factor_id, df, run_id)
+            return self._save_to_unified_table(factor_id, df, run_id, compute_mode=compute_mode)
         else:
-            return self._save_to_custom_table(df, storage)
+            return self._save_to_custom_table(df, storage, compute_mode=compute_mode)
 
-    def _save_to_unified_table(self, factor_id: str, df: pl.DataFrame, run_id: str = "", task_version: int = 1) -> int:
+    def _save_to_unified_table(self, factor_id: str, df: pl.DataFrame, run_id: str = "", task_version: int = 1, compute_mode: str = "incremental") -> int:
         """保存到统一因子表"""
         from datetime import datetime
-
-        # 获取当前因子版本
-        current_version = self.db.get_current_task_version("factor", factor_id)
-        if current_version:
-            task_version = current_version.get("version_number", 1)
 
         # 构造写入数据：ts_code, trade_date, factor_id, factor_value, quality_flag, task_version, run_id, data_version, created_at
         # 不可变模式：使用列表推导式和条件表达式构建列列表
@@ -689,31 +684,50 @@ class ProductionEngine:
 
         write_df = df.select(select_cols)
 
-        # 先删除旧数据再插入，确保被剔除的股票（如 ST 变更）不会留有残余值
-        trade_dates = write_df["trade_date"].unique().to_list()
-        if trade_dates:
-            self._delete_factor_dates(factor_id, trade_dates)
+        if compute_mode == "full":
+            # 全量模式：清空该因子的所有数据
+            try:
+                db_path = self.db._db_path
+                self.db.execute(
+                    f'pt = loadTable("{db_path}", "factor_values");'
+                    f'delete from pt where factor_id = "{factor_id}"'
+                )
+                logger.info(f"[全量模式] 已清空因子 {factor_id} 的所有历史数据")
+            except Exception as e:
+                logger.warning(f"清空因子 {factor_id} 数据失败: {e}")
 
-        self.db.upsert("factor_values", write_df,
-                       ["ts_code", "trade_date", "factor_id"])
+            # 全量写入（不需要按日期删除）
+            self.db.upsert("factor_values", write_df,
+                          ["ts_code", "trade_date", "factor_id"],
+                          is_full_sync=False)  # 已经手动清空了，不需要再清空
+        else:
+            # 增量模式：按日期逐个清空并写入
+            trade_dates = write_df["trade_date"].unique().to_list()
+            for trade_date in trade_dates:
+                date_df = write_df.filter(pl.col("trade_date") == trade_date)
+                # 先删除该因子在该日期的数据
+                try:
+                    db_path = self.db._db_path
+                    ddb_date = self.db._escape_value(trade_date)
+                    self.db.execute(
+                        f'pt = loadTable("{db_path}", "factor_values");'
+                        f'delete from pt where factor_id = "{factor_id}" and trade_date = {ddb_date}'
+                    )
+                except Exception as e:
+                    logger.warning(f"删除因子 {factor_id} 日期 {trade_date} 数据失败: {e}")
+
+                # 写入该日期的数据
+                self.db.upsert("factor_values", date_df,
+                              ["ts_code", "trade_date", "factor_id"],
+                              is_full_sync=False)
+
+            logger.info(f"[增量模式] 因子 {factor_id} 已更新 {len(trade_dates)} 个交易日")
+
         return len(write_df)
 
-    def _delete_factor_dates(self, factor_id: str, trade_dates: list) -> None:
-        """删除 factor_values 中指定因子在指定日期的所有旧数据"""
-        try:
-            db_path = self.db._db_path
-            ddb_dates = [self.db._escape_value(d) for d in trade_dates]
-            dates_vec = "[" + ", ".join(ddb_dates) + "]"
-            self.db.execute(
-                f'pt = loadTable("{db_path}", "factor_values");'
-                f'delete from pt where factor_id = "{factor_id}" and trade_date in {dates_vec}'
-            )
-            logger.debug(f"已删除 {factor_id} 在 {len(trade_dates)} 个日期的旧数据")
-        except Exception as e:
-            logger.warning(f"删除 {factor_id} 旧数据失败: {e}")
 
     def _save_to_custom_table(self, df: pl.DataFrame,
-                              storage: StorageConfig) -> int:
+                              storage: StorageConfig, compute_mode: str = "incremental") -> int:
         """保存到自定义表"""
         table_name = storage.target
 
@@ -727,7 +741,21 @@ class ProductionEngine:
             logger.info(f"Created custom factor table: {table_name}")
 
         pk = storage.primary_keys or ["ts_code", "trade_date"]
-        self.db.upsert(table_name, df, pk)
+
+        if compute_mode == "full":
+            # 全量模式：清空整个表
+            self.db.upsert(table_name, df, pk, is_full_sync=True)
+        else:
+            # 增量模式：按 trade_date 逐个清空并写入
+            if "trade_date" in df.columns:
+                trade_dates = df["trade_date"].unique().to_list()
+                for trade_date in trade_dates:
+                    date_df = df.filter(pl.col("trade_date") == trade_date)
+                    self.db.upsert(table_name, date_df, pk, is_full_sync=False, trade_date=trade_date)
+            else:
+                # 没有 trade_date 列，直接写入
+                self.db.upsert(table_name, df, pk, is_full_sync=False)
+
         return len(df)
 
     # ==================== 元数据管理 ====================

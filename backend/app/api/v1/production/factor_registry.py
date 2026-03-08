@@ -112,8 +112,6 @@ async def list_registered_factors():
 
                 seed_df = pl.DataFrame({
                     "factor_id": [fid],
-                    "version_number": [1],
-                    "is_current": [True],
                     "description": [fdef.get("description", "")],
                     "category": [fdef.get("category", "custom")],
                     "compute_mode": [fdef.get("compute_mode", "incremental")],
@@ -121,12 +119,10 @@ async def list_registered_factors():
                     "depends_on": [json.dumps(fdef.get("depends_on", []))],
                     "params": [json.dumps(fdef.get("params", {}))],
                     "code": [code_str],
-                    "changed_by": ["system"],
-                    "change_reason": ["Auto-discovered from code"],
                     "created_at": [now],
                     "updated_at": [now],
                 })
-                db_client.upsert("factor_metadata", seed_df, ["factor_id", "version_number"])
+                db_client.upsert("factor_metadata", seed_df, ["factor_id"])
                 db_meta[fid] = {"factor_id": fid, "description": fdef.get("description", ""),
                                 "category": fdef.get("category", "custom")}
             except Exception as e:
@@ -172,8 +168,6 @@ async def create_factor(req: FactorCreateRequest):
         now = datetime.now()
         new_df = pl.DataFrame({
             "factor_id": [req.factor_id],
-            "version_number": [1],
-            "is_current": [True],
             "description": [req.description],
             "category": [req.category],
             "compute_mode": [req.compute_mode],
@@ -181,12 +175,10 @@ async def create_factor(req: FactorCreateRequest):
             "depends_on": [json.dumps(req.depends_on)],
             "params": [json.dumps(req.params)],
             "code": [req.code or ""],
-            "changed_by": ["api"],
-            "change_reason": ["Created via API"],
             "created_at": [now],
             "updated_at": [now],
         })
-        db_client.upsert("factor_metadata", new_df, ["factor_id", "version_number"])
+        db_client.upsert("factor_metadata", new_df, ["factor_id"])
         api_cache.invalidate("production:factors")
         return {"status": "success", "data": {"factor_id": req.factor_id}}
     except HTTPException:
@@ -198,39 +190,38 @@ async def create_factor(req: FactorCreateRequest):
 
 @router.put("/production/factors/{factor_id}")
 async def update_factor(factor_id: str, req: FactorUpdateRequest):
-    """更新因子元数据（创建新版本）"""
+    """更新因子元数据（直接更新）"""
     _validate_factor_id(factor_id)
     try:
         existing = db_client.query(
-            "SELECT * FROM factor_metadata WHERE factor_id = %s AND is_current = true", (factor_id,)
+            "SELECT * FROM factor_metadata WHERE factor_id = %s", (factor_id,)
         )
         if existing.is_empty():
             raise HTTPException(status_code=404, detail=f"因子 {factor_id} 不存在")
 
         row = existing.to_dicts()[0]
         updates = req.model_dump(exclude_unset=True)
+        now = datetime.now()
 
-        for key, value in updates.items():
-            if key in ["depends_on", "params"]:
-                row[key] = json.dumps(value)
-            else:
-                row[key] = value
+        # 构建更新数据
+        update_df = pl.DataFrame({
+            "factor_id": [factor_id],
+            "description": [updates.get("description", row.get("description", ""))],
+            "category": [updates.get("category", row.get("category", "custom"))],
+            "compute_mode": [updates.get("compute_mode", row.get("compute_mode", "incremental"))],
+            "storage_target": [updates.get("storage_target", row.get("storage_target", "factor_values"))],
+            "depends_on": [json.dumps(updates["depends_on"]) if "depends_on" in updates else row.get("depends_on", "[]")],
+            "params": [json.dumps(updates["params"]) if "params" in updates else row.get("params", "{}")],
+            "code": [row.get("code", "")],
+            "enabled": [updates.get("enabled", row.get("enabled", True))],
+            "created_at": [row.get("created_at", now)],
+            "updated_at": [now],
+        })
 
-        config_data = {k: v for k, v in row.items() if k not in [
-            "factor_id", "version_number", "is_current", "changed_by",
-            "change_reason", "created_at", "updated_at"
-        ]}
-
-        version = db_client.create_task_version(
-            task_type="factor",
-            task_id=factor_id,
-            config_data=config_data,
-            changed_by="api",
-            change_reason="Updated via API"
-        )
+        db_client.upsert("factor_metadata", update_df, ["factor_id"])
 
         api_cache.invalidate("production:factors")
-        return {"status": "success", "data": {"factor_id": factor_id, "version": version}}
+        return {"status": "success", "data": {"factor_id": factor_id}}
     except HTTPException:
         raise
     except Exception as e:
@@ -307,7 +298,7 @@ async def update_factor_code(factor_id: str, req: FactorCodeUpdateRequest):
     try:
         # 检查因子是否存在
         existing = db_client.query(
-            "SELECT * FROM factor_metadata WHERE factor_id = %s AND is_current = true", (factor_id,)
+            "SELECT * FROM factor_metadata WHERE factor_id = %s", (factor_id,)
         )
 
         if existing.is_empty():
@@ -315,25 +306,26 @@ async def update_factor_code(factor_id: str, req: FactorCodeUpdateRequest):
 
         # 更新代码字段
         row = existing.to_dicts()[0]
-        row["code"] = req.code
+        now = datetime.now()
 
-        # 移除版本控制字段
-        config_data = {k: v for k, v in row.items() if k not in [
-            "factor_id", "version_number", "is_current", "changed_by",
-            "change_reason", "created_at", "updated_at"
-        ]}
+        update_df = pl.DataFrame({
+            "factor_id": [factor_id],
+            "description": [row.get("description", "")],
+            "category": [row.get("category", "custom")],
+            "compute_mode": [row.get("compute_mode", "incremental")],
+            "storage_target": [row.get("storage_target", "factor_values")],
+            "depends_on": [row.get("depends_on", "[]")],
+            "params": [row.get("params", "{}")],
+            "code": [req.code],
+            "enabled": [row.get("enabled", True)],
+            "created_at": [row.get("created_at", now)],
+            "updated_at": [now],
+        })
 
-        # 创建新版本
-        version = db_client.create_task_version(
-            task_type="factor",
-            task_id=factor_id,
-            config_data=config_data,
-            changed_by="api",
-            change_reason="Code updated via API"
-        )
+        db_client.upsert("factor_metadata", update_df, ["factor_id"])
 
         api_cache.invalidate("production:factors")
-        return {"status": "success", "data": {"factor_id": factor_id, "version": version}}
+        return {"status": "success", "data": {"factor_id": factor_id}}
     except HTTPException:
         raise
     except Exception as e:

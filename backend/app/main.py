@@ -6,7 +6,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from app.core.config import settings
 from app.core.logger import logger
 from app.core.exceptions import QuantException, quant_exception_handler, general_exception_handler
-from app.api.v1 import factor, strategy, ml, flows, versions
+from app.api.v1 import factor, strategy, ml, flows, versions, tasks, schema_tools
 from app.api.v1 import production  # 使用拆分后的 production 模块
 from app.api.v1 import data  # 使用拆分后的 data 模块
 from app.api.v1.generic_task import create_task_router
@@ -81,6 +81,10 @@ def create_app() -> FastAPI:
     app.include_router(production.router, prefix=settings.api_v1_prefix, tags=["production"])
     app.include_router(flows.router, prefix=settings.api_v1_prefix, tags=["flows"])
     app.include_router(versions.router, prefix=settings.api_v1_prefix, tags=["versions"])
+    app.include_router(schema_tools.router, prefix=settings.api_v1_prefix, tags=["schema-tools"])
+
+    # 统一任务管理路由
+    app.include_router(tasks.router, prefix=settings.api_v1_prefix, tags=["tasks"])
 
     # 新的通用任务管理路由
     app.include_router(

@@ -1,20 +1,14 @@
 /**
  * Task Management Abstraction Types
  *
- * Provides unified type definitions for all task types (sync, etl, factor)
- * with shared version control fields.
+ * Provides unified type definitions for all task types (sync, etl, factor).
  */
 
 // Task type discriminator
 export type TaskType = 'sync' | 'etl' | 'factor';
 
-// Base configuration interface with 8 version control fields
+// Base configuration interface
 export interface BaseTaskConfig {
-  // Version control fields (shared by all task types)
-  version_number: number;
-  is_current: boolean;
-  changed_by: string;
-  change_reason: string;
   created_at?: string;
   updated_at?: string;
   description: string;
@@ -70,13 +64,11 @@ export interface TaskDetailResponse<T extends BaseTaskConfig> {
 }
 
 export interface TaskCreateRequest<T extends BaseTaskConfig> {
-  config: Omit<T, 'version_number' | 'is_current' | 'created_at' | 'updated_at'>;
+  config: Omit<T, 'created_at' | 'updated_at'>;
 }
 
 export interface TaskUpdateRequest<T extends BaseTaskConfig> {
-  config: Partial<Omit<T, 'version_number' | 'is_current' | 'created_at' | 'updated_at'>>;
-  changed_by: string;
-  change_reason: string;
+  config: Partial<Omit<T, 'created_at' | 'updated_at'>>;
 }
 
 export interface TaskDeleteResponse {

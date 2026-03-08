@@ -24,11 +24,7 @@ describe('TaskService', () => {
           task_id: 'daily_basic',
           description: 'Daily basic data',
           api_name: 'daily',
-          version_number: 1,
-          is_current: true,
           enabled: true,
-          changed_by: 'system',
-          change_reason: 'Initial',
         },
       ];
 
@@ -47,11 +43,7 @@ describe('TaskService', () => {
         task_id: 'daily_basic',
         description: 'Daily basic data',
         api_name: 'daily',
-        version_number: 1,
-        is_current: true,
         enabled: true,
-        changed_by: 'system',
-        change_reason: 'Initial',
       };
 
       (global.fetch as jest.Mock).mockResolvedValueOnce({
@@ -74,10 +66,6 @@ describe('TaskService', () => {
 
       const mockResponse = {
         ...newTask,
-        version_number: 1,
-        is_current: true,
-        changed_by: 'user',
-        change_reason: 'Create',
       };
 
       (global.fetch as jest.Mock).mockResolvedValueOnce({
@@ -85,7 +73,7 @@ describe('TaskService', () => {
         json: async () => mockResponse,
       });
 
-      const task = await syncService.createTask(newTask as any, 'user', 'Create');
+      const task = await syncService.createTask(newTask as any);
       expect(task).toEqual(mockResponse);
       expect(global.fetch).toHaveBeenCalledWith(
         '/api/v1/sync/tasks',
@@ -102,11 +90,7 @@ describe('TaskService', () => {
         task_id: 'daily_basic',
         description: 'Updated description',
         api_name: 'daily',
-        version_number: 2,
-        is_current: true,
         enabled: true,
-        changed_by: 'user',
-        change_reason: 'Update',
       };
 
       (global.fetch as jest.Mock).mockResolvedValueOnce({
@@ -114,7 +98,7 @@ describe('TaskService', () => {
         json: async () => mockResponse,
       });
 
-      const task = await syncService.updateTask('daily_basic', updates, 'user', 'Update');
+      const task = await syncService.updateTask('daily_basic', updates);
       expect(task).toEqual(mockResponse);
       expect(global.fetch).toHaveBeenCalledWith(
         '/api/v1/sync/tasks/daily_basic',
@@ -144,11 +128,7 @@ describe('TaskService', () => {
         task_id: 'daily_basic',
         description: 'Daily basic data',
         api_name: 'daily',
-        version_number: 2,
-        is_current: true,
         enabled: false,
-        changed_by: 'user',
-        change_reason: '禁用任务',
       };
 
       (global.fetch as jest.Mock).mockResolvedValueOnce({
@@ -160,46 +140,8 @@ describe('TaskService', () => {
       expect(task.enabled).toBe(false);
     });
 
-    it('should get version history', async () => {
-      const mockVersions = {
-        versions: [
-          { version_number: 2, changed_by: 'user', change_reason: 'Update' },
-          { version_number: 1, changed_by: 'system', change_reason: 'Initial' },
-        ],
-      };
-
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockVersions,
-      });
-
-      const versions = await syncService.getVersionHistory('daily_basic');
-      expect(versions).toEqual(mockVersions.versions);
-      expect(global.fetch).toHaveBeenCalledWith('/api/v1/tasks/sync/daily_basic/versions');
-    });
-
-    it('should rollback to version', async () => {
-      const mockResponse = {
-        task_id: 'daily_basic',
-        version_number: 3,
-        is_current: true,
-        changed_by: 'user',
-        change_reason: '版本回滚',
-      };
-
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
-        ok: true,
-        json: async () => mockResponse,
-      });
-
-      const task = await syncService.rollbackToVersion('daily_basic', 1, 'user', '版本回滚');
-      expect(task.version_number).toBe(3);
-      expect(global.fetch).toHaveBeenCalledWith(
-        '/api/v1/tasks/sync/daily_basic/rollback/1',
-        expect.objectContaining({
-          method: 'POST',
-        })
-      );
+    it('should use correct ID field', () => {
+      expect(syncService.getIdField()).toBe('task_id');
     });
   });
 

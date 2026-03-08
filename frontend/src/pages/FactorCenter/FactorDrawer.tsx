@@ -8,7 +8,7 @@ import {
   Collapse, Card, Spin, Empty, Table, Tag, Tooltip, Toast, Checkbox,
 } from '@douyinfe/semi-ui';
 import {
-  IconEdit, IconSave, IconCode, IconServer, IconHistory, IconSearch,
+  IconEdit, IconSave, IconCode, IconServer, IconSearch, IconHistogram,
 } from '@douyinfe/semi-icons';
 import Editor from '@monaco-editor/react';
 import { productionApi, DEFAULT_PREPROCESS } from '../../api';
@@ -233,19 +233,6 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
       title={
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <span style={{ color: 'var(--color-primary)' }}>{factorId}</span>
-          <Button
-            icon={<IconHistory />}
-            size="small"
-            theme="borderless"
-            onClick={() => {
-              const event = new CustomEvent('showVersionHistory', {
-                detail: { taskType: 'factor', taskId: factorId }
-              });
-              window.dispatchEvent(event);
-            }}
-          >
-            版本历史
-          </Button>
         </div>
       }
       visible={open} onCancel={onClose} width={780}
@@ -400,7 +387,7 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
           </div>
         </TabPane>
 
-        <TabPane itemKey="logs" tab={<span><IconHistory size="small" /> 日志</span>}>
+        <TabPane itemKey="logs" tab={<span><IconHistogram size="small" /> 日志</span>}>
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
               <span style={{ color: 'var(--text-secondary)', fontSize: 13 }}>最近 50 条计算记录</span>

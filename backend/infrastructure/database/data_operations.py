@@ -112,18 +112,24 @@ class DataOperations:
         df: pl.DataFrame,
         key_columns: List[str],
         known_columns: Optional[List[str]] = None,
+        is_full_sync: bool = False,
+        trade_date: Optional[str] = None,
     ) -> None:
         """
         插入或更新数据
 
-        TSDB 分区表使用 keepDuplicates=LAST 自动去重。
-        维度表需要手动 delete + insert。
+        统一规则：
+        - 全量任务 (is_full_sync=True): 清空整个表，然后写入新数据
+        - 增量任务 (is_full_sync=False): 清空指定 trade_date 的数据，然后写入新数据
+        - 如果 is_full_sync=False 且 trade_date=None: 直接插入（用于元数据表等无需清空的场景）
 
         Args:
             table_name: 表名
             df: Polars DataFrame
             key_columns: 主键列
             known_columns: 已知列顺序（跳过 schema 查询，用于刚建表后首次写入）
+            is_full_sync: 是否全量同步
+            trade_date: 交易日期（增量同步时提供）
         """
         if df.is_empty():
             logger.warning(f"空 DataFrame，跳过写入: {table_name}")
@@ -140,29 +146,41 @@ class DataOperations:
                 )
                 col_select = ", ".join(ordered_cols)
 
-                if is_meta:
-                    # 维度表：手动 delete + insert
-                    key_conditions = " and ".join([
-                        f"{k} in (select distinct {k} from {tmp_var})"
-                        for k in key_columns
-                    ])
+                # 构建删除语句
+                table_handle = f"{table_name}_handle = loadTable('{db_path}', '{table_name}');"
+
+                if is_full_sync:
+                    # 全量同步：清空整个表
+                    delete_stmt = f"delete from {table_name}_handle;"
+                    logger.info(f"[全量同步] 清空表 {table_name}")
+                elif trade_date:
+                    # 增量同步：只清空指定 trade_date 的数据
+                    # 需要转义日期值
+                    from infrastructure.database.type_converter import TypeConverter
+                    escaped_date = TypeConverter.escape_value(trade_date)
+                    delete_stmt = f"delete from {table_name}_handle where trade_date = {escaped_date};"
+                    logger.info(f"[增量同步] 清空表 {table_name} 中 trade_date={trade_date} 的数据")
+                else:
+                    # 无需清空，直接插入（元数据表等场景）
+                    delete_stmt = ""
+
+                # 执行：删除 + 插入
+                if delete_stmt:
                     self._conn.session.run(
-                        f"{table_name}_handle = loadTable('{db_path}', '{table_name}');"
-                        f"delete from {table_name}_handle where {key_conditions};"
+                        f"{table_handle}"
+                        f"{delete_stmt}"
                         f"tableInsert({table_name}_handle, select {col_select} from {tmp_var});"
                         f"undef('{tmp_var}')"
                     )
                 else:
-                    # TSDB 表：keepDuplicates=LAST 自动去重，直接插入
                     self._conn.session.run(
-                        f"{table_name}_handle = loadTable('{db_path}', '{table_name}');"
+                        f"{table_handle}"
                         f"tableInsert({table_name}_handle, select {col_select} from {tmp_var});"
                         f"undef('{tmp_var}')"
                     )
-            logger.info(
-                f"写入 {len(df)} 行到 {table_name}，"
-                f"主键列: {key_columns}"
-            )
+
+            mode_desc = "全量" if is_full_sync else (f"增量(trade_date={trade_date})" if trade_date else "直接插入")
+            logger.info(f"写入 {len(df)} 行到 {table_name}，模式: {mode_desc}")
         except Exception as e:
             logger.error(f"写入失败 [{table_name}]: {e}")
             raise

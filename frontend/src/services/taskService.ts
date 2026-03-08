@@ -21,7 +21,7 @@ import type {
 
 /**
  * Generic Task Service
- * Handles CRUD operations for any task type with version control support
+ * Handles CRUD operations for any task type
  */
 export class TaskService<T extends BaseTaskConfig> {
   private taskType: TaskType;
@@ -35,7 +35,7 @@ export class TaskService<T extends BaseTaskConfig> {
   }
 
   /**
-   * List all tasks (current versions only)
+   * List all tasks
    */
   async listTasks(enabledOnly: boolean = false): Promise<T[]> {
     try {
@@ -65,7 +65,7 @@ export class TaskService<T extends BaseTaskConfig> {
   }
 
   /**
-   * Get a specific task by ID (current version)
+   * Get a specific task by ID
    */
   async getTask(taskId: string): Promise<T> {
     try {
@@ -87,21 +87,13 @@ export class TaskService<T extends BaseTaskConfig> {
    * Create a new task
    */
   async createTask(
-    config: Omit<T, 'version_number' | 'is_current' | 'created_at' | 'updated_at'>,
-    changedBy: string = 'user',
-    changeReason: string = '创建任务'
+    config: Omit<T, 'created_at' | 'updated_at'>
   ): Promise<T> {
     try {
-      const payload = {
-        ...config,
-        changed_by: changedBy,
-        change_reason: changeReason,
-      };
-
       const response = await fetch(this.baseUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(config),
       });
 
       if (!response.ok) {
@@ -119,25 +111,17 @@ export class TaskService<T extends BaseTaskConfig> {
   }
 
   /**
-   * Update an existing task (creates new version)
+   * Update an existing task
    */
   async updateTask(
     taskId: string,
-    updates: Partial<Omit<T, 'version_number' | 'is_current' | 'created_at' | 'updated_at'>>,
-    changedBy: string = 'user',
-    changeReason: string = '更新任务'
+    updates: Partial<Omit<T, 'created_at' | 'updated_at'>>
   ): Promise<T> {
     try {
-      const payload = {
-        ...updates,
-        changed_by: changedBy,
-        change_reason: changeReason,
-      };
-
       const response = await fetch(`${this.baseUrl}/${taskId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(updates),
       });
 
       if (!response.ok) {
@@ -155,7 +139,7 @@ export class TaskService<T extends BaseTaskConfig> {
   }
 
   /**
-   * Delete a task (soft delete - marks all versions as deleted)
+   * Delete a task
    */
   async deleteTask(taskId: string): Promise<void> {
     try {
@@ -179,64 +163,7 @@ export class TaskService<T extends BaseTaskConfig> {
    * Toggle task enabled status
    */
   async toggleEnabled(taskId: string, enabled: boolean): Promise<T> {
-    return this.updateTask(
-      taskId,
-      { enabled } as Partial<T>,
-      'user',
-      enabled ? '启用任务' : '禁用任务'
-    );
-  }
-
-  /**
-   * Get version history for a task
-   */
-  async getVersionHistory(taskId: string): Promise<T[]> {
-    try {
-      const response = await fetch(`/api/v1/tasks/${this.taskType}/${taskId}/versions`);
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      return data.versions || [];
-    } catch (error: any) {
-      Toast.error(`加载版本历史失败: ${error.message}`);
-      throw error;
-    }
-  }
-
-  /**
-   * Rollback to a specific version
-   */
-  async rollbackToVersion(
-    taskId: string,
-    version: number,
-    changedBy: string = 'user',
-    changeReason: string = '版本回滚'
-  ): Promise<T> {
-    try {
-      const response = await fetch(
-        `/api/v1/tasks/${this.taskType}/${taskId}/rollback/${version}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ changed_by: changedBy, change_reason: changeReason }),
-        }
-      );
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.detail || `HTTP ${response.status}`);
-      }
-
-      const data = await response.json();
-      Toast.success(`已回滚到版本 ${version}`);
-      return data as T;
-    } catch (error: any) {
-      Toast.error(`版本回滚失败: ${error.message}`);
-      throw error;
-    }
+    return this.updateTask(taskId, { enabled } as Partial<T>);
   }
 
   /**

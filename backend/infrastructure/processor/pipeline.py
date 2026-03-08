@@ -26,6 +26,9 @@ class ProcessContext:
     calc_end: str    # 计算结果结束日期
     data_start: str  # 数据加载起始日期（含 lookback）
 
+    # 计算模式
+    compute_mode: str = "incremental"  # "full" 或 "incremental"
+
     # 预处理选项
     preprocess_options: Dict[str, Any] = field(default_factory=dict)
 

@@ -1,0 +1,361 @@
+"""
+统一任务管理 API 路由
+提供跨任务类型的统一 RESTful API 端点
+"""
+from typing import Dict, Any, Optional
+from fastapi import APIRouter, HTTPException, Query, Path
+from pydantic import BaseModel, Field
+
+from app.services.task_service import sync_service, etl_service, factor_service, TaskService
+from app.core.logger import logger
+
+router = APIRouter()
+
+
+# ==================== 请求/响应模型 ====================
+
+class TaskCreateRequest(BaseModel):
+    """创建任务请求"""
+    config_data: Dict[str, Any] = Field(..., description="任务配置数据")
+    changed_by: str = Field(default="api", description="修改人")
+    change_reason: str = Field(default="Create new task", description="修改原因")
+
+
+class TaskUpdateRequest(BaseModel):
+    """更新任务请求"""
+    config_data: Dict[str, Any] = Field(..., description="更新的配置数据")
+    changed_by: str = Field(default="api", description="修改人")
+    change_reason: str = Field(default="Update task", description="修改原因")
+
+
+class TaskDeleteRequest(BaseModel):
+    """删除任务请求"""
+    drop_table: bool = Field(default=False, description="是否删除关联表")
+    changed_by: str = Field(default="api", description="修改人")
+    change_reason: str = Field(default="Delete task", description="修改原因")
+
+
+class TaskExecuteRequest(BaseModel):
+    """执行任务请求"""
+    start_date: Optional[str] = Field(default=None, description="开始日期 (YYYYMMDD)")
+    end_date: Optional[str] = Field(default=None, description="结束日期 (YYYYMMDD)")
+    params: Dict[str, Any] = Field(default_factory=dict, description="执行参数")
+
+
+class TaskListResponse(BaseModel):
+    """任务列表响应"""
+    tasks: list[Dict[str, Any]]
+    total: int
+    task_type: str
+
+
+class TaskResponse(BaseModel):
+    """单个任务响应"""
+    task: Dict[str, Any]
+    task_type: str
+
+
+class TaskExecuteResponse(BaseModel):
+    """任务执行响应"""
+    status: str
+    message: str
+    task_id: str
+    task_type: str
+    result: Optional[Dict[str, Any]] = None
+
+
+class DeleteResponse(BaseModel):
+    """删除响应"""
+    success: bool
+    message: str
+    task_id: str
+    task_type: str
+
+
+class VersionResponse(BaseModel):
+    """版本响应"""
+    version: int
+    message: str
+
+
+# ==================== 辅助函数 ====================
+
+def _get_service(task_type: str) -> TaskService:
+    """根据任务类型获取对应的服务"""
+    services = {
+        "sync": sync_service,
+        "etl": etl_service,
+        "factor": factor_service,
+    }
+
+    service = services.get(task_type)
+    if not service:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid task_type: {task_type}. Must be one of: sync, etl, factor"
+        )
+
+    return service
+
+
+# ==================== API 端点 ====================
+
+@router.get("/tasks/{task_type}", response_model=TaskListResponse)
+def list_tasks(
+    task_type: str = Path(..., description="任务类型: sync, etl, factor"),
+    enabled_only: bool = Query(default=False, description="是否只返回启用的任务")
+):
+    """列出所有任务"""
+    try:
+        service = _get_service(task_type)
+        tasks = service.list_tasks(enabled_only=enabled_only)
+        task_dicts = [task.model_dump() for task in tasks]
+
+        return TaskListResponse(
+            tasks=task_dicts,
+            total=len(task_dicts),
+            task_type=task_type
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to list {task_type} tasks: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/tasks/{task_type}/{task_id}", response_model=TaskResponse)
+def get_task(
+    task_type: str = Path(..., description="任务类型: sync, etl, factor"),
+    task_id: str = Path(..., description="任务ID")
+):
+    """获取单个任务"""
+    try:
+        service = _get_service(task_type)
+        task = service.get_task(task_id)
+
+        if not task:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Task {task_id} not found in {task_type}"
+            )
+
+        return TaskResponse(
+            task=task.model_dump(),
+            task_type=task_type
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get {task_type} task {task_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/tasks/{task_type}", response_model=TaskResponse)
+def create_task(
+    task_type: str = Path(..., description="任务类型: sync, etl, factor"),
+    request: TaskCreateRequest = None
+):
+    """创建新任务"""
+    try:
+        service = _get_service(task_type)
+        task = service.create_task(
+            config_data=request.config_data,
+            changed_by=request.changed_by,
+            change_reason=request.change_reason
+        )
+
+        return TaskResponse(
+            task=task.model_dump(),
+            task_type=task_type
+        )
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to create {task_type} task: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/tasks/{task_type}/{task_id}", response_model=TaskResponse)
+def update_task(
+    task_type: str = Path(..., description="任务类型: sync, etl, factor"),
+    task_id: str = Path(..., description="任务ID"),
+    request: TaskUpdateRequest = None
+):
+    """更新任务"""
+    try:
+        service = _get_service(task_type)
+        task = service.update_task(
+            task_id=task_id,
+            config_data=request.config_data,
+            changed_by=request.changed_by,
+            change_reason=request.change_reason
+        )
+
+        return TaskResponse(
+            task=task.model_dump(),
+            task_type=task_type
+        )
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to update {task_type} task {task_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/tasks/{task_type}/{task_id}", response_model=DeleteResponse)
+def delete_task(
+    task_type: str = Path(..., description="任务类型: sync, etl, factor"),
+    task_id: str = Path(..., description="任务ID"),
+    drop_table: bool = Query(default=False, description="是否删除关联表"),
+    changed_by: str = Query(default="api", description="修改人"),
+    change_reason: str = Query(default="Delete task", description="修改原因")
+):
+    """删除任务（软删除，设置 enabled=false）"""
+    try:
+        service = _get_service(task_type)
+
+        # 如果需要删除表，先处理
+        if drop_table:
+            task = service.get_task(task_id)
+            if task:
+                table_name = None
+                if task_type == "sync":
+                    table_name = getattr(task, "table_name", None)
+                elif task_type == "etl":
+                    table_name = getattr(task, "table_name", None)
+                elif task_type == "factor":
+                    # 因子使用统一的 factor_values 表，不删除
+                    logger.warning(f"Factor tasks use shared table, skipping drop_table for {task_id}")
+
+                if table_name:
+                    from store.dolphindb_client import db_client
+                    try:
+                        db_client.drop_table(table_name)
+                        logger.info(f"Dropped table {table_name} for task {task_id}")
+                    except Exception as e:
+                        logger.warning(f"Failed to drop table {table_name}: {e}")
+
+        # 执行软删除
+        success = service.delete_task(
+            task_id=task_id,
+            changed_by=changed_by,
+            change_reason=change_reason
+        )
+
+        return DeleteResponse(
+            success=success,
+            message=f"Task {task_id} deleted successfully" + (" (table dropped)" if drop_table else ""),
+            task_id=task_id,
+            task_type=task_type
+        )
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to delete {task_type} task {task_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/tasks/{task_type}/{task_id}/execute", response_model=TaskExecuteResponse)
+def execute_task(
+    task_type: str = Path(..., description="任务类型: sync, etl, factor"),
+    task_id: str = Path(..., description="任务ID"),
+    request: TaskExecuteRequest = None
+):
+    """执行任务"""
+    try:
+        service = _get_service(task_type)
+
+        # 验证任务存在
+        task = service.get_task(task_id)
+        if not task:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Task {task_id} not found in {task_type}"
+            )
+
+        # 根据任务类型执行不同的逻辑
+        result = None
+
+        if task_type == "sync":
+            from data_manager.refactored_sync_engine import sync_engine
+            result = sync_engine.sync_task(
+                task_id=task_id,
+                start_date=request.start_date if request else None,
+                end_date=request.end_date if request else None
+            )
+            message = f"Sync task {task_id} executed successfully"
+
+        elif task_type == "etl":
+            from data_manager.etl_engine import etl_engine
+            result = etl_engine.run_etl_task(
+                task_id=task_id,
+                start_date=request.start_date if request else None,
+                end_date=request.end_date if request else None
+            )
+            message = f"ETL task {task_id} executed successfully"
+
+        elif task_type == "factor":
+            from engine.production.engine import ProductionEngine
+            engine = ProductionEngine()
+            result = engine.run_task(
+                factor_id=task_id,
+                start_date=request.start_date if request else None,
+                end_date=request.end_date if request else None,
+                mode="full" if not request or not request.start_date else "incremental"
+            )
+            message = f"Factor task {task_id} executed successfully"
+
+        return TaskExecuteResponse(
+            status="success",
+            message=message,
+            task_id=task_id,
+            task_type=task_type,
+            result=result if isinstance(result, dict) else None
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to execute {task_type} task {task_id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Task execution failed: {str(e)}"
+        )
+
+
+@router.get("/tasks/version", response_model=VersionResponse)
+def get_config_version():
+    """获取配置版本号（基于最新更新时间的时间戳）"""
+    try:
+        from store.dolphindb_client import db_client
+
+        # 查询所有配置表的最新更新时间
+        tables = ["sync_task_config", "etl_task_config", "factor_metadata"]
+        max_timestamp = 0
+
+        for table in tables:
+            try:
+                sql = f"SELECT max(updated_at) as max_time FROM {table}"
+                df = db_client.query(sql)
+                if not df.is_empty():
+                    max_time = df["max_time"][0]
+                    if max_time:
+                        timestamp = int(max_time.timestamp() * 1000)
+                        max_timestamp = max(max_timestamp, timestamp)
+            except Exception as e:
+                logger.warning(f"Failed to get version from {table}: {e}")
+
+        return VersionResponse(
+            version=max_timestamp,
+            message=f"Configuration version: {max_timestamp}"
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to get config version: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

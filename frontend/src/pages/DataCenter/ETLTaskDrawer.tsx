@@ -17,8 +17,9 @@ import {
   DatePicker,
   Tag,
   Tooltip,
+  Modal,
 } from '@douyinfe/semi-ui';
-import { IconHistory, IconCode } from '@douyinfe/semi-icons';
+import { IconCode } from '@douyinfe/semi-icons';
 import Editor from '@monaco-editor/react';
 import dayjs from 'dayjs';
 import { dataApi } from '../../api';
@@ -31,7 +32,6 @@ interface ETLTaskDrawerProps {
   isNew: boolean;
   onClose: () => void;
   onSave: () => void;
-  onOpenVersionHistory?: (taskId: string) => void;
 }
 
 interface FieldType {
@@ -52,7 +52,6 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
   isNew,
   onClose,
   onSave,
-  onOpenVersionHistory,
 }) => {
   const { mode } = useThemeStore();
   const [activeTab, setActiveTab] = useState('config');
@@ -78,7 +77,7 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
       loadTaskConfig();
       loadTaskStatus();
       loadEtlLogs();
-    } else if (visible && isNew) {
+    } else if (visible && isNew && !task) {
       // 新建任务的默认配置
       setConfig({
         task_id: 'etl_',
@@ -90,6 +89,8 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
       setFieldTypes([]);
       setSelectedPrimaryKeys([]);
       setTestResult(null);
+      setEtlLogs([]);
+      setTaskStatus(null);
     }
   }, [visible, task, isNew]);
 
@@ -98,9 +99,10 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
     setConfig({
       task_id: task.task_id,
       description: task.description,
-      sync_type: 'incremental',
-      date_field: '',
+      sync_type: task.sync_type || 'incremental',
+      date_field: task.date_field || '',
       script: task.script,
+      enabled: task.enabled !== undefined ? task.enabled : true,
     });
 
     // 加载字段定义
@@ -147,8 +149,10 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
       const res = await dataApi.testEtlScript(config.script, testDate || undefined);
       const data = res.data;
 
-      // 提取字段类型
-      if (data.columns && data.columns.length > 0) {
+      // 提取字段类型（使用后端返回的 field_types）
+      if (data.field_types && data.field_types.length > 0) {
+        setFieldTypes(data.field_types);
+      } else if (data.columns && data.columns.length > 0) {
         const fields = data.columns.map((col: string) => ({
           name: col,
           type: 'STRING', // 默认类型
@@ -158,11 +162,11 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
 
       setTestResult({
         status: 'success',
-        rows: data.count || 0,
-        preview: data.data || [],
+        rows: data.rows || 0,
+        preview: data.preview || [],
       });
 
-      Toast.success(`测试通过: ${data.count || 0} 行`);
+      Toast.success(`测试通过: ${data.rows || 0} 行`);
     } catch (error: any) {
       const errorMsg = error.response?.data?.detail || '脚本测试失败';
       setTestResult({
@@ -181,7 +185,7 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
     }
   };
 
-  const handleSave = async () => {
+  const handleSave = async (confirmSchemaChange = false) => {
     if (!config.task_id || !config.task_id.startsWith('etl_')) {
       Toast.error('任务ID必须以 etl_ 开头');
       return;
@@ -193,28 +197,80 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
     }
 
     try {
+      // 将 fieldTypes 数组转换为 schema 对象格式
+      const schemaObject = fieldTypes.reduce((acc, field) => {
+        acc[field.name] = { type: field.type };
+        return acc;
+      }, {} as Record<string, { type: string }>);
+
       const saveConfig = {
         task_id: config.task_id,
         description: config.description,
         table_name: config.task_id, // 目标表名 = 任务ID
         script: config.script,
-        fields: fieldTypes,
+        schema: schemaObject, // 转换为对象格式
         primary_keys: selectedPrimaryKeys,
         sync_type: config.sync_type,
         date_field: config.date_field,
-        enabled: true,
+        enabled: config.enabled !== undefined ? config.enabled : true,
+        confirm_schema_change: confirmSchemaChange, // 添加确认标志
       };
 
       if (isNew) {
-        await dataApi.createEtlTask(saveConfig);
+        const response = await dataApi.createEtlTask(saveConfig);
         Toast.success(`ETL 任务 ${config.task_id} 创建成功`);
+        onSave();
+        onClose();
       } else {
-        await dataApi.updateEtlTask(config.task_id, saveConfig);
-        Toast.success(`ETL 任务 ${config.task_id} 更新成功`);
-      }
+        const response = await dataApi.updateEtlTask(config.task_id, saveConfig);
+        const result = response.data; // axios 响应数据在 data 中
 
-      onSave();
-      onClose();
+        // 检查响应状态
+        if (result.status === 'warning' && result.require_confirmation) {
+          // 显示确认对话框
+          Modal.confirm({
+            title: '表结构已变更',
+            content: (
+              <div>
+                <p>{result.message}</p>
+                {result.changes && (
+                  <div style={{ marginTop: 12 }}>
+                    <p><strong>变更详情：</strong></p>
+                    {result.changes.script_changed && <p>• ETL 脚本已修改</p>}
+                    {result.changes.primary_keys_changed && <p>• 主键配置已修改</p>}
+                    {result.changes.old_columns && result.changes.new_columns && (
+                      <>
+                        <p>• 旧字段: {result.changes.old_columns.join(', ')}</p>
+                        <p>• 新字段: {result.changes.new_columns.join(', ')}</p>
+                        {result.changes.removed && result.changes.removed.length > 0 && (
+                          <p style={{ color: 'red' }}>• 删除字段: {result.changes.removed.join(', ')}</p>
+                        )}
+                        {result.changes.added && result.changes.added.length > 0 && (
+                          <p style={{ color: 'green' }}>• 新增字段: {result.changes.added.join(', ')}</p>
+                        )}
+                      </>
+                    )}
+                    <p style={{ marginTop: 12, color: 'orange' }}>
+                      <strong>警告：</strong>确认后将删除表 {result.table_name} 的所有历史数据！
+                    </p>
+                  </div>
+                )}
+              </div>
+            ),
+            okText: '确认并清空数据',
+            cancelText: '取消',
+            okType: 'danger',
+            onOk: () => {
+              // 用户确认，重新保存并带上确认标志
+              handleSave(true);
+            },
+          });
+        } else if (result.status === 'success') {
+          Toast.success(`ETL 任务 ${config.task_id} 更新成功`);
+          onSave();
+          onClose();
+        }
+      }
     } catch (error: any) {
       Toast.error(error.response?.data?.detail || '保存配置失败');
     }
@@ -227,16 +283,6 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
           <span>
             {isNew ? '新建 ETL 任务' : `编辑 ETL 任务: ${config.task_id}`}
           </span>
-          {!isNew && onOpenVersionHistory && (
-            <Button
-              icon={<IconHistory />}
-              size="small"
-              theme="borderless"
-              onClick={() => onOpenVersionHistory(config.task_id || '')}
-            >
-              版本历史
-            </Button>
-          )}
         </div>
       }
       visible={visible}
@@ -255,7 +301,7 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
           >
             取消
           </Button>
-          <Button theme="solid" type="primary" onClick={handleSave}>
+          <Button theme="solid" type="primary" onClick={() => handleSave(false)}>
             保存
           </Button>
         </div>
@@ -608,6 +654,7 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
               </div>
             </TabPane>
           )}
+
         </Tabs>
       </div>
     </SideSheet>

@@ -60,7 +60,7 @@ python database/init_dolphindb.py
 
 - Two databases: `dfs://quant_ts` (TSDB partitioned tables) and `dfs://quant_meta` (dimension tables)
 - TSDB tables: `daily_data`, `daily_basic`, `adj_factor`, `index_daily`, `moneyflow`, `factor_values`
-- Dimension tables: `sync_log`, `sync_log_history`, `stock_basic`, `factor_metadata`, `factor_analysis`, `dag_run_log`, `dag_task_log`, `production_task_run`, `trade_cal`, `sync_task_config`
+- Dimension tables: `sync_log`, `sync_log_history`, `stock_basic`, `factor_metadata`, `factor_analysis`, `dag_run_log`, `dag_task_log`, `production_task_run`, `trade_cal`, `sync_task_config`, `factor_data_config`
 - Bare table names are auto-resolved to `loadTable()` calls in `_adapt_sql_syntax()`
 
 The database client is a singleton: `from store.dolphindb_client import db_client`
@@ -78,6 +78,21 @@ settings.backtest.initial_capital
 Environment variables use double underscore for nesting:
 - `DOLPHINDB__HOST=localhost`
 - `COLLECTOR__CALLS_PER_MINUTE=120`
+
+### Configuration Management
+
+**Direct Update Mode**: Configuration updates directly overwrite existing values without version history.
+
+**Best Practices**:
+- Export configurations before updates for manual backup
+- Use Git to version control important configuration files
+- Schedule regular database backups
+- Test configuration changes in development environment first
+
+**Configuration Tables**:
+- `sync_task_config` - Data sync task configurations
+- `factor_data_config` - Factor field mapping configurations
+- All configs include `updated_at` timestamp for tracking changes
 
 ### Data Sync Engine (Database-Driven)
 
@@ -109,6 +124,8 @@ All routes are under `/api/v1/`:
 - `/production/*` - Production factor management
 
 **Important**: The `/data/daily` endpoint queries `daily_basic` table (not `daily_data`), which contains close price + indicators (PE, PB, turnover_rate) but NOT full OHLC data.
+
+**Configuration Updates**: All configuration update endpoints use direct overwrite mode. Previous versions are not retained. Always export configurations before making changes.
 
 ### Exception Handling
 

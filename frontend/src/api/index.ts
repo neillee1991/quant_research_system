@@ -229,38 +229,4 @@ export const flowApi = {
     longRunningApi.post(`/flows/${name}/run`, null, { params: { target_date: targetDate } }),
 };
 
-// Version Control API
-export interface VersionRecord {
-  version: number;
-  changed_by: string;
-  change_reason: string;
-  created_at: string;
-  config?: any;
-}
-
-export interface VersionHistoryResponse {
-  task_id: string;
-  task_type: string;
-  current_version: number;
-  versions: VersionRecord[];
-}
-
-export const versionApi = {
-  // Get version history for a task
-  getHistory: (taskType: 'sync' | 'factor' | 'etl', taskId: string) =>
-    api.get<VersionHistoryResponse>(`/${taskType}/tasks/${taskId}/versions`),
-
-  // Get specific version config
-  getVersion: (taskType: 'sync' | 'factor' | 'etl', taskId: string, version: number) =>
-    api.get(`/${taskType}/tasks/${taskId}/versions/${version}`),
-
-  // Rollback to a specific version
-  rollback: (taskType: 'sync' | 'factor' | 'etl', taskId: string, version: number, reason?: string) =>
-    api.post(`/${taskType}/tasks/${taskId}/versions/${version}/rollback`, { reason }),
-
-  // Compare two versions
-  diff: (taskType: 'sync' | 'factor' | 'etl', taskId: string, v1: number, v2: number) =>
-    api.get(`/${taskType}/tasks/${taskId}/versions/diff`, { params: { v1, v2 } }),
-};
-
 export default api;

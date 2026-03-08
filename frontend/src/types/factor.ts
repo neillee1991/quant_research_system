@@ -30,7 +30,6 @@ export interface FactorDefinition {
   params?: Record<string, unknown>;
   depends_on?: string[];
   lookback_days?: number;
-  version?: number;
   created_at?: string;
   updated_at?: string;
   enabled?: boolean;
@@ -104,14 +103,4 @@ export interface FactorDataConfigItem {
   source_table: string;
   source_field: string;
   description?: string;
-}
-
-export interface FactorVersionRecord {
-  version: number;
-  factor_id: string;
-  code: string;
-  params?: Record<string, unknown>;
-  changed_by: string;
-  change_reason?: string;
-  created_at: string;
 }

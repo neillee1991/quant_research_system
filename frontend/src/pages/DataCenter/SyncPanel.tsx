@@ -16,7 +16,6 @@ import {
   IconSync,
   IconRefresh,
   IconDelete,
-  IconCopy,
   IconHistory,
   IconClock,
 } from '@douyinfe/semi-icons';
@@ -36,7 +35,6 @@ interface SyncPanelProps {
   onNewTask: () => void;
   onBatchSync: () => void;
   onSyncTask: (taskId: string) => void;
-  onCopyTask: (task: SyncTask) => void;
   onDeleteTask: (taskId: string) => void;
   onOpenTaskDrawer: (task: SyncTask) => void;
   onLoadSyncLogs: (source?: string, dataType?: string, startDate?: string, endDate?: string) => void;
@@ -54,7 +52,6 @@ export const SyncPanel: React.FC<SyncPanelProps> = ({
   onNewTask,
   onBatchSync,
   onSyncTask,
-  onCopyTask,
   onDeleteTask,
   onOpenTaskDrawer,
   onLoadSyncLogs,
@@ -212,9 +209,6 @@ export const SyncPanel: React.FC<SyncPanelProps> = ({
             >
               同步
             </Button>
-            <Tooltip content="复制任务">
-              <Button size="small" icon={<IconCopy />} onClick={() => onCopyTask(r)} />
-            </Tooltip>
             <Button
               size="small"
               type="danger"
@@ -310,6 +304,7 @@ export const SyncPanel: React.FC<SyncPanelProps> = ({
       title: '错误信息',
       dataIndex: 'error_message',
       key: 'error_message',
+      width: 200,
       render: (v: string) =>
         v ? (
           <Tooltip content={v}>
@@ -317,9 +312,12 @@ export const SyncPanel: React.FC<SyncPanelProps> = ({
               style={{
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
+                display: '-webkit-box',
+                WebkitLineClamp: 2,
+                WebkitBoxOrient: 'vertical',
                 color: 'var(--color-danger)',
                 fontSize: '12px',
+                lineHeight: '1.4',
               }}
             >
               {v}
@@ -376,7 +374,6 @@ export const SyncPanel: React.FC<SyncPanelProps> = ({
             selectedRowKeys: selectedTaskIds,
             onChange: (selectedRowKeys) => onSelectedTaskIdsChange(selectedRowKeys as string[]),
           }}
-          scroll={{ x: 900 }}
           columns={syncTaskColumns}
         />
       </Card>
@@ -455,8 +452,8 @@ export const SyncPanel: React.FC<SyncPanelProps> = ({
           columns={syncLogColumns}
           rowKey={(record: any) => `${record.id || ''}-${record.created_at || ''}`}
           size="small"
-          pagination={{ pageSize: 50 }}
-          scroll={{ x: 'max-content' }}
+          pagination={{ pageSize: 10 }}
+          scroll={{ x: '100%' }}
         />
       </Card>
     </>

@@ -125,60 +125,6 @@ class DolphinDBClient:
         """将表名注册到元数据表集合（如果尚未注册）"""
         self._query_builder.register_meta_table(table_name)
 
-    # ------------------------------------------------------------------
-    #  任务版本管理（委托给 MetadataManager）
-    # ------------------------------------------------------------------
-
-    def create_task_version(
-        self,
-        task_id: str,
-        task_name: str,
-        description: str,
-        script: str,
-        sync_type: str,
-        date_field: str,
-        primary_keys_json: str,
-        table_name: str,
-        changed_by: str = "system",
-        change_reason: str = "",
-    ) -> int:
-        """创建任务新版本（版本号自增）"""
-        return self._meta_manager.create_task_version(
-            task_id, task_name, description, script, sync_type,
-            date_field, primary_keys_json, table_name, changed_by, change_reason
-        )
-
-    def get_task_versions(
-        self,
-        task_id: str,
-        limit: int = 10,
-    ) -> pl.DataFrame:
-        """获取任务的版本历史"""
-        return self._meta_manager.get_task_versions(task_id, limit)
-
-    def get_task_version(
-        self,
-        task_id: str,
-        version_number: Optional[int] = None,
-    ) -> Optional[Dict[str, Any]]:
-        """获取任务的指定版本（默认当前版本）"""
-        return self._meta_manager.get_task_version(task_id, version_number)
-
-    def rollback_task_version(
-        self,
-        task_id: str,
-        target_version: int,
-        changed_by: str = "system",
-        change_reason: str = "rollback",
-    ) -> bool:
-        """回滚任务到指定版本"""
-        return self._meta_manager.rollback_task_version(
-            task_id, target_version, changed_by, change_reason
-        )
-
-    def get_current_task_version(self, task_id: str) -> Optional[int]:
-        """获取任务的当前版本号"""
-        return self._meta_manager.get_current_task_version(task_id)
 
     # ------------------------------------------------------------------
     #  数据初始化（委托给 SeedDataManager）

@@ -8,14 +8,13 @@ import {
   Toast, DatePicker, Banner, SideSheet, Input, InputNumber, Tooltip,
 } from '@douyinfe/semi-ui';
 import {
-  IconPlus, IconDelete, IconEdit, IconBolt, IconPlay, IconRefresh, IconCopy, IconCode,
+  IconPlus, IconDelete, IconEdit, IconBolt, IconPlay, IconRefresh, IconCode,
 } from '@douyinfe/semi-icons';
 import dayjs from 'dayjs';
 import Editor from '@monaco-editor/react';
 import { productionApi, DEFAULT_PREPROCESS } from '../../api';
 import { useThemeStore } from '../../store';
 import { formatCode } from '../../utils/codeFormatter';
-import { VersionHistory } from '../../components/VersionHistory';
 import type { PreprocessOptions, FactorDefinition } from '../../types';
 import { CODE_TEMPLATE, formatRunParams } from './types';
 import { useFactorList } from './hooks/useFactorList';
@@ -55,26 +54,9 @@ const FactorManageTab: React.FC = () => {
   const [createLookbackDays, setCreateLookbackDays] = useState<number>(60);
   const createEditorRef = useRef<unknown>(null);
 
-  // 版本控制状态
-  const [versionHistoryVisible, setVersionHistoryVisible] = useState(false);
-  const [versionFactorId, setVersionFactorId] = useState<string>('');
-
   // 批量计算模态框
   const [batchCalcModalVisible, setBatchCalcModalVisible] = useState<boolean>(false);
   const [batchCalcDates, setBatchCalcDates] = useState<[dayjs.Dayjs | null, dayjs.Dayjs | null]>([null, null]);
-
-  // 监听版本历史事件
-  useEffect(() => {
-    const handleShowVersionHistory = (event: CustomEvent<{ taskType: string; taskId: string }>) => {
-      const { taskType, taskId } = event.detail;
-      if (taskType === 'factor') {
-        setVersionFactorId(taskId);
-        setVersionHistoryVisible(true);
-      }
-    };
-    window.addEventListener('showVersionHistory', handleShowVersionHistory as EventListener);
-    return () => window.removeEventListener('showVersionHistory', handleShowVersionHistory as EventListener);
-  }, []);
 
   // 格式化创建代码
   const handleFormatCreateCode = async (): Promise<void> => {
@@ -169,25 +151,6 @@ const FactorManageTab: React.FC = () => {
     setDrawerState({ open: true, factor: record, tab });
   };
 
-  const handleCopyFactor = async (factor: any): Promise<void> => {
-    setCreateFactorId(`${factor.factor_id}_copy`);
-    setCreateDesc(factor.description || '');
-    setCreateCategory(factor.category || 'custom');
-    setCreateComputeMode(factor.compute_mode || 'incremental');
-    setCreatePreprocess(factor.params?.preprocess ? { ...DEFAULT_PREPROCESS, ...factor.params.preprocess } : { ...DEFAULT_PREPROCESS });
-    setCreateDependsOn(Array.isArray(factor.depends_on) ? factor.depends_on : (factor.depends_on ? JSON.parse(factor.depends_on) : ['sync_daily_data']));
-    setCreateWindow(factor.params?.window ?? undefined);
-    setCreateLookbackDays(factor.params?.lookback_days ?? 60);
-    try {
-      const res = await productionApi.getFactorCode(factor.factor_id);
-      setCreateCode(res.data?.data?.code || CODE_TEMPLATE);
-    } catch (error) {
-      console.error('Failed to load factor code for copy:', error);
-      setCreateCode(CODE_TEMPLATE);
-    }
-    setCreateModal(true);
-  };
-
   const factorColumns = [
     { title: '因子ID', dataIndex: 'factor_id', key: 'factor_id', width: 180,
       render: (v: string, r: any) => (
@@ -246,7 +209,6 @@ const FactorManageTab: React.FC = () => {
             loading={runLoading === record.factor_id}
             onClick={() => handleRun(record.factor_id, record.compute_mode || 'incremental')}>运行</Button>
           <Button size="small" icon={<IconEdit />} theme="borderless" onClick={() => openDrawer(record)}>编辑</Button>
-          <Button size="small" icon={<IconCopy />} theme="borderless" onClick={() => handleCopyFactor(record)}>复制</Button>
           <Popconfirm title="确认删除此因子？" onConfirm={() => handleDelete(record.factor_id)}>
             <Button size="small" icon={<IconDelete />} theme="borderless" type="danger">删除</Button>
           </Popconfirm>
@@ -493,18 +455,6 @@ const FactorManageTab: React.FC = () => {
           }
           loadFactors();
         }} />
-
-      {/* 版本历史 SideSheet */}
-      <VersionHistory
-        visible={versionHistoryVisible}
-        onClose={() => setVersionHistoryVisible(false)}
-        taskType="factor"
-        taskId={versionFactorId}
-        onRollback={(version: number) => {
-          Toast.success(`已切换到版本 ${version}`);
-          loadFactors();
-        }}
-      />
     </div>
   );
 };

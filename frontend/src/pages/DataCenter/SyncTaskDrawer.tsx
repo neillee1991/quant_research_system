@@ -15,8 +15,10 @@ import {
   Collapse,
   Tag,
   Tooltip,
+  Checkbox,
+  Modal,
 } from '@douyinfe/semi-ui';
-import { IconHistory, IconCode, IconPlus, IconDelete } from '@douyinfe/semi-icons';
+import { IconCode, IconPlus, IconDelete } from '@douyinfe/semi-icons';
 import Editor from '@monaco-editor/react';
 import { dataApi } from '../../api';
 import { useThemeStore } from '../../store';
@@ -28,7 +30,6 @@ interface SyncTaskDrawerProps {
   isNew: boolean;
   onClose: () => void;
   onSave: () => void;
-  onOpenVersionHistory?: (taskId: string) => void;
 }
 
 export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
@@ -37,7 +38,6 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
   isNew,
   onClose,
   onSave,
-  onOpenVersionHistory,
 }) => {
   const { mode } = useThemeStore();
   const [activeTab, setActiveTab] = useState('visual');
@@ -53,7 +53,7 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
       loadTaskConfig();
       loadSyncHistory();
       loadTaskStatus();
-    } else if (visible && isNew) {
+    } else if (visible && isNew && !task) {
       // 新建任务的默认配置
       const defaultConfig = {
         task_id: 'sync_',
@@ -73,6 +73,8 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
       };
       setConfig(defaultConfig);
       setJsonText(JSON.stringify(defaultConfig, null, 2));
+      setSyncHistory([]);
+      setTaskStatus(null);
     }
   }, [visible, task, isNew]);
 
@@ -80,7 +82,36 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
     if (!task) return;
     try {
       const res = await dataApi.getTaskConfig(task.task_id);
-      const cfg = res.data.config;
+      let cfg = res.data.config;
+
+      // 解析 JSON 字段
+      if (cfg.params_json && typeof cfg.params_json === 'string') {
+        try {
+          cfg.params = JSON.parse(cfg.params_json);
+        } catch (e) {
+          console.error('Failed to parse params_json:', e);
+          cfg.params = {};
+        }
+      }
+
+      if (cfg.schema_json && typeof cfg.schema_json === 'string') {
+        try {
+          cfg.schema = JSON.parse(cfg.schema_json);
+        } catch (e) {
+          console.error('Failed to parse schema_json:', e);
+          cfg.schema = {};
+        }
+      }
+
+      if (cfg.primary_keys_json && typeof cfg.primary_keys_json === 'string') {
+        try {
+          cfg.primary_keys = JSON.parse(cfg.primary_keys_json);
+        } catch (e) {
+          console.error('Failed to parse primary_keys_json:', e);
+          cfg.primary_keys = [];
+        }
+      }
+
       setConfig(cfg);
       setJsonText(JSON.stringify(cfg, null, 2));
     } catch (error) {
@@ -94,6 +125,7 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
   const loadSyncHistory = async () => {
     if (!task) return;
     try {
+      // 使用 data_type 参数来过滤任务ID
       const res = await dataApi.getSyncStatus(undefined, task.task_id, undefined, undefined, 50);
       setSyncHistory(res.data.logs || []);
     } catch (error) {
@@ -113,20 +145,20 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
   };
 
   const updateConfig = (key: string, value: any) => {
-    const newConfig = { ...config, [key]: value };
+    const newConfig = { ...(config || {}), [key]: value };
     setConfig(newConfig);
     setJsonText(JSON.stringify(newConfig, null, 2));
   };
 
   const updateSchemaField = (fieldName: string, prop: string, value: any) => {
-    const newSchema = { ...config.schema };
+    const newSchema = { ...(config.schema || {}) };
     if (!newSchema[fieldName]) newSchema[fieldName] = {};
     newSchema[fieldName] = { ...newSchema[fieldName], [prop]: value };
     updateConfig('schema', newSchema);
   };
 
   const updateParamsField = (key: string, value: string) => {
-    const newParams = { ...config.params, [key]: value };
+    const newParams = { ...(config.params || {}), [key]: value };
     updateConfig('params', newParams);
   };
 
@@ -153,20 +185,139 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
     }
   };
 
-  const handleSave = async () => {
+  const handleSave = async (confirmSchemaChange = false) => {
     try {
-      const configToSave = JSON.parse(jsonText);
+      const configToSave = {
+        ...JSON.parse(jsonText),
+        confirm_schema_change: confirmSchemaChange,
+      };
 
       if (isNew) {
         await dataApi.createSyncTask(configToSave);
         Toast.success(`任务 ${configToSave.task_id} 创建成功`);
+        onSave();
+        onClose();
       } else {
-        await dataApi.updateSyncTask(configToSave.task_id, configToSave);
-        Toast.success(`任务 ${configToSave.task_id} 更新成功`);
-      }
+        const response = await dataApi.updateSyncTask(configToSave.task_id, configToSave);
+        const result = response.data;
 
-      onSave();
-      onClose();
+        // 检查是否需要确认 schema 变更
+        if (result.status === 'warning' && result.require_confirmation) {
+          const changes = result.changes || {};
+
+          // 分析 schema 详细变化
+          const oldSchema = changes.old_schema || {};
+          const newSchema = changes.new_schema || {};
+          const oldFields = Object.keys(oldSchema);
+          const newFields = Object.keys(newSchema);
+
+          const addedFields = newFields.filter(f => !oldFields.includes(f));
+          const removedFields = oldFields.filter(f => !newFields.includes(f));
+          const modifiedFields = oldFields.filter(f => {
+            if (!newFields.includes(f)) return false;
+            const oldType = oldSchema[f]?.type;
+            const newType = newSchema[f]?.type;
+            const oldNullable = oldSchema[f]?.nullable;
+            const newNullable = newSchema[f]?.nullable;
+            return oldType !== newType || oldNullable !== newNullable;
+          });
+
+          Modal.confirm({
+            title: '表结构或主键已变更',
+            content: (
+              <div style={{ marginTop: 12 }}>
+                <p style={{ marginBottom: 12, fontWeight: 500 }}>检测到以下变更，需要清空历史数据：</p>
+
+                {changes.schema_changed && (
+                  <div style={{ marginBottom: 16 }}>
+                    <strong style={{ color: 'var(--semi-color-warning)' }}>表结构变更：</strong>
+
+                    {addedFields.length > 0 && (
+                      <div style={{ marginTop: 8, marginLeft: 12 }}>
+                        <div style={{ fontSize: 12, color: 'var(--semi-color-success)', marginBottom: 4 }}>
+                          ✓ 新增字段 ({addedFields.length}):
+                        </div>
+                        {addedFields.map(field => (
+                          <div key={field} style={{ fontSize: 11, marginLeft: 12, color: 'var(--semi-color-text-1)' }}>
+                            • {field}: {newSchema[field]?.type} {newSchema[field]?.nullable ? '(可空)' : '(非空)'}
+                            {newSchema[field]?.comment && ` - ${newSchema[field].comment}`}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {removedFields.length > 0 && (
+                      <div style={{ marginTop: 8, marginLeft: 12 }}>
+                        <div style={{ fontSize: 12, color: 'var(--semi-color-danger)', marginBottom: 4 }}>
+                          ✗ 删除字段 ({removedFields.length}):
+                        </div>
+                        {removedFields.map(field => (
+                          <div key={field} style={{ fontSize: 11, marginLeft: 12, color: 'var(--semi-color-text-1)' }}>
+                            • {field}: {oldSchema[field]?.type} {oldSchema[field]?.nullable ? '(可空)' : '(非空)'}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {modifiedFields.length > 0 && (
+                      <div style={{ marginTop: 8, marginLeft: 12 }}>
+                        <div style={{ fontSize: 12, color: 'var(--semi-color-warning)', marginBottom: 4 }}>
+                          ⚠ 修改字段 ({modifiedFields.length}):
+                        </div>
+                        {modifiedFields.map(field => (
+                          <div key={field} style={{ fontSize: 11, marginLeft: 12, color: 'var(--semi-color-text-1)' }}>
+                            • {field}:
+                            <div style={{ marginLeft: 12 }}>
+                              旧: {oldSchema[field]?.type} {oldSchema[field]?.nullable ? '(可空)' : '(非空)'}
+                            </div>
+                            <div style={{ marginLeft: 12 }}>
+                              新: {newSchema[field]?.type} {newSchema[field]?.nullable ? '(可空)' : '(非空)'}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {changes.primary_keys_changed && (
+                  <div style={{ marginBottom: 16 }}>
+                    <strong style={{ color: 'var(--semi-color-warning)' }}>主键变更：</strong>
+                    <div style={{ marginTop: 8, marginLeft: 12, fontSize: 12 }}>
+                      <div style={{ color: 'var(--semi-color-text-2)' }}>
+                        旧主键: <code>{(changes.old_primary_keys || []).join(', ')}</code>
+                      </div>
+                      <div style={{ color: 'var(--semi-color-text-1)', marginTop: 4 }}>
+                        新主键: <code>{(changes.new_primary_keys || []).join(', ')}</code>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <p style={{
+                  color: 'var(--semi-color-danger)',
+                  marginTop: 16,
+                  padding: 12,
+                  background: 'var(--semi-color-danger-light-default)',
+                  borderRadius: 4,
+                  fontSize: 12
+                }}>
+                  ⚠️ 确认后将删除表 <code style={{ fontWeight: 600 }}>{result.table_name}</code> 的所有历史数据
+                </p>
+              </div>
+            ),
+            okText: '确认清空并保存',
+            cancelText: '取消',
+            okButtonProps: { type: 'danger' },
+            onOk: () => handleSave(true),
+          });
+          return;
+        }
+
+        Toast.success(`任务 ${configToSave.task_id} 更新成功`);
+        onSave();
+        onClose();
+      }
     } catch (error: any) {
       if (error instanceof SyntaxError) {
         Toast.error('JSON 格式无效');
@@ -177,7 +328,7 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
   };
 
   const handleAddSchemaField = () => {
-    const newSchema = { ...config.schema };
+    const newSchema = { ...(config.schema || {}) };
     let newName = 'new_field';
     let counter = 1;
     while (newSchema[newName]) {
@@ -189,7 +340,7 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
   };
 
   const handleDeleteSchemaField = (fieldName: string) => {
-    const newSchema = { ...config.schema };
+    const newSchema = { ...(config.schema || {}) };
     delete newSchema[fieldName];
     updateConfig('schema', newSchema);
   };
@@ -203,16 +354,6 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
           <span style={{ color: 'var(--semi-color-primary)' }}>
             {isNew ? '新建任务' : task?.task_id}
           </span>
-          {!isNew && onOpenVersionHistory && (
-            <Button
-              icon={<IconHistory />}
-              size="small"
-              theme="borderless"
-              onClick={() => onOpenVersionHistory(task?.task_id || '')}
-            >
-              版本历史
-            </Button>
-          )}
         </div>
       }
       visible={visible}
@@ -359,7 +500,7 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
                       onChange={(v) =>
                         updateConfig(
                           'primary_keys',
-                          v.split(',').map((s: string) => s.trim()).filter(Boolean)
+                          (v || '').split(',').map((s: string) => s.trim()).filter(Boolean)
                         )
                       }
                     />
@@ -367,13 +508,13 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
                 </div>
 
                 {/* API 参数 */}
-                {config.params && Object.keys(config.params).length > 0 && (
-                  <Collapse defaultActiveKey={['params']}>
-                    <Collapse.Panel
-                      header={<span style={{ fontSize: '13px', fontWeight: 500 }}>API 参数</span>}
-                      itemKey="params"
-                    >
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                <Collapse defaultActiveKey={['params']}>
+                  <Collapse.Panel
+                    header={<span style={{ fontSize: '13px', fontWeight: 500 }}>API 参数</span>}
+                    itemKey="params"
+                  >
+                    {config.params && Object.keys(config.params).length > 0 ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                         {Object.entries(config.params).map(([key, value]) => (
                           <div key={key}>
                             <div
@@ -393,9 +534,13 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
                           </div>
                         ))}
                       </div>
-                    </Collapse.Panel>
-                  </Collapse>
-                )}
+                    ) : (
+                      <div style={{ padding: 12, color: 'var(--semi-color-text-2)', fontSize: '12px' }}>
+                        暂无 API 参数配置
+                      </div>
+                    )}
+                  </Collapse.Panel>
+                </Collapse>
 
                 {/* Schema 字段表格 */}
                 {config.schema && (
@@ -405,7 +550,7 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
                       itemKey="schema"
                     >
                       <Table
-                        dataSource={Object.entries(config.schema).map(([name, props]: [string, any]) => ({
+                        dataSource={Object.entries(config.schema || {}).map(([name, props]: [string, any]) => ({
                           name,
                           type: props?.type || '',
                           nullable: props?.nullable,
@@ -425,7 +570,7 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
                                 size="small"
                                 value={v}
                                 onChange={(val) => {
-                                  const newSchema = { ...config.schema };
+                                  const newSchema = { ...(config.schema || {}) };
                                   const entries = Object.entries(newSchema);
                                   const rebuilt: Record<string, any> = {};
                                   entries.forEach(([key, props]) => {
@@ -478,9 +623,7 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
                             key: 'nullable',
                             width: 60,
                             render: (v: boolean, r: any) => (
-                              <Input
-                                size="small"
-                                type="checkbox"
+                              <Checkbox
                                 checked={v}
                                 onChange={(e: any) =>
                                   updateSchemaField(r.name, 'nullable', e.target.checked)
@@ -619,6 +762,7 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
                 </div>
               </TabPane>
             )}
+
           </Tabs>
         </div>
 
@@ -633,7 +777,7 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
           }}
         >
           <Button onClick={onClose}>取消</Button>
-          <Button theme="solid" type="primary" onClick={handleSave}>
+          <Button theme="solid" type="primary" onClick={() => handleSave(false)}>
             {isNew ? '创建' : '保存'}
           </Button>
         </div>

@@ -1,7 +1,7 @@
 /**
  * Generic Task List Component
  *
- * Reusable component for displaying and managing tasks with version control.
+ * Reusable component for displaying and managing tasks.
  * Supports sync, etl, and factor task types.
  */
 
@@ -21,11 +21,9 @@ import {
 import {
   IconEdit,
   IconDelete,
-  IconHistory,
   IconSearch,
   IconPlus,
 } from '@douyinfe/semi-icons';
-import { VersionHistory } from '../VersionHistory';
 import type { BaseTaskConfig, TaskType } from '../../types/task';
 import type { TaskService } from '../../services/taskService';
 import type { ColumnProps } from '@douyinfe/semi-ui/lib/es/table';
@@ -58,9 +56,6 @@ export function TaskList<T extends BaseTaskConfig>({
   const [tasks, setTasks] = useState<T[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchText, setSearchText] = useState('');
-  const [versionHistoryVisible, setVersionHistoryVisible] = useState(false);
-  const [selectedTaskId, setSelectedTaskId] = useState<string>('');
-  const [selectedVersion, setSelectedVersion] = useState<number | undefined>();
 
   useEffect(() => {
     loadTasks();
@@ -99,17 +94,6 @@ export function TaskList<T extends BaseTaskConfig>({
     }
   };
 
-  const handleShowVersionHistory = (task: T) => {
-    const taskId = (task as any)[idField] as string;
-    setSelectedTaskId(taskId);
-    setSelectedVersion(task.version_number);
-    setVersionHistoryVisible(true);
-  };
-
-  const handleVersionRollback = async () => {
-    await loadTasks();
-  };
-
   // Filter tasks based on search text
   const filteredTasks = tasks.filter((task) => {
     if (!searchText) return true;
@@ -136,18 +120,8 @@ export function TaskList<T extends BaseTaskConfig>({
       ),
     },
     {
-      title: '版本',
-      dataIndex: 'version_number',
-      width: 80,
-      render: (version: number, record: T) => (
-        <Tag color={record.is_current ? 'blue' : 'grey'}>
-          v{version}
-        </Tag>
-      ),
-    },
-    {
       title: '操作',
-      width: 200,
+      width: 150,
       render: (_: any, record: T) => (
         <Space>
           {onEdit && (
@@ -159,13 +133,6 @@ export function TaskList<T extends BaseTaskConfig>({
               />
             </Tooltip>
           )}
-          <Tooltip content="版本历史">
-            <Button
-              icon={<IconHistory />}
-              size="small"
-              onClick={() => handleShowVersionHistory(record)}
-            />
-          </Tooltip>
           {extraActions?.(record)}
           <Popconfirm
             title="确认删除？"
@@ -221,15 +188,6 @@ export function TaskList<T extends BaseTaskConfig>({
           rowKey={idField}
         />
       </Spin>
-
-      <VersionHistory
-        visible={versionHistoryVisible}
-        onClose={() => setVersionHistoryVisible(false)}
-        taskId={selectedTaskId}
-        taskType={taskType}
-        currentVersion={selectedVersion}
-        onRollback={handleVersionRollback}
-      />
     </div>
   );
 }

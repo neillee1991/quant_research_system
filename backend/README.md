@@ -68,14 +68,21 @@ python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 backend/
 ├── app/                          # FastAPI application
 │   ├── api/v1/                   # API routes
-│   │   ├── data_merged.py        # Data queries & sync
-│   │   ├── factor.py             # Factor computation
-│   │   ├── production.py         # Production engine
+│   │   ├── data/                 # Data management APIs
+│   │   │   ├── query_api.py      # Data queries
+│   │   │   ├── sync_api.py       # Data sync operations
+│   │   │   ├── config_api.py     # Config management
+│   │   │   └── etl_api.py        # ETL tasks
+│   │   ├── production/           # Production APIs
+│   │   │   ├── factor_compute.py # Factor computation
+│   │   │   ├── factor_config.py  # Factor configuration
+│   │   │   ├── factor_analysis.py# Factor analysis
+│   │   │   └── factor_registry.py# Factor registry
+│   │   ├── factor.py             # Legacy factor API
 │   │   ├── strategy.py           # Backtest execution
 │   │   ├── ml.py                 # ML training
 │   │   ├── flows.py              # Prefect workflows
-│   │   ├── generic_task.py       # Generic task router factory
-│   │   └── versions.py           # Version control API
+│   │   └── generic_task.py       # Generic task router factory
 │   ├── models/                   # Data models
 │   │   └── base_task.py          # Task configuration models
 │   ├── services/                 # Business logic
@@ -187,13 +194,13 @@ capital = settings.backtest.initial_capital
 
 ## API Documentation
 
-### Task Management Abstraction Layer (New)
+### Task Management Abstraction Layer
 
-The system now provides a unified task management abstraction layer for all task types (sync, ETL, factor).
+The system provides a unified task management abstraction layer for all task types (sync, ETL, factor).
 
 **Key Features:**
 - Unified CRUD operations for all task types
-- Built-in version control and rollback
+- Direct update mode (no version history)
 - Type-safe with Pydantic models
 - 60% code reduction through reuse
 
@@ -212,22 +219,14 @@ task = sync_service.create_task(
         "task_id": "new_task",
         "api_name": "daily",
         "api_limit": 5000
-    },
-    changed_by="user",
-    change_reason="Create new sync task"
+    }
 )
 
-# Update task
+# Update task (direct overwrite)
 updated = sync_service.update_task(
     task_id="new_task",
-    config_data={"description": "Updated description"},
-    changed_by="user",
-    change_reason="Update description"
+    config_data={"description": "Updated description"}
 )
-
-# Version control
-versions = sync_service.get_version_history("new_task")
-rollback = sync_service.rollback_to_version("new_task", version=1)
 ```
 
 **API Endpoints:**
@@ -239,7 +238,7 @@ All task types share the same endpoint structure:
 GET    /api/v1/sync/tasks              # List all sync tasks
 GET    /api/v1/sync/tasks/{task_id}    # Get specific task
 POST   /api/v1/sync/tasks              # Create new task
-PUT    /api/v1/sync/tasks/{task_id}    # Update task
+PUT    /api/v1/sync/tasks/{task_id}    # Update task (direct overwrite)
 DELETE /api/v1/sync/tasks/{task_id}    # Delete task (soft)
 
 # ETL Tasks
@@ -251,17 +250,12 @@ POST   /api/v1/etl/tasks               # Create new ETL task
 GET    /api/v1/factors/tasks           # List all factors
 POST   /api/v1/factors/tasks           # Create new factor
 # ... (same pattern)
-
-# Version Control (all types)
-GET    /api/v1/tasks/{type}/{id}/versions        # Get version history
-GET    /api/v1/tasks/{type}/{id}/versions/{ver}  # Get specific version
-POST   /api/v1/tasks/{type}/{id}/rollback/{ver}  # Rollback to version
 ```
 
 **Documentation:**
-- Migration Guide: `MIGRATION_GUIDE.md`
-- Performance Report: `PERFORMANCE_REPORT.md`
-- Design Document: `/tmp/task_abstraction_design.md`
+- Migration Guide: `docs/MIGRATION_GUIDE_NO_VERSION.md`
+- Configuration Management: `docs/USER_GUIDE_CONFIG_MANAGEMENT.md`
+- Developer Guide: `docs/DEVELOPER_GUIDE.md`
 
 ### Data Endpoints
 

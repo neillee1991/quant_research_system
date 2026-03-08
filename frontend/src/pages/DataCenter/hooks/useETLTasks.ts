@@ -103,14 +103,24 @@ export const useETLTasks = () => {
     startDate: string,
     endDate: string
   ) => {
-    if (!startDate || !endDate) {
+    // 检查任务类型
+    const task = etlTasks.find(t => t.task_id === taskId);
+    const isFullTask = task?.sync_type === 'full';
+
+    // 增量任务需要日期范围
+    if (!isFullTask && (!startDate || !endDate)) {
       Toast.warning('请选择回溯日期范围');
       return false;
     }
 
     setRunningEtlTasks((prev) => new Set(prev).add(taskId));
     try {
-      await dataApi.backfillEtlTask(taskId, startDate, endDate);
+      // 全量任务不传日期参数
+      if (isFullTask) {
+        await dataApi.backfillEtlTask(taskId, '', '');
+      } else {
+        await dataApi.backfillEtlTask(taskId, startDate, endDate);
+      }
       Toast.success(`任务 ${taskId} 回溯已启动`);
       setTimeout(() => {
         loadEtlLogs(taskId);
@@ -126,15 +136,23 @@ export const useETLTasks = () => {
         return newSet;
       });
     }
-  }, [loadEtlLogs]);
+  }, [etlTasks, loadEtlLogs]);
 
   const batchBackfillEtlTasks = useCallback(async (
     taskIds: string[],
     startDate: string,
     endDate: string
   ) => {
-    if (!startDate || !endDate) {
-      Toast.warning('请选择回溯日期范围');
+    // 区分全量任务和增量任务
+    const fullIds = taskIds.filter(id => {
+      const t = etlTasks.find(t => t.task_id === id);
+      return t?.sync_type === 'full';
+    });
+    const incrementalIds = taskIds.filter(id => !fullIds.includes(id));
+
+    // 增量任务需要日期范围
+    if (incrementalIds.length > 0 && (!startDate || !endDate)) {
+      Toast.warning('存在增量任务，请选择回溯日期范围');
       return false;
     }
 
@@ -144,9 +162,21 @@ export const useETLTasks = () => {
 
     Toast.info(`开始回溯 ${taskIds.length} 个任务`);
 
-    for (const taskId of taskIds) {
+    // 先执行全量任务（只执行一次，不传日期参数）
+    for (const taskId of fullIds) {
+      try {
+        await dataApi.backfillEtlTask(taskId, '', '');
+        Toast.success(`全量任务 ${taskId} 回溯成功`);
+      } catch (error: any) {
+        Toast.error(`任务 ${taskId} 回溯失败: ${error.response?.data?.detail || error.message}`);
+      }
+    }
+
+    // 再执行增量任务（按日期范围执行）
+    for (const taskId of incrementalIds) {
       try {
         await dataApi.backfillEtlTask(taskId, startDate, endDate);
+        Toast.success(`增量任务 ${taskId} 回溯成功`);
       } catch (error: any) {
         Toast.error(`任务 ${taskId} 回溯失败: ${error.response?.data?.detail || error.message}`);
       }
@@ -165,7 +195,7 @@ export const useETLTasks = () => {
     }, 2000);
 
     return true;
-  }, [loadEtlLogs]);
+  }, [etlTasks, loadEtlLogs]);
 
   const createEtlTable = useCallback(async (
     taskId: string,

@@ -623,53 +623,128 @@ def get_task_config(task_id: str):
 @router.put("/data/sync/task/{task_id}/config")
 def update_task_config(task_id: str, config: dict):
     """
-    更新指定任务的配置（使用版本控制）
+    更新同步任务配置
 
-    - **task_id**: 任务ID
+    工作流程：
+    1. 如果修改了 schema 或 primary_keys，检测表结构是否变更
+    2. 如果变更且未确认，返回 warning 状态要求用户确认
+    3. 如果用户确认（confirm_schema_change=true），删除旧表并更新配置
     """
     try:
         # 确认任务存在
         existing = db_client.query(
-            "SELECT * FROM sync_task_config WHERE task_id = %s AND is_current = true",
+            "SELECT * FROM sync_task_config WHERE task_id = %s",
             (task_id,)
         )
         if existing.is_empty():
             raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
 
-        # 获取当前配置并合并更新
         current_row = existing.to_dicts()[0]
+        table_name = config.get("table_name", current_row.get("table_name", ""))
 
-        # 构建新配置数据（移除版本控制字段）
-        config_data = {
-            "api_name": config.get("api_name", current_row.get("api_name", "")),
-            "description": config.get("description", current_row.get("description", "")),
-            "sync_type": config.get("sync_type", current_row.get("sync_type", "incremental")),
-            "params_json": json.dumps(config.get("params", {}), ensure_ascii=False) if "params" in config else current_row.get("params_json", "{}"),
-            "date_field": config.get("date_field", current_row.get("date_field", "")),
-            "primary_keys_json": json.dumps(config.get("primary_keys", [])) if "primary_keys" in config else current_row.get("primary_keys_json", "[]"),
-            "table_name": config.get("table_name", current_row.get("table_name", "")),
-            "schema_json": json.dumps(config.get("schema", {}), ensure_ascii=False) if "schema" in config else current_row.get("schema_json", "{}"),
-            "source": config.get("source", current_row.get("source", "tushare")),
-            "api_limit": config.get("api_limit", current_row.get("api_limit", 5000)),
-        }
+        # 检查 schema 或 primary_keys 是否变化
+        old_schema_json = current_row.get("schema_json", "{}")
+        new_schema_json = json.dumps(config.get("schema", {}), ensure_ascii=False) if "schema" in config else old_schema_json
+        old_primary_keys = current_row.get("primary_keys_json", "[]")
+        new_primary_keys = json.dumps(config.get("primary_keys", [])) if "primary_keys" in config else old_primary_keys
 
-        # 使用版本控制创建新版本
-        version = db_client.create_task_version(
-            task_type="sync",
-            task_id=task_id,
-            config_data=config_data,
-            changed_by="api",
-            change_reason="更新同步任务配置"
-        )
+        schema_changed = old_schema_json != new_schema_json
+        primary_keys_changed = old_primary_keys != new_primary_keys
+
+        # 检查表是否存在
+        table_exists = table_name and db_client.table_exists(table_name)
+
+        # 只有当表已存在且有变更时，才需要确认
+        if table_exists and (schema_changed or primary_keys_changed) and not config.get("confirm_schema_change", False):
+            old_schema = json.loads(old_schema_json) if old_schema_json else {}
+            new_schema = json.loads(new_schema_json) if new_schema_json else {}
+            old_pk = json.loads(old_primary_keys) if old_primary_keys else []
+            new_pk = json.loads(new_primary_keys) if new_primary_keys else []
+
+            return {
+                "status": "warning",
+                "message": "表结构或主键配置已变更，需要清空历史数据并重建表",
+                "schema_changed": True,
+                "table_name": table_name,
+                "changes": {
+                    "schema_changed": schema_changed,
+                    "primary_keys_changed": primary_keys_changed,
+                    "old_schema": old_schema if schema_changed else None,
+                    "new_schema": new_schema if schema_changed else None,
+                    "old_primary_keys": old_pk if primary_keys_changed else None,
+                    "new_primary_keys": new_pk if primary_keys_changed else None,
+                },
+                "require_confirmation": True
+            }
+
+        # 构建新配置数据
+        now = datetime.now()
+        update_df = pl.DataFrame({
+            "task_id": [task_id],
+            "api_name": [config.get("api_name", current_row.get("api_name", ""))],
+            "description": [config.get("description", current_row.get("description", ""))],
+            "sync_type": [config.get("sync_type", current_row.get("sync_type", "incremental"))],
+            "params_json": [json.dumps(config.get("params", {}), ensure_ascii=False) if "params" in config else current_row.get("params_json", "{}")],
+            "date_field": [config.get("date_field", current_row.get("date_field", ""))],
+            "primary_keys_json": [new_primary_keys],
+            "table_name": [table_name],
+            "schema_json": [new_schema_json],
+            "enabled": [config.get("enabled", current_row.get("enabled", True))],
+            "api_limit": [config.get("api_limit", current_row.get("api_limit", 5000))],
+            "created_at": [current_row.get("created_at", now)],
+            "updated_at": [now],
+        })
+
+        # 如果有变更且已确认，删除旧表
+        if (schema_changed or primary_keys_changed) and config.get("confirm_schema_change", False):
+            if table_name and db_client.table_exists(table_name):
+                try:
+                    db_client.drop_table(table_name)
+                    logger.info(f"Dropped table {table_name} due to schema/primary_keys change")
+                except Exception as e:
+                    logger.error(f"Failed to drop table {table_name}: {e}")
+                    raise HTTPException(status_code=500, detail=f"清空表失败: {str(e)}")
+
+        # 先删除旧记录，再插入新记录
+        db_client.execute("DELETE FROM sync_task_config WHERE task_id = %s", (task_id,))
+        db_client.upsert("sync_task_config", update_df, ["task_id"])
 
         # 重新加载配置
         sync_engine.config_manager.reload()
 
-        logger.info(f"Updated config for task {task_id}, new version: {version}")
+        # 如果表不存在或已被删除，创建新表
+        if table_name:
+            # 先注册表名，确保 table_exists 能正确路由到对应的数据库
+            db_client.register_meta_table(table_name)
+
+            logger.info(f"Checking if table {table_name} exists...")
+            table_exists_now = db_client.table_exists(table_name)
+            logger.info(f"Table {table_name} exists: {table_exists_now}")
+
+            if not table_exists_now:
+                try:
+                    # 构建任务配置用于创建表
+                    task_config = {
+                        "table_name": table_name,
+                        "primary_keys": json.loads(new_primary_keys) if new_primary_keys else [],
+                        "schema": json.loads(new_schema_json) if new_schema_json else {}
+                    }
+                    logger.info(f"Creating table {table_name} with config: {task_config}")
+                    sync_engine.table_manager.ensure_table_exists(task_config)
+                    logger.info(f"Created table {table_name} after config update")
+                except Exception as e:
+                    logger.error(f"Failed to create table {table_name}: {e}", exc_info=True)
+                    # 不抛出异常，因为配置已保存成功
+            else:
+                logger.info(f"Table {table_name} already exists, skipping creation")
+
+        logger.info(f"Updated config for task {task_id}, schema_changed={schema_changed or primary_keys_changed}")
         return {
             "status": "success",
             "message": f"Task {task_id} config updated",
-            "version": version
+            "schema_changed": schema_changed or primary_keys_changed,
+            "table_dropped": (schema_changed or primary_keys_changed) and config.get("confirm_schema_change", False),
+            "table_created": table_name and not table_exists
         }
     except HTTPException:
         raise
@@ -1024,7 +1099,7 @@ def list_etl_tasks():
     """列出所有 ETL 任务，附带最新同步状态"""
     try:
         # 只查询当前版本的任务
-        df = db_client.query("SELECT * FROM etl_task_config WHERE is_current = true")
+        df = db_client.query("SELECT * FROM etl_task_config")
         if df.is_empty():
             return {"tasks": [], "total": 0}
         tasks = df.to_dicts()
@@ -1094,44 +1169,108 @@ def create_etl_task(config: dict):
 
 
 @router.put("/data/etl/task/{task_id}")
-def update_etl_task(task_id: str, config: dict):
-    """更新 ETL 任务（使用版本控制）"""
+def update_etl_task(task_id: str, config: dict, confirm_schema_change: bool = False):
+    """
+    更新 ETL 任务
+
+    Args:
+        task_id: 任务ID
+        config: 新配置
+        confirm_schema_change: 是否确认 schema 变更（需要清空数据）
+
+    Returns:
+        - 如果 schema 未变更：直接更新配置
+        - 如果 schema 变更且未确认：返回变更信息，要求用户确认
+        - 如果 schema 变更且已确认：更新配置并清空/重建表
+    """
     try:
         # 确认任务存在
         existing = db_client.query(
-            "SELECT * FROM etl_task_config WHERE task_id = %s AND is_current = true",
+            "SELECT * FROM etl_task_config WHERE task_id = %s",
             (task_id,)
         )
         if existing.is_empty():
             raise HTTPException(status_code=404, detail=f"ETL task {task_id} not found")
 
-        # 获取当前配置并合并更新
         current_row = existing.to_dicts()[0]
+        table_name = current_row.get("table_name", task_id)
 
-        # 构建新配置数据（移除版本控制字段）
-        config_data = {
-            "description": config.get("description", current_row.get("description", "")),
-            "script": config.get("script", current_row.get("script", "")),
-            "sync_type": config.get("sync_type", current_row.get("sync_type", "incremental")),
-            "date_field": config.get("date_field", current_row.get("date_field", "")),
-            "primary_keys_json": json.dumps(config.get("primary_keys", [])) if "primary_keys" in config else current_row.get("primary_keys_json", "[]"),
-            "table_name": config.get("table_name", current_row.get("table_name", task_id)),
-        }
+        # 检测 schema 是否变更
+        schema_changed = False
+        old_columns = []
+        new_columns = []
 
-        # 使用版本控制创建新版本
-        version = db_client.create_task_version(
-            task_type="etl",
-            task_id=task_id,
-            config_data=config_data,
-            changed_by="api",
-            change_reason="更新 ETL 任务配置"
-        )
+        # 如果修改了 script，需要检测输出字段变更
+        if "script" in config and config["script"] != current_row.get("script"):
+            try:
+                # 执行新脚本获取输出字段（限制1行）
+                test_script = f"select top 1 * from ({config['script']})"
+                result = db_client.query(test_script)
+                new_columns = list(result.columns)
 
-        logger.info(f"Updated ETL task {task_id}, new version: {version}")
+                # 获取现有表的字段
+                if db_client.table_exists(table_name):
+                    existing_data = db_client.query(f"select top 1 * from {table_name}")
+                    old_columns = list(existing_data.columns)
+
+                    # 比较字段
+                    if set(old_columns) != set(new_columns):
+                        schema_changed = True
+                        logger.info(f"Schema changed for {task_id}: {old_columns} -> {new_columns}")
+                else:
+                    # 表不存在，不算 schema 变更
+                    schema_changed = False
+
+            except Exception as e:
+                logger.warning(f"Failed to detect schema change: {e}")
+                # 无法检测，假设未变更
+                schema_changed = False
+
+        # 如果 schema 变更但用户未确认，返回提示
+        if schema_changed and not confirm_schema_change:
+            return {
+                "status": "schema_changed",
+                "message": "ETL 脚本输出字段已变更，需要清空历史数据并重建表",
+                "schema_change": {
+                    "old_columns": old_columns,
+                    "new_columns": new_columns,
+                    "added": list(set(new_columns) - set(old_columns)),
+                    "removed": list(set(old_columns) - set(new_columns)),
+                },
+                "require_confirmation": True
+            }
+
+        # 构建新配置数据
+        now = datetime.now()
+        update_df = pl.DataFrame({
+            "task_id": [task_id],
+            "description": [config.get("description", current_row.get("description", ""))],
+            "script": [config.get("script", current_row.get("script", ""))],
+            "sync_type": [config.get("sync_type", current_row.get("sync_type", "full"))],
+            "date_field": [config.get("date_field", current_row.get("date_field", ""))],
+            "primary_keys_json": [json.dumps(config.get("primary_keys", [])) if "primary_keys" in config else current_row.get("primary_keys_json", "[]")],
+            "table_name": [config.get("table_name", current_row.get("table_name", task_id))],
+            "enabled": [config.get("enabled", current_row.get("enabled", True))],
+            "created_at": [current_row.get("created_at", now)],
+            "updated_at": [now],
+        })
+
+        # 如果 schema 变更且用户已确认，删除旧表
+        if schema_changed and confirm_schema_change:
+            if db_client.table_exists(table_name):
+                logger.info(f"Dropping table {table_name} due to schema change")
+                db_client.execute(f"drop table {table_name}")
+
+        # 先删除旧配置记录，再插入新记录
+        db_client.execute("DELETE FROM etl_task_config WHERE task_id = %s", (task_id,))
+        db_client.upsert("etl_task_config", update_df, ["task_id"])
+
+        logger.info(f"Updated ETL task {task_id}, schema_changed={schema_changed}")
         return {
             "status": "success",
             "message": f"ETL task {task_id} updated",
-            "version": version
+            "schema_changed": schema_changed,
+            "table_dropped": schema_changed and confirm_schema_change
         }
     except HTTPException:
         raise
@@ -1276,10 +1415,14 @@ def test_etl_script(payload: dict):
 @router.post("/data/etl/task/{task_id}/backfill")
 def backfill_etl_task(
     task_id: str,
-    start_date: str = Query(..., description="开始日期 YYYYMMDD"),
-    end_date: str = Query(..., description="结束日期 YYYYMMDD"),
+    start_date: str = Query("", description="开始日期 YYYYMMDD，为空则执行全量回溯"),
+    end_date: str = Query("", description="结束日期 YYYYMMDD，为空则执行全量回溯"),
 ):
-    """回溯执行 ETL 任务，逐天替换 {date} 执行脚本并写入目标表"""
+    """回溯执行 ETL 任务
+
+    - 如果 start_date 和 end_date 为空：执行全量回溯（只执行一次，不替换 {date}）
+    - 如果提供日期范围：逐天替换 {date} 执行脚本并写入目标表
+    """
     try:
         df = db_client.query("SELECT * FROM etl_task_config WHERE task_id = %s", (task_id,))
         if df.is_empty():
@@ -1290,6 +1433,25 @@ def backfill_etl_task(
         if not script_template or not script_template.strip():
             raise HTTPException(status_code=400, detail="ETL script is empty")
 
+        # 全量回溯模式：日期参数为空
+        if not start_date or not end_date:
+            logger.info(f"ETL backfill {task_id}: full mode (no date range)")
+            backfill_params = "type=full_backfill"
+            try:
+                # 全量回溯：直接执行脚本，不替换 {date}
+                rows = _etl_execute_and_write(task_id, script_template, task)
+                _etl_log_sync(task_id, DateUtils.today(), rows, params=backfill_params)
+                logger.info(f"ETL full backfill {task_id}: {rows} rows")
+                return {
+                    "status": "success",
+                    "message": f"全量回溯完成: {rows} 行",
+                    "results": [{"date": DateUtils.today(), "status": "success", "rows": rows}],
+                }
+            except Exception as ex:
+                _etl_log_sync(task_id, DateUtils.today(), 0, "failed", str(ex), params=backfill_params)
+                raise HTTPException(status_code=500, detail=f"全量回溯失败: {str(ex)}")
+
+        # 增量回溯模式：按日期范围执行
         start = DateUtils.parse_date(start_date)
         end = DateUtils.parse_date(end_date)
         if start > end:
@@ -1300,7 +1462,7 @@ def backfill_etl_task(
         while current <= end:
             date_str = current.strftime("%Y.%m.%d")
             date_yyyymmdd = current.strftime("%Y%m%d")
-            backfill_params = f"type=backfill, date={date_str}, range={start_date}~{end_date}"
+            backfill_params = f"type=incremental_backfill, date={date_str}, range={start_date}~{end_date}"
             script = script_template.replace("{date}", date_str)
             try:
                 rows = _etl_execute_and_write(task_id, script, task)
@@ -1312,10 +1474,10 @@ def backfill_etl_task(
             current += timedelta(days=1)
 
         success_count = sum(1 for r in results if r["status"] == "success")
-        logger.info(f"ETL backfill {task_id}: {success_count}/{len(results)} days succeeded")
+        logger.info(f"ETL incremental backfill {task_id}: {success_count}/{len(results)} days succeeded")
         return {
             "status": "success",
-            "message": f"回溯完成: {success_count}/{len(results)} 天成功",
+            "message": f"增量回溯完成: {success_count}/{len(results)} 天成功",
             "results": results,
         }
     except HTTPException:

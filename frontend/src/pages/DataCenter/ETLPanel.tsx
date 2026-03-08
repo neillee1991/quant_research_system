@@ -15,7 +15,6 @@ import {
   IconPlay,
   IconRefresh,
   IconDelete,
-  IconCopy,
   IconHistory,
 } from '@douyinfe/semi-icons';
 import dayjs from 'dayjs';
@@ -32,7 +31,6 @@ interface ETLPanelProps {
   onNewTask: () => void;
   onBatchBackfill: () => void;
   onEditTask: (task: ETLTask) => void;
-  onCopyTask: (task: ETLTask) => void;
   onDeleteTask: (taskId: string) => void;
   onOpenBackfillModal: (taskId: string) => void;
   onLoadLogs: (taskId?: string, startDate?: string, endDate?: string) => void;
@@ -48,7 +46,6 @@ export const ETLPanel: React.FC<ETLPanelProps> = ({
   onNewTask,
   onBatchBackfill,
   onEditTask,
-  onCopyTask,
   onDeleteTask,
   onOpenBackfillModal,
   onLoadLogs,
@@ -182,7 +179,7 @@ export const ETLPanel: React.FC<ETLPanelProps> = ({
     {
       title: '操作',
       key: 'action',
-      width: 160,
+      width: 200,
       fixed: 'right' as const,
       render: (_: any, r: any) => {
         return (
@@ -190,9 +187,6 @@ export const ETLPanel: React.FC<ETLPanelProps> = ({
             <Button size="small" icon={<IconHistory />} onClick={() => onOpenBackfillModal(r.task_id)}>
               回溯
             </Button>
-            <Tooltip content="复制任务">
-              <Button size="small" icon={<IconCopy />} onClick={() => onCopyTask(r)} />
-            </Tooltip>
             <Button
               size="small"
               type="danger"
@@ -208,9 +202,9 @@ export const ETLPanel: React.FC<ETLPanelProps> = ({
   const etlLogColumns = [
     {
       title: '任务ID',
-      dataIndex: 'task_id',
-      key: 'task_id',
-      width: 150,
+      dataIndex: 'data_type',
+      key: 'data_type',
+      width: 180,
       render: (v: string) => (
         <Tooltip content={v}>
           <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -221,8 +215,8 @@ export const ETLPanel: React.FC<ETLPanelProps> = ({
     },
     {
       title: '执行日期',
-      dataIndex: 'exec_date',
-      key: 'exec_date',
+      dataIndex: 'sync_date',
+      key: 'sync_date',
       width: 100,
       render: (v: string) => (
         <Tooltip content={v}>
@@ -234,9 +228,9 @@ export const ETLPanel: React.FC<ETLPanelProps> = ({
     },
     {
       title: '处理行数',
-      dataIndex: 'rows_processed',
-      key: 'rows_processed',
-      width: 90,
+      dataIndex: 'rows_synced',
+      key: 'rows_synced',
+      width: 100,
       render: (text: number) => (
         <span style={{ color: 'var(--color-primary)', fontWeight: 500 }}>
           {text?.toLocaleString() || 0}
@@ -258,17 +252,26 @@ export const ETLPanel: React.FC<ETLPanelProps> = ({
       },
     },
     {
-      title: '执行时间',
-      dataIndex: 'execution_time',
-      key: 'execution_time',
-      width: 100,
-      render: (v: number) => (v ? `${v.toFixed(2)}s` : '-'),
+      title: '参数',
+      dataIndex: 'params',
+      key: 'params',
+      width: 200,
+      render: (v: string) =>
+        v ? (
+          <Tooltip content={v}>
+            <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <code style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{v}</code>
+            </div>
+          </Tooltip>
+        ) : (
+          '-'
+        ),
     },
     {
       title: '创建时间',
       dataIndex: 'created_at',
       key: 'created_at',
-      width: 150,
+      width: 160,
       render: (v: string) => (
         <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
           {v?.slice(0, 19) || '-'}
@@ -279,6 +282,7 @@ export const ETLPanel: React.FC<ETLPanelProps> = ({
       title: '错误信息',
       dataIndex: 'error_message',
       key: 'error_message',
+      width: 300,
       render: (v: string) =>
         v ? (
           <Tooltip content={v}>
@@ -414,10 +418,11 @@ export const ETLPanel: React.FC<ETLPanelProps> = ({
         <Table
           dataSource={etlLogs}
           columns={etlLogColumns}
-          rowKey={(record: any) => `${record.id || ''}-${record.created_at || ''}`}
+          rowKey={(record: any) => `${record.data_type || ''}-${record.sync_date || ''}-${record.created_at || ''}`}
           size="small"
           pagination={{ pageSize: 50 }}
           scroll={{ x: 'max-content' }}
+          style={{ width: '100%' }}
         />
       </Card>
     </>

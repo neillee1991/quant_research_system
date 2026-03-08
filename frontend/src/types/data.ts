@@ -37,7 +37,6 @@ export interface SyncTask {
   schedule?: string;
   cron_expression?: string;
   config?: SyncTaskConfig;
-  version?: number;
   created_at?: string;
   updated_at?: string;
 }
@@ -119,9 +118,10 @@ export interface ETLTask {
   description: string;
   table_name: string;
   script: string;
+  sync_type?: 'full' | 'incremental';
+  date_field?: string;
   enabled?: boolean;
   schedule?: string;
-  version?: number;
   created_at?: string;
   updated_at?: string;
 }

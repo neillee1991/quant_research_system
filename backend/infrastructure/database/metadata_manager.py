@@ -41,8 +41,6 @@ class MetadataManager:
         "factor_metadata": (
             "table("
             "array(SYMBOL,0) as factor_id,"
-            "array(INT,0) as version_number,"
-            "array(BOOL,0) as is_current,"
             "array(STRING,0) as description,"
             "array(STRING,0) as category,"
             "array(STRING,0) as compute_mode,"
@@ -50,11 +48,10 @@ class MetadataManager:
             "array(STRING,0) as depends_on,"
             "array(STRING,0) as params,"
             "array(STRING,0) as code,"
-            "array(STRING,0) as changed_by,"
-            "array(STRING,0) as change_reason,"
+            "array(BOOL,0) as enabled,"
             "array(TIMESTAMP,0) as created_at,"
             "array(TIMESTAMP,0) as updated_at)",
-            ["factor_id", "version_number"],
+            ["factor_id"],
         ),
         "factor_analysis": (
             "table("
@@ -96,8 +93,6 @@ class MetadataManager:
         "sync_task_config": (
             "table("
             "array(SYMBOL,0) as task_id,"
-            "array(INT,0) as version_number,"
-            "array(BOOL,0) as is_current,"
             "array(SYMBOL,0) as api_name,"
             "array(STRING,0) as description,"
             "array(SYMBOL,0) as sync_type,"
@@ -106,29 +101,25 @@ class MetadataManager:
             "array(STRING,0) as primary_keys_json,"
             "array(SYMBOL,0) as table_name,"
             "array(STRING,0) as schema_json,"
+            "array(BOOL,0) as enabled,"
             "array(INT,0) as api_limit,"
-            "array(STRING,0) as changed_by,"
-            "array(STRING,0) as change_reason,"
             "array(TIMESTAMP,0) as created_at,"
             "array(TIMESTAMP,0) as updated_at)",
-            ["task_id", "version_number"],
+            ["task_id"],
         ),
         "etl_task_config": (
             "table("
             "array(SYMBOL,0) as task_id,"
-            "array(INT,0) as version_number,"
-            "array(BOOL,0) as is_current,"
             "array(STRING,0) as description,"
             "array(STRING,0) as script,"
             "array(SYMBOL,0) as sync_type,"
             "array(STRING,0) as date_field,"
             "array(STRING,0) as primary_keys_json,"
             "array(SYMBOL,0) as table_name,"
-            "array(STRING,0) as changed_by,"
-            "array(STRING,0) as change_reason,"
+            "array(BOOL,0) as enabled,"
             "array(TIMESTAMP,0) as created_at,"
             "array(TIMESTAMP,0) as updated_at)",
-            ["task_id", "version_number"],
+            ["task_id"],
         ),
         "factor_data_config": (
             "table("
@@ -224,224 +215,3 @@ class MetadataManager:
         if not created and not altered:
             logger.info("所有维度表已存在且列完整，无需变更")
 
-    def create_task_version(
-        self,
-        task_type: str,
-        task_id: str,
-        config_data: Dict[str, Any],
-        changed_by: str = "system",
-        change_reason: str = ""
-    ) -> int:
-        """
-        创建任务配置新版本
-
-        Args:
-            task_type: 任务类型 ("sync", "etl", "factor")
-            task_id: 任务ID
-            config_data: 配置数据字典
-            changed_by: 修改人
-            change_reason: 修改原因
-
-        Returns:
-            新版本号
-        """
-        table_map = {
-            "sync": "sync_task_config",
-            "etl": "etl_task_config",
-            "factor": "factor_metadata"
-        }
-
-        if task_type not in table_map:
-            raise ValueError(f"Invalid task_type: {task_type}")
-
-        table_name = table_map[task_type]
-        id_field = "task_id" if task_type in ["sync", "etl"] else "factor_id"
-
-        # 获取当前最大版本号
-        sql = f"SELECT max(version_number) as max_ver FROM {table_name} WHERE {id_field} = %s"
-        result = self._data_ops.query(sql, params=(task_id,))
-
-        max_ver = 0
-        if not result.is_empty() and result["max_ver"][0] is not None:
-            max_ver = int(result["max_ver"][0])
-
-        new_version = max_ver + 1
-        now = datetime.now()
-
-        # 将旧版本的 is_current 设为 false (使用 upsert 而非 UPDATE)
-        if max_ver > 0:
-            # 读取所有旧版本
-            old_versions = self._data_ops.query(
-                f"SELECT * FROM {table_name} WHERE {id_field} = %s AND is_current = true",
-                params=(task_id,)
-            )
-            if not old_versions.is_empty():
-                # 更新 is_current 为 false
-                old_versions = old_versions.with_columns(
-                    pl.lit(False).alias("is_current"),
-                    pl.lit(now).alias("updated_at")
-                )
-                self._data_ops.upsert(table_name, old_versions, [id_field, "version_number"])
-
-        # 插入新版本
-        config_data[id_field] = task_id
-        config_data["version_number"] = new_version
-        config_data["is_current"] = True
-        config_data["changed_by"] = changed_by
-        config_data["change_reason"] = change_reason
-        config_data["created_at"] = now
-        config_data["updated_at"] = now
-
-        df = pl.DataFrame([config_data])
-        self._data_ops.upsert(table_name, df, [id_field, "version_number"])
-
-        logger.info(f"Created {task_type} task version: {task_id} v{new_version}")
-        return new_version
-
-    def get_task_versions(
-        self,
-        task_type: str,
-        task_id: str
-    ) -> pl.DataFrame:
-        """
-        获取任务的所有版本历史
-
-        Args:
-            task_type: 任务类型 ("sync", "etl", "factor")
-            task_id: 任务ID
-
-        Returns:
-            版本历史 DataFrame
-        """
-        table_map = {
-            "sync": "sync_task_config",
-            "etl": "etl_task_config",
-            "factor": "factor_metadata"
-        }
-
-        if task_type not in table_map:
-            raise ValueError(f"Invalid task_type: {task_type}")
-
-        table_name = table_map[task_type]
-        id_field = "task_id" if task_type in ["sync", "etl"] else "factor_id"
-
-        sql = f"SELECT * FROM {table_name} WHERE {id_field} = %s ORDER BY version_number DESC"
-        return self._data_ops.query(sql, params=(task_id,))
-
-    def get_task_version(
-        self,
-        task_type: str,
-        task_id: str,
-        version: int
-    ) -> Optional[Dict[str, Any]]:
-        """
-        获取任务的特定版本
-
-        Args:
-            task_type: 任务类型 ("sync", "etl", "factor")
-            task_id: 任务ID
-            version: 版本号
-
-        Returns:
-            版本配置字典，不存在返回 None
-        """
-        table_map = {
-            "sync": "sync_task_config",
-            "etl": "etl_task_config",
-            "factor": "factor_metadata"
-        }
-
-        if task_type not in table_map:
-            raise ValueError(f"Invalid task_type: {task_type}")
-
-        table_name = table_map[task_type]
-        id_field = "task_id" if task_type in ["sync", "etl"] else "factor_id"
-
-        sql = f"SELECT * FROM {table_name} WHERE {id_field} = %s AND version_number = %s"
-        result = self._data_ops.query(sql, params=(task_id, version))
-
-        if result.is_empty():
-            return None
-
-        return result.to_dicts()[0]
-
-    def rollback_task_version(
-        self,
-        task_type: str,
-        task_id: str,
-        target_version: int,
-        changed_by: str = "system",
-        change_reason: str = "Rollback"
-    ) -> int:
-        """
-        回滚任务到指定版本（创建新版本，内容复制自目标版本）
-
-        Args:
-            task_type: 任务类型 ("sync", "etl", "factor")
-            task_id: 任务ID
-            target_version: 目标版本号
-            changed_by: 修改人
-            change_reason: 修改原因
-
-        Returns:
-            新版本号
-        """
-        target_config = self.get_task_version(task_type, task_id, target_version)
-        if not target_config:
-            raise ValueError(f"Version {target_version} not found for {task_type} task {task_id}")
-
-        # 移除版本管理字段
-        target_config.pop("version_number", None)
-        target_config.pop("is_current", None)
-        target_config.pop("created_at", None)
-        target_config.pop("updated_at", None)
-
-        return self.create_task_version(
-            task_type=task_type,
-            task_id=task_id,
-            config_data=target_config,
-            changed_by=changed_by,
-            change_reason=f"{change_reason} (from v{target_version})"
-        )
-
-    def get_current_task_version(
-        self,
-        task_type: str,
-        task_id: str
-    ) -> Optional[Dict[str, Any]]:
-        """
-        获取任务的当前版本
-
-        Args:
-            task_type: 任务类型 ("sync", "etl", "factor")
-            task_id: 任务ID
-
-        Returns:
-            当前版本配置字典，不存在返回 None
-        """
-        table_map = {
-            "sync": "sync_task_config",
-            "etl": "etl_task_config",
-            "factor": "factor_metadata"
-        }
-
-        if task_type not in table_map:
-            raise ValueError(f"Invalid task_type: {task_type}")
-
-        table_name = table_map[task_type]
-        id_field = "task_id" if task_type in ["sync", "etl"] else "factor_id"
-
-        sql = f"SELECT * FROM {table_name} WHERE {id_field} = %s AND is_current = true"
-        result = self._data_ops.query(sql, params=(task_id,))
-
-        if result.is_empty():
-            return None
-
-        return result.to_dicts()[0]
-
-    # Note: Seed methods (seed_sync_task_config, seed_etl_task_config,
-    # seed_factor_data_config, seed_factor_metadata) are intentionally
-    # omitted from this refactored module to keep it focused.
-    # These methods contain large amounts of seed data and should be
-    # moved to separate configuration files or database migration scripts.
-    # For backward compatibility, they remain in the original DolphinDBClient.

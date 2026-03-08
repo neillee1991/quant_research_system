@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 from datetime import datetime, timedelta
 from pathlib import Path
 import json
+import warnings
 import polars as pl
 import tushare as ts
 
@@ -22,70 +23,95 @@ from app.core.constants import DEFAULT_START_DATE
 
 
 class SyncConfigManager:
-    """同步配置管理器 — 从 DolphinDB sync_task_config 表读取"""
+    """
+    同步配置管理器 - 兼容层
+
+    ⚠️ 已废弃：此类仅用于向后兼容
+    新代码请直接使用 app.services.task_service.sync_service
+
+    内部使用 TaskService 实现，保持原有接口不变
+    """
 
     def __init__(self, config_path: Optional[str] = None):
-        # config_path 保留签名兼容，但不再使用
-        from store.dolphindb_client import db_client
-        self._db = db_client
-        self._cache: Optional[List[Dict[str, Any]]] = None
+        """
+        初始化配置管理器
 
-    # ------ 内部 ------
+        Args:
+            config_path: 保留参数用于兼容，实际不再使用
+        """
+        # 发出废弃警告
+        warnings.warn(
+            "SyncConfigManager is deprecated. Use app.services.task_service.sync_service instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
 
-    def _load_tasks(self) -> List[Dict[str, Any]]:
-        """从数据库加载全部任务配置并缓存"""
-        if self._cache is not None:
-            return self._cache
-        try:
-            df = self._db.query("SELECT * FROM sync_task_config WHERE is_current = true")
-            if df.is_empty():
-                self._cache = []
-                return self._cache
-            seen: Dict[str, Dict[str, Any]] = {}
-            for row in df.iter_rows(named=True):
-                task = {
-                    "task_id": row["task_id"],
-                    "api_name": row["api_name"],
-                    "description": row.get("description", ""),
-                    "sync_type": row["sync_type"],
-                    "params": json.loads(row["params_json"]) if row.get("params_json") else {},
-                    "date_field": row.get("date_field", ""),
-                    "primary_keys": json.loads(row["primary_keys_json"]) if row.get("primary_keys_json") else [],
-                    "table_name": row["table_name"],
-                    "schema": json.loads(row["schema_json"]) if row.get("schema_json") else {},
-                    "enabled": bool(row.get("enabled", True)),
-                    "api_limit": row.get("api_limit", 5000),
-                }
-                seen[task["task_id"]] = task
-            self._cache = list(seen.values())
-            logger.info(f"从数据库加载了 {len(self._cache)} 条同步任务配置")
-            return self._cache
-        except Exception as e:
-            raise SyncConfigError(f"从数据库加载同步任务配置失败: {e}")
-
-    def reload(self) -> None:
-        """清除缓存，下次访问时重新加载"""
-        self._cache = None
-
-    # ------ 公开接口（保持不变） ------
+        # 延迟导入避免循环依赖
+        from app.services.task_service import sync_service
+        self._service = sync_service
 
     def get_task(self, task_id: str) -> Dict[str, Any]:
-        """获取任务配置"""
-        for task in self._load_tasks():
-            if task["task_id"] == task_id:
-                return task
-        raise SyncTaskNotFoundError(task_id)
+        """
+        获取任务配置
+
+        Args:
+            task_id: 任务ID
+
+        Returns:
+            任务配置字典（JSON 字段已解析）
+
+        Raises:
+            SyncTaskNotFoundError: 任务不存在
+        """
+        task = self._service.get_task(task_id)
+        if not task:
+            raise SyncTaskNotFoundError(task_id)
+        return task.to_dict_with_parsed_json()
 
     def get_all_tasks(self) -> List[Dict[str, Any]]:
-        """获取所有任务"""
-        return self._load_tasks()
+        """
+        获取所有任务
+
+        Returns:
+            任务配置列表（JSON 字段已解析）
+        """
+        tasks = self._service.list_tasks(enabled_only=False)
+        return [task.to_dict_with_parsed_json() for task in tasks]
 
     def get_enabled_tasks(self) -> List[Dict[str, Any]]:
-        """获取所有启用的任务"""
-        return [t for t in self._load_tasks() if t.get("enabled", True)]
+        """
+        获取所有启用的任务
+
+        Returns:
+            启用的任务配置列表（JSON 字段已解析）
+        """
+        tasks = self._service.list_tasks(enabled_only=True)
+        return [task.to_dict_with_parsed_json() for task in tasks]
+        """
+        获取所有启用的任务
+
+        Returns:
+            启用的任务配置列表
+        """
+        tasks = self._service.list_tasks(enabled_only=True)
+        return [task.model_dump() for task in tasks]
+
+    def reload(self) -> None:
+        """
+        重新加载配置
+
+        注意：TaskService 不使用缓存，此方法保留仅用于兼容
+        """
+        # TaskService 每次都从数据库读取，无需重载
+        pass
 
     def get_global_config(self) -> Dict[str, Any]:
-        """获取全局配置（现在从 settings 读取，不再依赖 JSON）"""
+        """
+        获取全局配置
+
+        Returns:
+            全局配置字典
+        """
         return {
             "rate_limit": {
                 "calls_per_minute": settings.collector.calls_per_minute,
@@ -112,7 +138,16 @@ class SyncLogManager:
             """
             result = self.repository.query(sql, params=("tushare_config", task_id))
             if not result.is_empty():
-                return result["last_date"][0]
+                last_date = result["last_date"][0]
+                # 确保返回字符串格式 YYYYMMDD
+                if isinstance(last_date, str):
+                    return last_date
+                else:
+                    # 如果是 datetime 对象，转换为字符串
+                    from datetime import datetime
+                    if isinstance(last_date, datetime):
+                        return last_date.strftime("%Y%m%d")
+                    return str(last_date)
         except Exception as e:
             logger.warning(f"Failed to get last sync date for {task_id}: {e}")
         return None
@@ -187,9 +222,34 @@ class TableManager:
 
     def ensure_table_exists(self, task: Dict[str, Any]) -> None:
         """确保表存在"""
-        table_name = task["table_name"]
-        primary_keys = task["primary_keys"]
-        schema = task.get("schema", {})
+        import json
+
+        table_name = task.get("table_name")
+        if not table_name:
+            logger.warning("Task config missing table_name, skipping table creation")
+            return
+
+        # 解析 primary_keys（可能是 JSON 字符串或列表）
+        primary_keys_raw = task.get("primary_keys") or task.get("primary_keys_json", "[]")
+        if isinstance(primary_keys_raw, str):
+            try:
+                primary_keys = json.loads(primary_keys_raw)
+            except json.JSONDecodeError:
+                logger.warning(f"Failed to parse primary_keys: {primary_keys_raw}")
+                primary_keys = []
+        else:
+            primary_keys = primary_keys_raw
+
+        # 解析 schema（可能是 JSON 字符串或字典）
+        schema_raw = task.get("schema") or task.get("schema_json", "{}")
+        if isinstance(schema_raw, str):
+            try:
+                schema = json.loads(schema_raw)
+            except json.JSONDecodeError:
+                logger.warning(f"Failed to parse schema: {schema_raw}")
+                schema = {}
+        else:
+            schema = schema_raw
 
         # 先注册到元数据表集合，确保 table_exists / _resolve_db_path 路由到正确的库
         self.repository.register_meta_table(table_name)
@@ -358,6 +418,8 @@ class SyncTaskExecutor(ISyncTaskExecutor):
 
         except Exception as e:
             logger.error(f"Task {task_id} failed: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             try:
                 self.log_manager.update_sync_log(task_id, DateUtils.today(), 0, "failed", str(e), params=f"type={sync_type}")
             except Exception:
@@ -429,18 +491,9 @@ class SyncTaskExecutor(ISyncTaskExecutor):
                 self.log_manager.update_sync_log(task_id, DateUtils.today(), 0, params=params_str)
                 return False
 
-            # 全量同步且无主键时，先清空表再写入，避免数据不断累积
-            if not primary_keys:
-                try:
-                    self.repository.execute(
-                        f"delete from loadTable('{self.repository._db_path}', '{table_name}')"
-                    )
-                    logger.info(f"[{task_id}] cleared table {table_name} before full sync (no primary keys)")
-                except Exception as e:
-                    logger.warning(f"[{task_id}] failed to clear table {table_name}: {e}")
-
             rows_count = len(df)
-            self.repository.upsert(table_name, df, primary_keys)
+            # 全量同步：清空整个表再写入
+            self.repository.upsert(table_name, df, primary_keys, is_full_sync=True)
             self.log_manager.update_sync_log(task_id, DateUtils.today(), rows_count, params=params_str)
             logger.info(f"Full sync completed for {task_id}: {rows_count} rows")
             return True
@@ -479,6 +532,13 @@ class SyncTaskExecutor(ISyncTaskExecutor):
             # 如果指定了 end_date，使用它；否则使用 target_date
             target_date = end_date if end_date else target_date
 
+        # 确保日期都是字符串格式（防止 datetime 对象比较错误）
+        from datetime import datetime
+        if isinstance(start_date, datetime):
+            start_date = start_date.strftime("%Y%m%d")
+        if isinstance(target_date, datetime):
+            target_date = target_date.strftime("%Y%m%d")
+
         if start_date > target_date:
             logger.info(f"Task {task_id} already up to date")
             return True
@@ -499,7 +559,14 @@ class SyncTaskExecutor(ISyncTaskExecutor):
                 df = self._fetch_with_pagination(task_id, api_name, params, api_limit)
 
                 if df is not None and not df.is_empty():
-                    self.repository.upsert(task["table_name"], df, task["primary_keys"])
+                    # 增量同步：只清空当前 trade_date 的数据再写入
+                    self.repository.upsert(
+                        task["table_name"],
+                        df,
+                        task["primary_keys"],
+                        is_full_sync=False,
+                        trade_date=date_str
+                    )
                     rows_count = len(df)
                     total_rows += rows_count
                     logger.info(f"Synced {task_id} for {date_str}: {rows_count} rows")

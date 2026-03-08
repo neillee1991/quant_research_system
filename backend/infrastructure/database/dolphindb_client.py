@@ -156,9 +156,13 @@ class DolphinDBClient:
         df: pl.DataFrame,
         key_columns: List[str],
         known_columns: Optional[List[str]] = None,
+        is_full_sync: bool = False,
+        trade_date: Optional[str] = None,
     ) -> None:
         """插入或更新数据"""
-        return self._data_operations.upsert(table_name, df, key_columns, known_columns)
+        return self._data_operations.upsert(
+            table_name, df, key_columns, known_columns, is_full_sync, trade_date
+        )
 
     def upsert_daily(self, df: pl.DataFrame) -> None:
         """插入或更新日线数据"""
@@ -216,56 +220,6 @@ class DolphinDBClient:
         """确保元数据表存在"""
         return self._metadata_manager.ensure_meta_tables()
 
-    def create_task_version(
-        self,
-        task_type: str,
-        task_id: str,
-        config_data: Dict[str, Any],
-        changed_by: str = "system",
-        change_reason: str = ""
-    ) -> int:
-        """创建任务配置新版本"""
-        return self._metadata_manager.create_task_version(
-            task_type, task_id, config_data, changed_by, change_reason
-        )
-
-    def get_task_versions(
-        self,
-        task_type: str,
-        task_id: str
-    ) -> pl.DataFrame:
-        """获取任务的所有版本历史"""
-        return self._metadata_manager.get_task_versions(task_type, task_id)
-
-    def get_task_version(
-        self,
-        task_type: str,
-        task_id: str,
-        version: int
-    ) -> Optional[Dict[str, Any]]:
-        """获取任务的特定版本"""
-        return self._metadata_manager.get_task_version(task_type, task_id, version)
-
-    def rollback_task_version(
-        self,
-        task_type: str,
-        task_id: str,
-        target_version: int,
-        changed_by: str = "system",
-        change_reason: str = "Rollback"
-    ) -> int:
-        """回滚任务到指定版本"""
-        return self._metadata_manager.rollback_task_version(
-            task_type, task_id, target_version, changed_by, change_reason
-        )
-
-    def get_current_task_version(
-        self,
-        task_type: str,
-        task_id: str
-    ) -> Optional[Dict[str, Any]]:
-        """获取任务的当前版本"""
-        return self._metadata_manager.get_current_task_version(task_type, task_id)
 
     # ------------------------------------------------------------------
     # 种子数据方法（保留在原始文件中，这里提供占位符）

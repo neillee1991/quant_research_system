@@ -1,0 +1,432 @@
+/**
+ * Frontend Unit Tests - No Version Management
+ *
+ * Verifies that frontend components and services do not include version management:
+ * - Type definitions exclude version fields
+ * - API calls do not include version parameters
+ * - UI components do not show version history
+ */
+
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { syncService, etlService, factorService } from '../services/taskService';
+import type { SyncTaskConfig, ETLTaskConfig, FactorConfig } from '../types/task';
+
+// Mock fetch globally
+global.fetch = vi.fn();
+
+describe('Task Type Definitions - No Version Fields', () => {
+  it('SyncTaskConfig should not include version fields', () => {
+    const syncTask: SyncTaskConfig = {
+      task_id: 'test_sync',
+      api_name: 'daily',
+      api_limit: 5000,
+      fields: 'ts_code,trade_date,close',
+      description: 'Test sync task',
+      enabled: true,
+    };
+
+    // Verify type structure
+    expect(syncTask).toHaveProperty('task_id');
+    expect(syncTask).toHaveProperty('description');
+    expect(syncTask).toHaveProperty('enabled');
+
+    // Verify no version fields
+    expect(syncTask).not.toHaveProperty('version_number');
+    expect(syncTask).not.toHaveProperty('is_current');
+  });
+
+  it('ETLTaskConfig should not include version fields', () => {
+    const etlTask: ETLTaskConfig = {
+      task_id: 'test_etl',
+      source_table: 'sync_daily_data',
+      target_table: 'processed_daily',
+      script: 'SELECT * FROM sync_daily_data',
+      description: 'Test ETL task',
+      enabled: true,
+    };
+
+    // Verify type structure
+    expect(etlTask).toHaveProperty('task_id');
+    expect(etlTask).toHaveProperty('source_table');
+    expect(etlTask).toHaveProperty('target_table');
+
+    // Verify no version fields
+    expect(etlTask).not.toHaveProperty('version_number');
+    expect(etlTask).not.toHaveProperty('is_current');
+  });
+
+  it('FactorConfig should not include version fields', () => {
+    const factor: FactorConfig = {
+      factor_id: 'test_factor',
+      code: 'def compute(df): return df',
+      depends_on: 'daily',
+      params: '{}',
+      lookback_days: 20,
+      description: 'Test factor',
+      enabled: true,
+    };
+
+    // Verify type structure
+    expect(factor).toHaveProperty('factor_id');
+    expect(factor).toHaveProperty('code');
+    expect(factor).toHaveProperty('lookback_days');
+
+    // Verify no version fields
+    expect(factor).not.toHaveProperty('version_number');
+    expect(factor).not.toHaveProperty('is_current');
+  });
+});
+
+describe('Sync Task Service - No Version Management', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('listTasks should not filter by is_current', async () => {
+    const mockTasks: SyncTaskConfig[] = [
+      {
+        task_id: 'task1',
+        api_name: 'daily',
+        description: 'Task 1',
+        enabled: true,
+      },
+      {
+        task_id: 'task2',
+        api_name: 'stock_basic',
+        description: 'Task 2',
+        enabled: true,
+      },
+    ];
+
+    (global.fetch as any).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ tasks: mockTasks }),
+    });
+
+    const tasks = await syncService.listTasks();
+
+    // Verify fetch was called with correct URL (no version filter)
+    expect(global.fetch).toHaveBeenCalledWith('/api/v1/sync/tasks');
+
+    // Verify returned tasks
+    expect(tasks).toHaveLength(2);
+    expect(tasks[0].task_id).toBe('task1');
+  });
+
+  it('createTask should not include version fields in request', async () => {
+    const newTask: Omit<SyncTaskConfig, 'created_at' | 'updated_at'> = {
+      task_id: 'new_task',
+      api_name: 'daily',
+      api_limit: 5000,
+      fields: 'ts_code,trade_date,close',
+      description: 'New task',
+      enabled: true,
+    };
+
+    (global.fetch as any).mockResolvedValueOnce({
+      ok: true,
+      json: async () => newTask,
+    });
+
+    await syncService.createTask(newTask);
+
+    // Verify fetch was called with correct parameters
+    expect(global.fetch).toHaveBeenCalledWith(
+      '/api/v1/sync/tasks',
+      expect.objectContaining({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newTask),
+      })
+    );
+
+    // Verify request body does not include version fields
+    const requestBody = JSON.parse((global.fetch as any).mock.calls[0][1].body);
+    expect(requestBody).not.toHaveProperty('version_number');
+    expect(requestBody).not.toHaveProperty('is_current');
+  });
+
+  it('updateTask should directly overwrite without creating version', async () => {
+    const updates = {
+      description: 'Updated description',
+      api_limit: 8000,
+    };
+
+    (global.fetch as any).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        task_id: 'task1',
+        ...updates,
+        enabled: true,
+      }),
+    });
+
+    await syncService.updateTask('task1', updates);
+
+    // Verify fetch was called with PUT method
+    expect(global.fetch).toHaveBeenCalledWith(
+      '/api/v1/sync/tasks/task1',
+      expect.objectContaining({
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates),
+      })
+    );
+
+    // Verify request body does not include version fields
+    const requestBody = JSON.parse((global.fetch as any).mock.calls[0][1].body);
+    expect(requestBody).not.toHaveProperty('version_number');
+    expect(requestBody).not.toHaveProperty('is_current');
+  });
+
+  it('getTask should not query by version', async () => {
+    const mockTask: SyncTaskConfig = {
+      task_id: 'task1',
+      api_name: 'daily',
+      description: 'Task 1',
+      enabled: true,
+    };
+
+    (global.fetch as any).mockResolvedValueOnce({
+      ok: true,
+      json: async () => mockTask,
+    });
+
+    const task = await syncService.getTask('task1');
+
+    // Verify fetch was called with simple task_id (no version parameter)
+    expect(global.fetch).toHaveBeenCalledWith('/api/v1/sync/tasks/task1');
+
+    // Verify returned task does not have version fields
+    expect(task).not.toHaveProperty('version_number');
+    expect(task).not.toHaveProperty('is_current');
+  });
+
+  it('deleteTask should soft delete without version consideration', async () => {
+    (global.fetch as any).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ success: true }),
+    });
+
+    await syncService.deleteTask('task1');
+
+    // Verify fetch was called with DELETE method
+    expect(global.fetch).toHaveBeenCalledWith(
+      '/api/v1/sync/tasks/task1',
+      expect.objectContaining({
+        method: 'DELETE',
+      })
+    );
+  });
+});
+
+describe('ETL Task Service - No Version Management', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('createTask should not include version fields', async () => {
+    const newTask: Omit<ETLTaskConfig, 'created_at' | 'updated_at'> = {
+      task_id: 'new_etl',
+      source_table: 'sync_daily_data',
+      target_table: 'processed_daily',
+      script: 'SELECT * FROM sync_daily_data',
+      description: 'New ETL task',
+      enabled: true,
+    };
+
+    (global.fetch as any).mockResolvedValueOnce({
+      ok: true,
+      json: async () => newTask,
+    });
+
+    await etlService.createTask(newTask);
+
+    // Verify request body does not include version fields
+    const requestBody = JSON.parse((global.fetch as any).mock.calls[0][1].body);
+    expect(requestBody).not.toHaveProperty('version_number');
+    expect(requestBody).not.toHaveProperty('is_current');
+  });
+
+  it('updateTask should directly overwrite configuration', async () => {
+    const updates = {
+      script: 'SELECT * FROM sync_daily_data WHERE trade_date > "20240101"',
+      schedule: '0 3 * * *',
+    };
+
+    (global.fetch as any).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        task_id: 'etl1',
+        ...updates,
+        enabled: true,
+      }),
+    });
+
+    await etlService.updateTask('etl1', updates);
+
+    // Verify PUT request without version fields
+    const requestBody = JSON.parse((global.fetch as any).mock.calls[0][1].body);
+    expect(requestBody).not.toHaveProperty('version_number');
+    expect(requestBody).not.toHaveProperty('is_current');
+  });
+});
+
+describe('Factor Service - No Version Management', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('createTask should not include version fields', async () => {
+    const newFactor: Omit<FactorConfig, 'created_at' | 'updated_at'> = {
+      factor_id: 'new_factor',
+      code: 'def compute(df): return df',
+      depends_on: 'daily',
+      params: '{}',
+      lookback_days: 20,
+      description: 'New factor',
+      enabled: true,
+    };
+
+    (global.fetch as any).mockResolvedValueOnce({
+      ok: true,
+      json: async () => newFactor,
+    });
+
+    await factorService.createTask(newFactor);
+
+    // Verify request body does not include version fields
+    const requestBody = JSON.parse((global.fetch as any).mock.calls[0][1].body);
+    expect(requestBody).not.toHaveProperty('version_number');
+    expect(requestBody).not.toHaveProperty('is_current');
+  });
+
+  it('updateTask should directly overwrite factor configuration', async () => {
+    const updates = {
+      lookback_days: 60,
+      params: '{"window": 20}',
+    };
+
+    (global.fetch as any).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        factor_id: 'factor1',
+        ...updates,
+        enabled: true,
+      }),
+    });
+
+    await factorService.updateTask('factor1', updates);
+
+    // Verify PUT request without version fields
+    const requestBody = JSON.parse((global.fetch as any).mock.calls[0][1].body);
+    expect(requestBody).not.toHaveProperty('version_number');
+    expect(requestBody).not.toHaveProperty('is_current');
+  });
+});
+
+describe('API Response Validation - No Version Fields', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('API response should not contain version_number', async () => {
+    const mockResponse = {
+      task_id: 'task1',
+      api_name: 'daily',
+      description: 'Task 1',
+      enabled: true,
+      created_at: '2024-01-01T00:00:00Z',
+      updated_at: '2024-01-01T00:00:00Z',
+    };
+
+    (global.fetch as any).mockResolvedValueOnce({
+      ok: true,
+      json: async () => mockResponse,
+    });
+
+    const task = await syncService.getTask('task1');
+
+    // Verify response does not include version fields
+    expect(task).not.toHaveProperty('version_number');
+    expect(task).not.toHaveProperty('is_current');
+  });
+
+  it('List API response should not contain version fields', async () => {
+    const mockResponse = {
+      tasks: [
+        {
+          task_id: 'task1',
+          api_name: 'daily',
+          description: 'Task 1',
+          enabled: true,
+        },
+        {
+          task_id: 'task2',
+          api_name: 'stock_basic',
+          description: 'Task 2',
+          enabled: true,
+        },
+      ],
+      total: 2,
+    };
+
+    (global.fetch as any).mockResolvedValueOnce({
+      ok: true,
+      json: async () => mockResponse,
+    });
+
+    const tasks = await syncService.listTasks();
+
+    // Verify all tasks do not include version fields
+    tasks.forEach((task) => {
+      expect(task).not.toHaveProperty('version_number');
+      expect(task).not.toHaveProperty('is_current');
+    });
+  });
+});
+
+describe('Multiple Updates - No Version Accumulation', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('Multiple updates should not create version history', async () => {
+    // Simulate multiple updates
+    for (let i = 0; i < 5; i++) {
+      (global.fetch as any).mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          task_id: 'task1',
+          api_limit: 5000 + i * 1000,
+          enabled: true,
+        }),
+      });
+
+      await syncService.updateTask('task1', { api_limit: 5000 + i * 1000 });
+    }
+
+    // Verify all 5 updates were PUT requests (not creating new versions)
+    expect(global.fetch).toHaveBeenCalledTimes(5);
+
+    // Verify all calls were to the same endpoint (no version in URL)
+    (global.fetch as any).mock.calls.forEach((call: any) => {
+      expect(call[0]).toBe('/api/v1/sync/tasks/task1');
+      expect(call[1].method).toBe('PUT');
+    });
+  });
+});
+
+describe('Service Instance Configuration', () => {
+  it('syncService should use correct endpoint', () => {
+    expect(syncService.getIdField()).toBe('task_id');
+  });
+
+  it('etlService should use correct endpoint', () => {
+    expect(etlService.getIdField()).toBe('task_id');
+  });
+
+  it('factorService should use correct endpoint and ID field', () => {
+    expect(factorService.getIdField()).toBe('factor_id');
+  });
+});

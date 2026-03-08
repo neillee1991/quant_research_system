@@ -454,11 +454,31 @@ class ResultWriterProcessor(IProcessor):
         # 确定存储表
         storage_config = definition.storage
         table_name = storage_config.table if storage_config else "factor_values"
+        primary_keys = ["ts_code", "trade_date", "factor_id"] if table_name == "factor_values" else ["ts_code", "trade_date"]
+
+        # 获取计算模式
+        compute_mode = context.compute_mode
 
         # 写入数据库（upsert）
         try:
-            rows = self.db.upsert(table_name, result_df)
-            logger.info(f"Saved {rows} rows to {table_name}")
+            if compute_mode == "full":
+                # 全量模式：清空整个表
+                rows = self.db.upsert(table_name, result_df, primary_keys, is_full_sync=True)
+            else:
+                # 增量模式：按 trade_date 逐个清空并写入
+                if "trade_date" in result_df.columns:
+                    trade_dates = result_df["trade_date"].unique().to_list()
+                    total_rows = 0
+                    for trade_date in trade_dates:
+                        date_df = result_df.filter(pl.col("trade_date") == trade_date)
+                        self.db.upsert(table_name, date_df, primary_keys, is_full_sync=False, trade_date=trade_date)
+                        total_rows += len(date_df)
+                    rows = total_rows
+                else:
+                    # 没有 trade_date 列，直接写入
+                    rows = self.db.upsert(table_name, result_df, primary_keys, is_full_sync=False)
+
+            logger.info(f"Saved {rows} rows to {table_name} (mode={compute_mode})")
             context.set_state("saved_rows", rows)
         except Exception as e:
             logger.error(f"Failed to save results: {e}")

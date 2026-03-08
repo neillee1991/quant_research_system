@@ -136,6 +136,9 @@ class DateUtils:
     @staticmethod
     def add_days(date_str: str, days: int, format_str: str = DATE_FORMAT_YYYYMMDD) -> str:
         """日期加减天数"""
+        # 如果输入是 datetime 对象，先转换为字符串
+        if isinstance(date_str, datetime):
+            date_str = date_str.strftime(format_str)
         date = datetime.strptime(date_str, format_str)
         new_date = date + timedelta(days=days)
         return new_date.strftime(format_str)
@@ -215,7 +218,18 @@ class TradingCalendar:
             if df.is_empty():
                 logger.warning("TradingCalendar: sync_trade_cal 表为空，回退到自然日模式")
                 return
-            self._trading_days = df["cal_date"].to_list()
+
+            # 确保 cal_date 转换为字符串格式 YYYYMMDD
+            cal_dates = df["cal_date"].to_list()
+            self._trading_days = []
+            for date in cal_dates:
+                if isinstance(date, str):
+                    self._trading_days.append(date)
+                elif isinstance(date, datetime):
+                    self._trading_days.append(date.strftime("%Y%m%d"))
+                else:
+                    self._trading_days.append(str(date))
+
             logger.info(f"TradingCalendar loaded {len(self._trading_days)} trading days "
                         f"({self._trading_days[0]} ~ {self._trading_days[-1]})")
         except Exception as e:

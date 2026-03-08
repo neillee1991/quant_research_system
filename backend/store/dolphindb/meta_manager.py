@@ -45,8 +45,6 @@ class MetadataManager:
         "factor_metadata": (
             "table("
             "array(SYMBOL,0) as factor_id,"
-            "array(INT,0) as version_number,"
-            "array(BOOL,0) as is_current,"
             "array(STRING,0) as description,"
             "array(STRING,0) as category,"
             "array(STRING,0) as compute_mode,"
@@ -54,11 +52,10 @@ class MetadataManager:
             "array(STRING,0) as depends_on,"
             "array(STRING,0) as params,"
             "array(STRING,0) as code,"
-            "array(STRING,0) as changed_by,"
-            "array(STRING,0) as change_reason,"
+            "array(BOOL,0) as enabled,"
             "array(TIMESTAMP,0) as created_at,"
             "array(TIMESTAMP,0) as updated_at)",
-            ["factor_id", "version_number"],
+            ["factor_id"],
         ),
         "factor_analysis": (
             "table("
@@ -93,49 +90,32 @@ class MetadataManager:
             "array(SYMBOL,0) as task_id,"
             "array(SYMBOL,0) as api_name,"
             "array(STRING,0) as description,"
-            "array(STRING,0) as params,"
             "array(SYMBOL,0) as sync_type,"
+            "array(STRING,0) as params_json,"
             "array(STRING,0) as date_field,"
-            "array(STRING,0) as primary_keys,"
+            "array(STRING,0) as primary_keys_json,"
             "array(SYMBOL,0) as table_name,"
-            "array(STRING,0) as schema,"
+            "array(STRING,0) as schema_json,"
             "array(INT,0) as api_limit,"
             "array(BOOL,0) as enabled,"
             "array(TIMESTAMP,0) as created_at,"
             "array(TIMESTAMP,0) as updated_at)",
-            ["task_id", "updated_at"],
+            ["task_id"],
         ),
         "etl_task_config": (
             "table("
             "array(SYMBOL,0) as task_id,"
-            "array(STRING,0) as task_name,"
-            "array(STRING,0) as description,"
-            "array(STRING,0) as source_tables,"
-            "array(SYMBOL,0) as target_table,"
-            "array(STRING,0) as transform_logic,"
-            "array(STRING,0) as schedule,"
-            "array(BOOL,0) as enabled,"
-            "array(TIMESTAMP,0) as created_at,"
-            "array(TIMESTAMP,0) as updated_at)",
-            ["task_id", "updated_at"],
-        ),
-        "task_version_history": (
-            "table("
-            "array(SYMBOL,0) as task_id,"
-            "array(INT,0) as version_number,"
-            "array(BOOL,0) as is_current,"
-            "array(STRING,0) as task_name,"
             "array(STRING,0) as description,"
             "array(STRING,0) as script,"
             "array(SYMBOL,0) as sync_type,"
             "array(STRING,0) as date_field,"
             "array(STRING,0) as primary_keys_json,"
             "array(SYMBOL,0) as table_name,"
-            "array(STRING,0) as changed_by,"
-            "array(STRING,0) as change_reason,"
+            "array(STRING,0) as schema_json,"
+            "array(BOOL,0) as enabled,"
             "array(TIMESTAMP,0) as created_at,"
             "array(TIMESTAMP,0) as updated_at)",
-            ["task_id", "version_number"],
+            ["task_id"],
         ),
         "factor_data_config": (
             "table("
@@ -280,7 +260,10 @@ class MetadataManager:
             logger.warning(f"schema 为空，跳过建表: {table_name}")
             return
 
+        # 使用配置的数据库路径
         db_path = self.conn.db_path
+        logger.info(f"Creating table {table_name} in {db_path}")
+
         try:
             with self.conn.lock:
                 self.conn._ensure_connected()
@@ -340,7 +323,7 @@ class MetadataManager:
                 self.conn._ensure_connected()
                 self.conn.session.run(script)
             logger.info(
-                f"Created table {table_name} with {len(schema)} columns, "
+                f"Created table {table_name} in {db_path} with {len(schema)} columns, "
                 f"primary_keys: {primary_keys}"
             )
         except Exception as e:
@@ -452,228 +435,3 @@ class MetadataManager:
             )
         logger.info(f"Dropped table {table_name}")
 
-    def create_task_version(
-        self,
-        task_id: str,
-        task_name: str,
-        description: str,
-        script: str,
-        sync_type: str,
-        date_field: str,
-        primary_keys_json: str,
-        table_name: str,
-        changed_by: str = "system",
-        change_reason: str = "",
-    ) -> int:
-        """
-        创建任务新版本（版本号自增）
-
-        Args:
-            task_id: 任务ID
-            task_name: 任务名称
-            description: 描述
-            script: 脚本内容
-            sync_type: 同步类型
-            date_field: 日期字段
-            primary_keys_json: 主键JSON
-            table_name: 表名
-            changed_by: 修改人
-            change_reason: 修改原因
-
-        Returns:
-            新版本号
-        """
-        db_path = self.conn.db_path
-        now = datetime.now()
-
-        with self.conn.lock:
-            self.conn._ensure_connected()
-
-            # 获取当前最大版本号
-            max_version_result = self.conn.session.run(
-                f"select max(version_number) as max_ver from "
-                f"loadTable('{db_path}', 'task_version_history') "
-                f"where task_id = '{task_id}'"
-            )
-
-            if isinstance(max_version_result, pd.DataFrame) and not max_version_result.empty:
-                max_ver = max_version_result['max_ver'].iloc[0]
-                new_version = int(max_ver) + 1 if pd.notna(max_ver) else 1
-            else:
-                new_version = 1
-
-            # 将旧版本标记为非当前
-            self.conn.session.run(
-                f"update loadTable('{db_path}', 'task_version_history') "
-                f"set is_current = false "
-                f"where task_id = '{task_id}'"
-            )
-
-            # 插入新版本
-            version_df = pl.DataFrame({
-                "task_id": [task_id],
-                "version_number": [new_version],
-                "is_current": [True],
-                "task_name": [task_name],
-                "description": [description],
-                "script": [script],
-                "sync_type": [sync_type],
-                "date_field": [date_field],
-                "primary_keys_json": [primary_keys_json],
-                "table_name": [table_name],
-                "changed_by": [changed_by],
-                "change_reason": [change_reason],
-                "created_at": [now],
-                "updated_at": [now],
-            })
-
-            pdf = version_df.to_pandas()
-            tmp_var = f"tmp_version_{threading.current_thread().ident}"
-            self.conn.session.upload({tmp_var: pdf})
-            self.conn.session.run(
-                f"tableInsert(loadTable('{db_path}', 'task_version_history'), {tmp_var})"
-            )
-
-        logger.info(f"Created version {new_version} for task {task_id}")
-        return new_version
-
-    def get_task_versions(
-        self,
-        task_id: str,
-        limit: int = 10,
-    ) -> pl.DataFrame:
-        """
-        获取任务的版本历史
-
-        Args:
-            task_id: 任务ID
-            limit: 返回记录数限制
-
-        Returns:
-            版本历史 DataFrame
-        """
-        db_path = self.conn.db_path
-        with self.conn.lock:
-            self.conn._ensure_connected()
-            result = self.conn.session.run(
-                f"select * from loadTable('{db_path}', 'task_version_history') "
-                f"where task_id = '{task_id}' "
-                f"order by version_number desc "
-                f"limit {limit}"
-            )
-
-        if result is None or (isinstance(result, pd.DataFrame) and result.empty):
-            return pl.DataFrame()
-
-        return pl.from_pandas(result)
-
-    def get_task_version(
-        self,
-        task_id: str,
-        version_number: Optional[int] = None,
-    ) -> Optional[Dict[str, Any]]:
-        """
-        获取任务的指定版本（默认当前版本）
-
-        Args:
-            task_id: 任务ID
-            version_number: 版本号（None 表示当前版本）
-
-        Returns:
-            版本信息字典
-        """
-        db_path = self.conn.db_path
-        with self.conn.lock:
-            self.conn._ensure_connected()
-            if version_number is None:
-                result = self.conn.session.run(
-                    f"select * from loadTable('{db_path}', 'task_version_history') "
-                    f"where task_id = '{task_id}' and is_current = true "
-                    f"limit 1"
-                )
-            else:
-                result = self.conn.session.run(
-                    f"select * from loadTable('{db_path}', 'task_version_history') "
-                    f"where task_id = '{task_id}' and version_number = {version_number} "
-                    f"limit 1"
-                )
-
-        if result is None or (isinstance(result, pd.DataFrame) and result.empty):
-            return None
-
-        df = pl.from_pandas(result)
-        if df.is_empty():
-            return None
-
-        return df.to_dicts()[0]
-
-    def rollback_task_version(
-        self,
-        task_id: str,
-        target_version: int,
-        changed_by: str = "system",
-        change_reason: str = "rollback",
-    ) -> bool:
-        """
-        回滚任务到指定版本
-
-        Args:
-            task_id: 任务ID
-            target_version: 目标版本号
-            changed_by: 操作人
-            change_reason: 回滚原因
-
-        Returns:
-            是否成功
-        """
-        db_path = self.conn.db_path
-
-        with self.conn.lock:
-            self.conn._ensure_connected()
-
-            # 检查目标版本是否存在
-            check_result = self.conn.session.run(
-                f"select count(*) as cnt from "
-                f"loadTable('{db_path}', 'task_version_history') "
-                f"where task_id = '{task_id}' and version_number = {target_version}"
-            )
-
-            if isinstance(check_result, pd.DataFrame):
-                cnt = check_result['cnt'].iloc[0]
-                if cnt == 0:
-                    logger.error(
-                        f"Version {target_version} not found for task {task_id}"
-                    )
-                    return False
-
-            # 将所有版本标记为非当前
-            self.conn.session.run(
-                f"update loadTable('{db_path}', 'task_version_history') "
-                f"set is_current = false "
-                f"where task_id = '{task_id}'"
-            )
-
-            # 将目标版本标记为当前
-            self.conn.session.run(
-                f"update loadTable('{db_path}', 'task_version_history') "
-                f"set is_current = true, updated_at = now() "
-                f"where task_id = '{task_id}' and version_number = {target_version}"
-            )
-
-        logger.info(f"Rolled back task {task_id} to version {target_version}")
-        return True
-
-    def get_current_task_version(self, task_id: str) -> Optional[int]:
-        """
-        获取任务的当前版本号
-
-        Args:
-            task_id: 任务ID
-
-        Returns:
-            当前版本号
-        """
-        version_info = self.get_task_version(task_id)
-        if version_info:
-            return version_info.get("version_number")
-        return None

@@ -18,6 +18,7 @@ import {
   BatchSyncModal,
   ETLBackfillModal,
   DeleteConfirmModal,
+  SchemaChangeConfirmModal,
 } from './Modals';
 import { SyncTaskDrawer } from './SyncTaskDrawer';
 import { ETLTaskDrawer } from './ETLTaskDrawer';
@@ -45,6 +46,7 @@ const DataCenter: React.FC = () => {
 
   // ETL 回溯模态框状态
   const [etlBackfillModalVisible, setEtlBackfillModalVisible] = useState(false);
+  const [etlBackfillTask, setEtlBackfillTask] = useState<ETLTask | null>(null);
   const [etlBackfillTaskId, setEtlBackfillTaskId] = useState<string>('');
   const [etlBackfillStartDate, setEtlBackfillStartDate] = useState<string>('');
   const [etlBackfillEndDate, setEtlBackfillEndDate] = useState<string>('');
@@ -149,18 +151,6 @@ const DataCenter: React.FC = () => {
     setTaskDrawerVisible(true);
   };
 
-  const handleCopyTask = (task: SyncTask) => {
-    // 复制任务：清空 task_id，其他配置保留
-    const copiedTask = {
-      ...task,
-      task_id: '',
-      description: `${task.description} (副本)`,
-    };
-    setTaskDrawerTask(copiedTask);
-    setTaskDrawerIsNew(true);
-    setTaskDrawerVisible(true);
-  };
-
   const handleDeleteTask = (taskId: string) => {
     setDeleteConfirmTaskId(taskId);
     setDeleteConfirmType('sync');
@@ -186,18 +176,6 @@ const DataCenter: React.FC = () => {
     setEtlDrawerVisible(true);
   };
 
-  const handleCopyEtlTask = (task: ETLTask) => {
-    // 复制任务：清空 task_id，其他配置保留
-    const copiedTask = {
-      ...task,
-      task_id: '',
-      description: `${task.description} (副本)`,
-    };
-    setEtlDrawerTask(copiedTask);
-    setEtlDrawerIsNew(true);
-    setEtlDrawerVisible(true);
-  };
-
   const handleDeleteEtlTask = (taskId: string) => {
     setDeleteConfirmTaskId(taskId);
     setDeleteConfirmType('etl');
@@ -205,6 +183,9 @@ const DataCenter: React.FC = () => {
   };
 
   const handleOpenEtlBackfillModal = (taskId: string) => {
+    const task = etlTasksHook.etlTasks.find((t) => t.task_id === taskId);
+    if (!task) return;
+    setEtlBackfillTask(task);
     setEtlBackfillTaskId(taskId);
     setEtlBackfillStartDate('');
     setEtlBackfillEndDate('');
@@ -333,7 +314,6 @@ const DataCenter: React.FC = () => {
             onNewTask={handleNewTask}
             onBatchSync={handleBatchSync}
             onSyncTask={handleSyncTask}
-            onCopyTask={handleCopyTask}
             onDeleteTask={handleDeleteTask}
             onOpenTaskDrawer={handleOpenTaskDrawer}
             onLoadSyncLogs={syncTasksHook.loadSyncLogs}
@@ -351,7 +331,6 @@ const DataCenter: React.FC = () => {
             onNewTask={handleNewEtlTask}
             onBatchBackfill={handleBatchEtlBackfill}
             onEditTask={handleEditEtlTask}
-            onCopyTask={handleCopyEtlTask}
             onDeleteTask={handleDeleteEtlTask}
             onOpenBackfillModal={handleOpenEtlBackfillModal}
             onLoadLogs={etlTasksHook.loadEtlLogs}
@@ -402,6 +381,7 @@ const DataCenter: React.FC = () => {
 
       <ETLBackfillModal
         visible={etlBackfillModalVisible}
+        task={etlBackfillTask}
         taskId={etlBackfillTaskId}
         startDate={etlBackfillStartDate}
         endDate={etlBackfillEndDate}
@@ -420,6 +400,8 @@ const DataCenter: React.FC = () => {
         onEndDateChange={setBatchEtlBackfillEndDate}
         onOk={executeBatchEtlBackfill}
         onCancel={() => setBatchEtlBackfillModalVisible(false)}
+        selectedTaskIds={etlTasksHook.selectedEtlTaskIds}
+        etlTasks={etlTasksHook.etlTasks}
       />
 
       <DeleteConfirmModal

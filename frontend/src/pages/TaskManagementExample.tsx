@@ -148,35 +148,29 @@ const TaskManagementExample: React.FC = () => {
     try {
       if (activeTab === 'sync') {
         if (isNewTask) {
-          await syncService.createTask(values, 'user', '创建同步任务');
+          await syncService.createTask(values);
         } else {
           await syncService.updateTask(
             editingTask.task_id,
-            values,
-            'user',
-            '更新同步任务'
+            values
           );
         }
       } else if (activeTab === 'etl') {
         if (isNewTask) {
-          await etlService.createTask(values, 'user', '创建ETL任务');
+          await etlService.createTask(values);
         } else {
           await etlService.updateTask(
             editingTask.task_id,
-            values,
-            'user',
-            '更新ETL任务'
+            values
           );
         }
       } else if (activeTab === 'factor') {
         if (isNewTask) {
-          await factorService.createTask(values, 'user', '创建因子');
+          await factorService.createTask(values);
         } else {
           await factorService.updateTask(
             editingTask.factor_id,
-            values,
-            'user',
-            '更新因子'
+            values
           );
         }
       }

@@ -8,7 +8,7 @@ import { TextArea } from '@douyinfe/semi-ui';
 import {
   IconTestScoreStroked, IconPlay, IconRefresh, IconBarChartHStroked, IconPlus,
   IconDelete, IconEdit, IconBolt, IconCode, IconServer, IconInfoCircle,
-  IconSearch, IconSave, IconSetting, IconAlertTriangle, IconCopy, IconHistory,
+  IconSearch, IconSave, IconSetting, IconAlertTriangle, IconHistory,
 } from '@douyinfe/semi-icons';
 import dayjs from 'dayjs';
 import ReactECharts from 'echarts-for-react';
@@ -16,7 +16,6 @@ import Editor from '@monaco-editor/react';
 import { productionApi, dataApi, DEFAULT_PREPROCESS } from '../api';
 import { useThemeStore } from '../store';
 import { formatCode } from '../utils/codeFormatter';
-import { VersionHistory, VersionBadge } from '../components/VersionHistory';
 import type {
   PreprocessOptions,
   DataFieldMapping,
@@ -247,20 +246,6 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
       title={
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <span style={{ color: 'var(--color-primary)' }}>{factorId}</span>
-          <Button
-            icon={<IconHistory />}
-            size="small"
-            theme="borderless"
-            onClick={() => {
-              // 触发版本历史显示
-              const event = new CustomEvent('showVersionHistory', {
-                detail: { taskType: 'factor', taskId: factorId }
-              });
-              window.dispatchEvent(event);
-            }}
-          >
-            版本历史
-          </Button>
         </div>
       }
       visible={open} onCancel={onClose} width={780}
@@ -735,23 +720,6 @@ const FactorManageTab: React.FC = () => {
   const [createLookbackDays, setCreateLookbackDays] = useState<number>(60);
   const createEditorRef = useRef<unknown>(null);
 
-  // 版本控制状态
-  const [versionHistoryVisible, setVersionHistoryVisible] = useState(false);
-  const [versionFactorId, setVersionFactorId] = useState<string>('');
-
-  // 监听版本历史事件
-  useEffect(() => {
-    const handleShowVersionHistory = (event: CustomEvent<{ taskType: string; taskId: string }>) => {
-      const { taskType, taskId } = event.detail;
-      if (taskType === 'factor') {
-        setVersionFactorId(taskId);
-        setVersionHistoryVisible(true);
-      }
-    };
-    window.addEventListener('showVersionHistory', handleShowVersionHistory as EventListener);
-    return () => window.removeEventListener('showVersionHistory', handleShowVersionHistory as EventListener);
-  }, []);
-
   // 格式化创建代码
   const handleFormatCreateCode = async (): Promise<void> => {
     try {
@@ -865,26 +833,6 @@ const FactorManageTab: React.FC = () => {
     setDrawerState({ open: true, factor: record, tab });
   };
 
-  const handleCopyFactor = async (factor: any) => {
-    // 预填充新建因子 SideSheet，ID 加 _copy 后缀
-    setCreateFactorId(`${factor.factor_id}_copy`);
-    setCreateDesc(factor.description || '');
-    setCreateCategory(factor.category || 'custom');
-    setCreateComputeMode(factor.compute_mode || 'incremental');
-    setCreatePreprocess(factor.params?.preprocess ? { ...DEFAULT_PREPROCESS, ...factor.params.preprocess } : { ...DEFAULT_PREPROCESS });
-    setCreateDependsOn(Array.isArray(factor.depends_on) ? factor.depends_on : (factor.depends_on ? JSON.parse(factor.depends_on) : ['sync_daily_data']));
-    setCreateWindow(factor.params?.window ?? undefined);
-    setCreateLookbackDays(factor.params?.lookback_days ?? 60);
-    // 异步加载因子代码
-    try {
-      const res = await productionApi.getFactorCode(factor.factor_id);
-      setCreateCode(res.data?.data?.code || CODE_TEMPLATE);
-    } catch {
-      setCreateCode(CODE_TEMPLATE);
-    }
-    setCreateModal(true);
-  };
-
   const factorColumns = [
     { title: '因子ID', dataIndex: 'factor_id', key: 'factor_id', width: 180,
       render: (v: string, r: any) => (
@@ -945,9 +893,6 @@ const FactorManageTab: React.FC = () => {
               setFullRunModal({ visible: true, factorId: record.factor_id, computeMode: record.compute_mode || 'incremental' });
               setFullRunDates([null, null]);
             }}>计算</Button>
-          <Tooltip content="复制因子">
-            <Button size="small" icon={<IconCopy />} onClick={() => handleCopyFactor(record)} />
-          </Tooltip>
           <Popconfirm title="确认删除?" onConfirm={() => handleDelete(record.factor_id)}>
             <Button size="small" type="danger" icon={<IconDelete />} />
           </Popconfirm>
@@ -1297,18 +1242,6 @@ const FactorManageTab: React.FC = () => {
             if (updated) setDrawerState(prev => ({ ...prev, factor: updated }));
           }
         }} />
-
-      {/* 版本历史 SideSheet */}
-      <VersionHistory
-        visible={versionHistoryVisible}
-        onClose={() => setVersionHistoryVisible(false)}
-        taskType="factor"
-        taskId={versionFactorId}
-        onRollback={(version: number) => {
-          Toast.success(`已切换到版本 ${version}`);
-          loadFactors();
-        }}
-      />
     </div>
   );
 };

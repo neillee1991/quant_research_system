@@ -3,7 +3,7 @@
  */
 import React from 'react';
 import { Card, Table, Button, Input } from '@douyinfe/semi-ui';
-import { IconPlay, IconRefresh } from '@douyinfe/semi-icons';
+import { IconPlay, IconRefresh, IconLink } from '@douyinfe/semi-icons';
 import Editor from '@monaco-editor/react';
 import type { TableInfo } from '../../types';
 
@@ -106,32 +106,18 @@ export const DataTable: React.FC<DataTableProps> = ({
         style={{ marginBottom: '12px' }}
         title={
           <span style={{ color: 'var(--text-primary)', fontSize: '16px', fontWeight: 600 }}>
-            数据表管理
+            SQL 查询
           </span>
         }
         headerExtraContent={
-          <Button icon={<IconRefresh />} onClick={onRefreshTables} size="small">
-            刷新
+          <Button
+            icon={<IconLink />}
+            onClick={() => window.open('http://localhost:8848', '_blank')}
+            size="small"
+            theme="borderless"
+          >
+            DolphinDB 后台
           </Button>
-        }
-      >
-        <Table
-          dataSource={tables}
-          columns={tableColumns}
-          rowKey="table_name"
-          size="small"
-          pagination={false}
-          scroll={{ x: 'max-content' }}
-        />
-      </Card>
-
-      <Card
-        className="content-card"
-        style={{ marginTop: 12 }}
-        title={
-          <span style={{ color: 'var(--text-primary)', fontSize: '16px', fontWeight: 600 }}>
-            SQL 查询
-          </span>
         }
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -205,6 +191,30 @@ export const DataTable: React.FC<DataTableProps> = ({
             </div>
           )}
         </div>
+      </Card>
+
+      <Card
+        className="content-card"
+        style={{ marginTop: 12 }}
+        title={
+          <span style={{ color: 'var(--text-primary)', fontSize: '16px', fontWeight: 600 }}>
+            数据表管理
+          </span>
+        }
+        headerExtraContent={
+          <Button icon={<IconRefresh />} onClick={onRefreshTables} size="small">
+            刷新
+          </Button>
+        }
+      >
+        <Table
+          dataSource={tables}
+          columns={tableColumns}
+          rowKey="table_name"
+          size="small"
+          pagination={false}
+          scroll={{ x: 'max-content' }}
+        />
       </Card>
     </>
   );
