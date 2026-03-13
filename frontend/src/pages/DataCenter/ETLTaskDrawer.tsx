@@ -46,6 +46,13 @@ interface TestResult {
   error?: string;
 }
 
+interface FieldDiff {
+  name: string;
+  currentType?: string;  // 当前表中的类型
+  newType?: string;      // 脚本测试产出的类型
+  status: 'added' | 'removed' | 'modified' | 'unchanged';
+}
+
 export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
   visible,
   task,
@@ -63,7 +70,10 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
     script: '',
   });
   const [taskStatus, setTaskStatus] = useState<any>(null);
-  const [fieldTypes, setFieldTypes] = useState<FieldType[]>([]);
+  const [tableExists, setTableExists] = useState(false);  // 表是否存在
+  const [currentFields, setCurrentFields] = useState<FieldType[]>([]);  // 当前表的字段
+  const [testFields, setTestFields] = useState<FieldType[]>([]);  // 测试脚本产出的字段
+  const [fieldDiffs, setFieldDiffs] = useState<FieldDiff[]>([]);  // 字段差异
   const [selectedPrimaryKeys, setSelectedPrimaryKeys] = useState<string[]>([]);
   const [testResult, setTestResult] = useState<TestResult | null>(null);
   const [testLoading, setTestLoading] = useState(false);
@@ -86,7 +96,10 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
         date_field: '',
         script: '',
       });
-      setFieldTypes([]);
+      setTableExists(false);
+      setCurrentFields([]);
+      setTestFields([]);
+      setFieldDiffs([]);
       setSelectedPrimaryKeys([]);
       setTestResult(null);
       setEtlLogs([]);
@@ -105,13 +118,26 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
       enabled: task.enabled !== undefined ? task.enabled : true,
     });
 
-    // 加载字段定义
+    // 加载字段定义（检查表是否存在）
     try {
       const res = await dataApi.getEtlTableSchema(task.task_id);
-      const fields = res.data.fields || [];
-      setFieldTypes(fields.map((f: any) => ({ name: f.name, type: f.type })));
+      const exists = res.data.table_exists || false;
+      const fields = res.data.schema || [];
+
+      setTableExists(exists);
+      if (exists) {
+        // 表存在，显示实际表结构
+        setCurrentFields(fields.map((f: any) => ({ name: f.name, type: f.type })));
+      } else {
+        // 表不存在，不显示字段
+        setCurrentFields([]);
+      }
+      setTestFields([]);
+      setFieldDiffs([]);
     } catch (error) {
       console.error('Failed to load ETL table schema:', error);
+      setTableExists(false);
+      setCurrentFields([]);
     }
   };
 
@@ -150,14 +176,25 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
       const data = res.data;
 
       // 提取字段类型（使用后端返回的 field_types）
+      let newFields: FieldType[] = [];
       if (data.field_types && data.field_types.length > 0) {
-        setFieldTypes(data.field_types);
+        newFields = data.field_types;
       } else if (data.columns && data.columns.length > 0) {
-        const fields = data.columns.map((col: string) => ({
+        newFields = data.columns.map((col: string) => ({
           name: col,
           type: 'STRING', // 默认类型
         }));
-        setFieldTypes(fields);
+      }
+
+      setTestFields(newFields);
+
+      // 如果表已存在，计算字段差异
+      if (tableExists && currentFields.length > 0) {
+        const diffs = calculateFieldDiffs(currentFields, newFields);
+        setFieldDiffs(diffs);
+      } else {
+        // 表不存在，直接使用测试结果
+        setFieldDiffs([]);
       }
 
       setTestResult({
@@ -179,6 +216,35 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
     }
   };
 
+  // 计算字段差异
+  const calculateFieldDiffs = (current: FieldType[], test: FieldType[]): FieldDiff[] => {
+    const diffs: FieldDiff[] = [];
+    const currentMap = new Map(current.map(f => [f.name, f.type]));
+    const testMap = new Map(test.map(f => [f.name, f.type]));
+
+    // 检查所有字段
+    const allFields = new Set([...currentMap.keys(), ...testMap.keys()]);
+
+    allFields.forEach(name => {
+      const currentType = currentMap.get(name);
+      const newType = testMap.get(name);
+
+      if (currentType && newType) {
+        if (currentType === newType) {
+          diffs.push({ name, currentType, newType, status: 'unchanged' });
+        } else {
+          diffs.push({ name, currentType, newType, status: 'modified' });
+        }
+      } else if (currentType && !newType) {
+        diffs.push({ name, currentType, status: 'removed' });
+      } else if (!currentType && newType) {
+        diffs.push({ name, newType, status: 'added' });
+      }
+    });
+
+    return diffs;
+  };
+
   const handleFormatScript = () => {
     if (etlEditorRef.current) {
       etlEditorRef.current.getAction('editor.action.formatDocument').run();
@@ -197,8 +263,11 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
     }
 
     try {
-      // 将 fieldTypes 数组转换为 schema 对象格式
-      const schemaObject = fieldTypes.reduce((acc, field) => {
+      // 确定使用哪个字段列表：优先使用测试结果，否则使用当前表字段
+      const fieldsToSave = testFields.length > 0 ? testFields : currentFields;
+
+      // 将字段数组转换为 schema 对象格式
+      const schemaObject = fieldsToSave.reduce((acc, field) => {
         acc[field.name] = { type: field.type };
         return acc;
       }, {} as Record<string, { type: string }>);
@@ -496,13 +565,18 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
               </div>
 
               {/* 字段定义 */}
-              {fieldTypes.length > 0 && (
+              {/* 情况1: 表不存在且未测试 - 不显示 */}
+              {/* 情况2: 表存在且未测试 - 显示当前表字段 */}
+              {tableExists && currentFields.length > 0 && fieldDiffs.length === 0 && (
                 <div>
                   <div style={{ marginBottom: 4, fontSize: '12px', color: 'var(--semi-color-text-2)' }}>
-                    字段定义（勾选主键，可修改类型）
+                    当前表字段定义（勾选主键，可修改类型）
+                    <span style={{ marginLeft: 8, color: 'var(--semi-color-text-3)', fontSize: '11px' }}>
+                      💡 显示数据库实际表结构，修改后需删除表重建
+                    </span>
                   </div>
                   <Table
-                    dataSource={fieldTypes}
+                    dataSource={currentFields}
                     rowKey="name"
                     size="small"
                     pagination={false}
@@ -530,7 +604,7 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
                             value={v}
                             style={{ width: 130 }}
                             onChange={(val) =>
-                              setFieldTypes((prev) =>
+                              setCurrentFields((prev) =>
                                 prev.map((f) => (f.name === record.name ? { ...f, type: val as string } : f))
                               )
                             }
@@ -549,6 +623,192 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
                             ]}
                           />
                         ),
+                      },
+                    ]}
+                  />
+                  {selectedPrimaryKeys.length > 0 && (
+                    <div style={{ marginTop: 4, fontSize: '11px', color: 'var(--semi-color-text-3)' }}>
+                      主键: {selectedPrimaryKeys.join(', ')}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* 情况3: 表不存在但已测试 - 显示测试结果字段 */}
+              {!tableExists && testFields.length > 0 && (
+                <div>
+                  <div style={{ marginBottom: 4, fontSize: '12px', color: 'var(--semi-color-text-2)' }}>
+                    脚本测试字段定义（勾选主键，可修改类型）
+                    <span style={{ marginLeft: 8, color: 'var(--semi-color-text-3)', fontSize: '11px' }}>
+                      💡 保存后将作为建表模板，表创建后以实际表结构为准
+                    </span>
+                  </div>
+                  <Table
+                    dataSource={testFields}
+                    rowKey="name"
+                    size="small"
+                    pagination={false}
+                    rowSelection={{
+                      selectedRowKeys: selectedPrimaryKeys,
+                      onChange: (keys) => setSelectedPrimaryKeys(keys as string[]),
+                    }}
+                    columns={[
+                      {
+                        title: '字段名',
+                        dataIndex: 'name',
+                        key: 'name',
+                        width: 180,
+                        render: (v: string) => (
+                          <code style={{ fontSize: '12px', color: 'var(--semi-color-primary)' }}>{v}</code>
+                        ),
+                      },
+                      {
+                        title: '类型',
+                        dataIndex: 'type',
+                        key: 'type',
+                        render: (v: string, record: FieldType) => (
+                          <Select
+                            size="small"
+                            value={v}
+                            style={{ width: 130 }}
+                            onChange={(val) =>
+                              setTestFields((prev) =>
+                                prev.map((f) => (f.name === record.name ? { ...f, type: val as string } : f))
+                              )
+                            }
+                            optionList={[
+                              { label: 'STRING', value: 'STRING' },
+                              { label: 'SYMBOL', value: 'SYMBOL' },
+                              { label: 'INT', value: 'INT' },
+                              { label: 'LONG', value: 'LONG' },
+                              { label: 'SHORT', value: 'SHORT' },
+                              { label: 'DOUBLE', value: 'DOUBLE' },
+                              { label: 'FLOAT', value: 'FLOAT' },
+                              { label: 'DATE', value: 'DATE' },
+                              { label: 'TIMESTAMP', value: 'TIMESTAMP' },
+                              { label: 'DATETIME', value: 'DATETIME' },
+                              { label: 'BOOL', value: 'BOOL' },
+                            ]}
+                          />
+                        ),
+                      },
+                    ]}
+                  />
+                  {selectedPrimaryKeys.length > 0 && (
+                    <div style={{ marginTop: 4, fontSize: '11px', color: 'var(--semi-color-text-3)' }}>
+                      主键: {selectedPrimaryKeys.join(', ')}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* 情况4: 表存在且已测试，显示字段差异对比（合并为单表四列） */}
+              {tableExists && fieldDiffs.length > 0 && (
+                <div>
+                  <div style={{ marginBottom: 4, fontSize: '12px', color: 'var(--semi-color-text-2)' }}>
+                    字段对比（勾选主键，可修改测试类型）
+                  </div>
+                  <Table
+                    dataSource={fieldDiffs}
+                    rowKey="name"
+                    size="small"
+                    pagination={false}
+                    rowSelection={{
+                      selectedRowKeys: selectedPrimaryKeys,
+                      onChange: (keys) => setSelectedPrimaryKeys(keys as string[]),
+                      getCheckboxProps: (record: FieldDiff) => ({
+                        disabled: record.status === 'removed',
+                      }),
+                    }}
+                    columns={[
+                      {
+                        title: '字段名',
+                        dataIndex: 'name',
+                        key: 'name',
+                        width: 150,
+                        render: (v: string) => (
+                          <code style={{ fontSize: '12px', color: 'var(--semi-color-primary)' }}>{v}</code>
+                        ),
+                      },
+                      {
+                        title: '当前类型',
+                        dataIndex: 'currentType',
+                        key: 'currentType',
+                        width: 120,
+                        render: (v?: string) => (
+                          <span style={{ fontSize: '12px', color: v ? 'inherit' : 'var(--semi-color-text-2)' }}>
+                            {v || '-'}
+                          </span>
+                        ),
+                      },
+                      {
+                        title: '测试类型',
+                        dataIndex: 'newType',
+                        key: 'newType',
+                        width: 150,
+                        render: (_v: string | undefined, record: FieldDiff) => {
+                          const v = record.newType;
+                          if (!v) {
+                            return <span style={{ fontSize: '12px', color: 'var(--semi-color-text-2)' }}>-</span>;
+                          }
+                          return (
+                            <Select
+                              size="small"
+                              value={v}
+                              style={{ width: 130 }}
+                              onChange={(val) => {
+                                setTestFields((prev) =>
+                                  prev.map((f) => (f.name === record.name ? { ...f, type: val as string } : f))
+                                );
+                                setFieldDiffs((prev) =>
+                                  prev.map((d) =>
+                                    d.name === record.name
+                                      ? {
+                                          ...d,
+                                          newType: val as string,
+                                          status:
+                                            !d.currentType
+                                              ? 'added'
+                                              : d.currentType === val
+                                              ? 'unchanged'
+                                              : 'modified',
+                                        }
+                                      : d
+                                  )
+                                );
+                              }}
+                              optionList={[
+                                { label: 'STRING', value: 'STRING' },
+                                { label: 'SYMBOL', value: 'SYMBOL' },
+                                { label: 'INT', value: 'INT' },
+                                { label: 'LONG', value: 'LONG' },
+                                { label: 'SHORT', value: 'SHORT' },
+                                { label: 'DOUBLE', value: 'DOUBLE' },
+                                { label: 'FLOAT', value: 'FLOAT' },
+                                { label: 'DATE', value: 'DATE' },
+                                { label: 'TIMESTAMP', value: 'TIMESTAMP' },
+                                { label: 'DATETIME', value: 'DATETIME' },
+                                { label: 'BOOL', value: 'BOOL' },
+                              ]}
+                            />
+                          );
+                        },
+                      },
+                      {
+                        title: '状态',
+                        dataIndex: 'status',
+                        key: 'status',
+                        width: 100,
+                        render: (status: 'added' | 'removed' | 'modified' | 'unchanged') => {
+                          const tagConfig: Record<string, { color: 'green' | 'red' | 'orange' | 'blue'; text: string }> = {
+                            added: { color: 'green', text: '新增' },
+                            removed: { color: 'red', text: '已删除' },
+                            modified: { color: 'orange', text: '类型变更' },
+                            unchanged: { color: 'blue', text: '一致' },
+                          };
+                          const config = tagConfig[status];
+                          return <Tag color={config.color}>{config.text}</Tag>;
+                        },
                       },
                     ]}
                   />

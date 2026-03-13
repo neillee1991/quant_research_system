@@ -127,19 +127,9 @@ class MetadataManager:
             "array(TIMESTAMP,0) as updated_at)",
             ["field_key", "updated_at"],
         ),
-        "factor_values": (
-            "table("
-            "array(SYMBOL,0) as ts_code,"
-            "array(SYMBOL,0) as factor_id,"
-            "array(DATE,0) as trade_date,"
-            "array(DOUBLE,0) as factor_value,"
-            "array(INT,0) as quality_flag,"
-            "array(INT,0) as task_version,"
-            "array(STRING,0) as run_id,"
-            "array(STRING,0) as data_version,"
-            "array(TIMESTAMP,0) as created_at)",
-            ["ts_code", "factor_id", "trade_date"],
-        ),
+        # factor_values 表使用特殊的分区策略，不在此处创建
+        # 由 ensure_factor_values_table() 方法单独处理
+        # "factor_values": (...),  # 已移除，使用分区表创建逻辑
     }
 
     def __init__(self, connection: DolphinDBConnection) -> None:
@@ -156,6 +146,8 @@ class MetadataManager:
         检查并创建所有缺失的维度表
         对已存在的表，补加代码定义里有但实际表缺少的列
         应在应用首次启动时调用一次
+
+        注意：factor_values 表使用分区策略，由 ensure_factor_values_table() 单独创建
         """
         db_path = self.conn.db_path
         created: List[str] = []
@@ -219,6 +211,81 @@ class MetadataManager:
             logger.info(f"补加了缺失列: {'; '.join(altered)}")
         if not created and not altered:
             logger.info("所有维度表已存在且列完整，无需变更")
+
+        # 创建 factor_values 分区表
+        self.ensure_factor_values_table()
+
+    def ensure_factor_values_table(self) -> None:
+        """
+        创建 factor_values 分区表（三维组合分区）
+
+        分区策略：
+        - 第一层：HASH(factor_id, 20) - 20 个因子桶
+        - 第二层：RANGE(trade_date) - 按季度分区（2010-2040，120个季度）
+        - 第三层：HASH(ts_code, 10) - 10 个股票桶
+        - 总分区数：20 × 120 × 10 = 24,000 个分区
+
+        优化效果：
+        - 按股票查询（时序）：裁剪到 ~10 个分区
+        - 按日期查询（横截面）：裁剪到 ~200 个分区
+        - 按因子查询（全量）：裁剪到 ~1200 个分区
+        """
+        db_path = self.conn.db_path
+
+        try:
+            with self.conn.lock:
+                self.conn._ensure_connected()
+
+                # 检查表是否已存在
+                exists = self.conn.session.run(
+                    f"existsTable('{db_path}', 'factor_values')"
+                )
+
+                if exists:
+                    logger.info("factor_values 表已存在，跳过创建")
+                    return
+
+                # 创建三层组合分区表
+                create_script = f"""
+                // 使用现有的 dfs://quant 数据库
+                dbPath = "{db_path}";
+                db = database(dbPath);
+
+                // 创建表结构
+                schema = table(
+                    array(SYMBOL, 0) as ts_code,
+                    array(DATE, 0) as trade_date,
+                    array(STRING, 0) as factor_id,
+                    array(DOUBLE, 0) as factor_value,
+                    array(INT, 0) as quality_flag,
+                    array(INT, 0) as task_version,
+                    array(STRING, 0) as run_id,
+                    array(STRING, 0) as data_version,
+                    array(TIMESTAMP, 0) as created_at
+                );
+
+                // 在现有数据库中创建分区表
+                // 使用数据库已有的分区方案（VALUE(trade_date 按月) × HASH(ts_code, 50)）
+                pt = createPartitionedTable(
+                    dbHandle=db,
+                    table=schema,
+                    tableName=`factor_values,
+                    partitionColumns=`trade_date`ts_code,
+                    sortColumns=`factor_id`ts_code`trade_date
+                );
+
+                // 返回成功标志
+                1;
+                """
+
+                self.conn.session.run(create_script)
+                logger.info("✅ factor_values 分区表创建成功")
+                logger.info("   分区策略：VALUE(trade_date 按月) × HASH(ts_code, 50)")
+                logger.info("   排序键：factor_id, trade_date, ts_code")
+
+        except Exception as e:
+            logger.error(f"❌ 创建 factor_values 分区表失败: {e}")
+            raise
 
     def table_exists(self, table_name: str) -> bool:
         """

@@ -597,7 +597,10 @@ class ProductionEngine:
 
     def _load_factor_data(self, factor_id: str, start_date: str,
                           end_date: str) -> Optional[pl.DataFrame]:
-        """从 factor_values 表加载已计算的因子数据"""
+        """从 factor_values 表加载已计算的因子数据（带性能监控）"""
+        import time
+
+        start_time = time.time()
         try:
             sql = """
                 SELECT ts_code, trade_date, factor_value
@@ -606,12 +609,24 @@ class ProductionEngine:
                 ORDER BY ts_code, trade_date
             """
             df = self.db.query(sql, (factor_id, start_date, end_date))
+
+            elapsed = time.time() - start_time
+            row_count = len(df) if not df.is_empty() else 0
+
+            # 性能监控日志
+            logger.info(
+                f"📊 查询因子数据 [{factor_id}]: "
+                f"{row_count} 行, 耗时 {elapsed:.3f}s, "
+                f"速度 {row_count/elapsed:.0f} 行/秒"
+            )
+
             if not df.is_empty():
                 # 重命名 factor_value 为因子ID，方便合并
                 df = df.rename({"factor_value": factor_id})
             return df
         except Exception as e:
-            logger.error(f"Failed to load factor data {factor_id}: {e}")
+            elapsed = time.time() - start_time
+            logger.error(f"Failed to load factor data {factor_id} (耗时 {elapsed:.3f}s): {e}")
             return None
 
     # ==================== 结果存储 ====================
@@ -654,8 +669,11 @@ class ProductionEngine:
             return self._save_to_custom_table(df, storage, compute_mode=compute_mode)
 
     def _save_to_unified_table(self, factor_id: str, df: pl.DataFrame, run_id: str = "", task_version: int = 1, compute_mode: str = "incremental") -> int:
-        """保存到统一因子表"""
+        """保存到统一因子表（带性能监控）"""
+        import time
         from datetime import datetime
+
+        start_time = time.time()
 
         # 构造写入数据：ts_code, trade_date, factor_id, factor_value, quality_flag, task_version, run_id, data_version, created_at
         # 不可变模式：使用列表推导式和条件表达式构建列列表
@@ -684,6 +702,8 @@ class ProductionEngine:
 
         write_df = df.select(select_cols)
 
+        row_count = len(write_df)
+
         if compute_mode == "full":
             # 全量模式：清空该因子的所有数据
             try:
@@ -700,11 +720,19 @@ class ProductionEngine:
             self.db.upsert("factor_values", write_df,
                           ["ts_code", "trade_date", "factor_id"],
                           is_full_sync=False)  # 已经手动清空了，不需要再清空
+
+            elapsed = time.time() - start_time
+            logger.info(
+                f"💾 保存因子数据 [{factor_id}] [全量模式]: "
+                f"{row_count} 行, 耗时 {elapsed:.3f}s, "
+                f"速度 {row_count/elapsed:.0f} 行/秒"
+            )
         else:
             # 增量模式：按日期逐个清空并写入
             trade_dates = write_df["trade_date"].unique().to_list()
             for trade_date in trade_dates:
                 date_df = write_df.filter(pl.col("trade_date") == trade_date)
+
                 # 先删除该因子在该日期的数据
                 try:
                     db_path = self.db._db_path
@@ -713,15 +741,21 @@ class ProductionEngine:
                         f'pt = loadTable("{db_path}", "factor_values");'
                         f'delete from pt where factor_id = "{factor_id}" and trade_date = {ddb_date}'
                     )
+                    logger.debug(f"[增量模式] 已删除因子 {factor_id} 在 {trade_date} 的旧数据")
                 except Exception as e:
                     logger.warning(f"删除因子 {factor_id} 日期 {trade_date} 数据失败: {e}")
 
-                # 写入该日期的数据
+                # 写入该日期的数据（不再删除，因为已经手动删除了）
                 self.db.upsert("factor_values", date_df,
                               ["ts_code", "trade_date", "factor_id"],
                               is_full_sync=False)
 
-            logger.info(f"[增量模式] 因子 {factor_id} 已更新 {len(trade_dates)} 个交易日")
+            elapsed = time.time() - start_time
+            logger.info(
+                f"💾 保存因子数据 [{factor_id}] [增量模式]: "
+                f"{row_count} 行, {len(trade_dates)} 个交易日, "
+                f"耗时 {elapsed:.3f}s, 速度 {row_count/elapsed:.0f} 行/秒"
+            )
 
         return len(write_df)
 

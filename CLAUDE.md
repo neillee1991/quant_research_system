@@ -58,10 +58,19 @@ python database/init_dolphindb.py
 
 **Critical**: This project uses DolphinDB as the sole data store.
 
-- Two databases: `dfs://quant_ts` (TSDB partitioned tables) and `dfs://quant_meta` (dimension tables)
+- Two databases: `dfs://quant` (unified database with optimized partitioning)
 - TSDB tables: `daily_data`, `daily_basic`, `adj_factor`, `index_daily`, `moneyflow`, `factor_values`
 - Dimension tables: `sync_log`, `sync_log_history`, `stock_basic`, `factor_metadata`, `factor_analysis`, `dag_run_log`, `dag_task_log`, `production_task_run`, `trade_cal`, `sync_task_config`, `factor_data_config`
 - Bare table names are auto-resolved to `loadTable()` calls in `_adapt_sql_syntax()`
+
+**factor_values 表分区策略（已优化）**:
+- 三维组合分区：HASH(factor_id, 20) + RANGE(trade_date, 季度) + HASH(ts_code, 10)
+- 总分区数：20 × 120 × 10 = 24,000 个分区
+- 查询优化效果：
+  - 按股票查询（时序）：裁剪到 ~10 个分区
+  - 按日期查询（横截面）：裁剪到 ~200 个分区
+  - 按因子查询（全量）：裁剪到 ~1200 个分区
+- 性能监控：查询和写入操作自动记录耗时和速度
 
 The database client is a singleton: `from store.dolphindb_client import db_client`
 
@@ -240,7 +249,7 @@ db_client.upsert("table_name", polars_df, ["primary", "keys"])
 
 ### SQL Syntax Errors
 - Use `%s` not `?` for parameters; pass tuple not list
-- Bare table names auto-resolved by `_adapt_sql_syntax()`; if not, use `loadTable("dfs://quant_ts", "table_name")`
+- Bare table names auto-resolved by `_adapt_sql_syntax()`; if not, use `loadTable("dfs://quant", "table_name")`
 
 ### Connection Pool Exhausted
 - DolphinDB uses a single persistent connection; check for session leaks
@@ -254,6 +263,15 @@ db_client.upsert("table_name", polars_df, ["primary", "keys"])
 - Use `./check_status.sh` to diagnose
 - Check port availability (3000, 8000, 8848, 4200)
 - Ensure Docker is running for DolphinDB and Prefect
+
+### 分区性能测试
+- 运行 `python scripts/test_partition_performance.py` 测试查询性能
+- 预期速度：> 10,000 行/秒表示分区优化生效
+- 如果性能不佳，检查查询是否命中分区键（factor_id, trade_date, ts_code）
+
+### 重建分区表
+- 如果需要重新优化分区，运行 `python scripts/optimize_factor_values_partition.py`
+- 脚本会自动备份数据、删除旧表、创建优化分区表、恢复数据
 
 ## File Locations
 
@@ -273,3 +291,138 @@ db_client.upsert("table_name", polars_df, ["primary", "keys"])
 | Config | `.env` (project root) |
 | Logs | `backend/logs/app.log` |
 | PID files | `.pids/` |
+
+
+
+我希望你可以基于第一性的原则和我沟通，不用完全迎合我的判断，如果我的分析思路有风险不合理，我需要你提醒我
+
+---
+
+## 项目标准与规范
+
+**重要**: 本项目遵循严格的代码质量和安全标准。详细规范请参考 [PROJECT_STANDARDS.md](PROJECT_STANDARDS.md)
+
+### 代码质量要求
+
+- **函数长度**: ≤ 50 行
+- **文件长度**: ≤ 800 行
+- **嵌套深度**: ≤ 4 层
+- **类型注解覆盖率**: ≥ 80%
+- **测试覆盖率**: ≥ 80% (核心模块 ≥ 90%)
+
+### 安全要求 (CRITICAL)
+
+**🔴 立即处理的安全问题:**
+1. **代码执行端点** (`/api/v1/production/factor/test`) - 必须添加认证和授权
+2. **SQL查询端点** (`/api/v1/data/query`) - 必须添加认证和速率限制
+3. **默认密码** - 生产环境禁止使用默认密码 "123456"
+
+**强制要求:**
+- 所有 API 端点必须实现认证 (JWT/OAuth2)
+- 敏感操作必须实现基于角色的授权 (RBAC)
+- 所有用户输入必须验证 (使用 Pydantic)
+- 表名/列名使用白名单验证
+- 禁止硬编码敏感信息
+
+### 文件组织规范
+
+**✅ 正确的目录结构:**
+```
+backend/
+├── app/              # FastAPI 应用层
+├── engine/           # 因子计算引擎
+├── data_manager/     # 数据管理
+├── store/            # 数据存储
+├── tests/            # 测试代码 (按类型组织)
+│   ├── unit/        # 单元测试
+│   ├── integration/ # 集成测试
+│   ├── api/         # API 测试
+│   └── performance/ # 性能测试
+├── scripts/          # 运维脚本 (仅必要脚本)
+│   ├── migrations/  # 数据库迁移
+│   └── maintenance/ # 维护脚本
+└── docs/            # 项目文档
+```
+
+**❌ 禁止:**
+- backend 根目录放置临时脚本 (check_*.py, test_*.py, analyze_*.py)
+- 代码库中保留 backups/ 目录
+- 提交 __pycache__/ 和 *.pyc 文件
+- tests/ 目录所有文件平铺 (必须按类型组织)
+
+### 测试规范
+
+**测试组织:**
+- 单元测试: `tests/unit/` - 快速, 无外部依赖
+- 集成测试: `tests/integration/` - 需要数据库
+- API 测试: `tests/api/` - 需要启动服务
+- 性能测试: `tests/performance/` - 性能基准
+
+**测试依赖 (requirements-test.txt):**
+```
+pytest>=8.0.0
+pytest-cov>=4.1.0
+pytest-asyncio>=0.23.0
+pytest-mock>=3.12.0
+pytest-xdist>=3.5.0
+```
+
+### 代码风格工具
+
+**必须使用:**
+- `black` - 代码格式化 (line-length=100)
+- `isort` - import 排序
+- `flake8` - 代码检查
+- `mypy` - 类型检查
+
+**提交前检查:**
+```bash
+black backend/
+isort backend/
+flake8 backend/
+mypy backend/
+pytest tests/ --cov=. --cov-report=term-missing
+```
+
+### Git 提交规范
+
+**提交信息格式:**
+```
+<type>: <subject>
+
+<body>
+
+<footer>
+```
+
+**Type:** feat, fix, refactor, docs, test, chore, perf, ci
+
+**示例:**
+```
+feat: 添加因子计算缓存机制
+
+- 实现 Redis 缓存层
+- 添加缓存失效策略
+- 性能提升 3x
+
+Closes #123
+```
+
+### 代码审查要求
+
+**强制要求:**
+- 所有代码必须经过 Code Review
+- 至少 1 人 approve 才能合并
+- CI 测试必须通过
+- 覆盖率不能下降
+
+**审查清单:**
+- [ ] 代码通过所有工具检查 (black, isort, flake8, mypy)
+- [ ] 测试覆盖率 ≥ 80%
+- [ ] 所有测试通过
+- [ ] 添加了必要的文档和注释
+- [ ] 没有硬编码的敏感信息
+- [ ] 没有未解决的 TODO/FIXME
+- [ ] 更新了 CHANGELOG.md
+
+---

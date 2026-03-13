@@ -468,11 +468,17 @@ class DolphinDBClient(_NewDolphinDBClient):
             "date_field": [t["date_field"] for t in tasks],
             "primary_keys_json": [json.dumps(t["primary_keys"]) for t in tasks],
             "table_name": [t["table_name"] for t in tasks],
+            "schema_json": [json.dumps(t.get("schema", {}), ensure_ascii=False) for t in tasks],
             "enabled": [True] * len(tasks),
             "created_at": [now] * len(tasks),
             "updated_at": [now] * len(tasks),
         })
-        self.upsert("etl_task_config", seed_df, ["task_id"])
+
+        # 如果表不存在，使用 bulk_copy 创建；否则使用 upsert
+        if not self.table_exists("etl_task_config"):
+            self.bulk_copy("etl_task_config", seed_df)
+        else:
+            self.upsert("etl_task_config", seed_df, ["task_id"])
         logger.info(f"已写入 {len(tasks)} 条默认 ETL 任务配置")
 
     def seed_factor_data_config(self) -> None:

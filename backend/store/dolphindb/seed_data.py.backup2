@@ -300,78 +300,7 @@ class SeedDataManager:
     def _get_default_sync_tasks(self) -> list[dict]:
         """获取默认同步任务配置（基于实际生效的任务）"""
         return [
-            {
-                "task_id": "sync_adj_factor",
-                "api_name": "adj_factor",
-                "description": "复权因子（用于前复权、后复权计算）",
-                "sync_type": "incremental",
-                "date_field": "trade_date",
-                "table_name": "sync_adj_factor",
-                "params": {"trade_date": "{date}", "fields": "ts_code,trade_date,adj_factor"},
-                "primary_keys": ["ts_code", "trade_date"],
-                "api_limit": 5000,
-                "schema": {"ts_code": {"type": "SYMBOL"}, "trade_date": {"type": "DATE"}, "adj_factor": {"type": "DOUBLE"}},
-            },
-            {
-                "task_id": "sync_ci_index_member_N",
-                "api_name": "ci_index_member",
-                "description": "中信行业成分构成（三级分类，含纳入/剔除日期）",
-                "sync_type": "full",
-                "date_field": "",
-                "table_name": "sync_ci_index_member_N",
-                "params": {"is_new": "N", "fields": "l1_code,l1_name,l2_code,l2_name,l3_code,l3_name,ts_code,name,in_date,out_date,is_new"},
-                "primary_keys": [],
-                "api_limit": 2000,
-                "schema": {"l1_code": {"type": "SYMBOL"}, "l1_name": {"type": "STRING"}, "l2_code": {"type": "SYMBOL"}, "l2_name": {"type": "STRING"}, "l3_code": {"type": "SYMBOL"}, "l3_name": {"type": "STRING"}, "ts_code": {"type": "SYMBOL"}, "name": {"type": "STRING"}, "in_date": {"type": "DATE"}, "out_date": {"type": "DATE"}, "is_new": {"type": "STRING"}},
-            },
-            {
-                "task_id": "sync_ci_index_member_Y",
-                "api_name": "ci_index_member",
-                "description": "中信行业成分构成（三级分类，含纳入/剔除日期）",
-                "sync_type": "full",
-                "date_field": "",
-                "table_name": "sync_ci_index_member_Y",
-                "params": {"is_new": "Y", "fields": "l1_code,l1_name,l2_code,l2_name,l3_code,l3_name,ts_code,name,in_date,out_date,is_new"},
-                "primary_keys": [],
-                "api_limit": 2000,
-                "schema": {"l1_code": {"type": "SYMBOL"}, "l1_name": {"type": "STRING"}, "l2_code": {"type": "SYMBOL"}, "l2_name": {"type": "STRING"}, "l3_code": {"type": "SYMBOL"}, "l3_name": {"type": "STRING"}, "ts_code": {"type": "SYMBOL"}, "name": {"type": "STRING"}, "in_date": {"type": "DATE"}, "out_date": {"type": "DATE"}, "is_new": {"type": "STRING"}},
-            },
-            {
-                "task_id": "sync_daily_basic",
-                "api_name": "daily_basic",
-                "description": "每日指标（换手率、量比、市盈率、市净率、市值等）",
-                "sync_type": "incremental",
-                "date_field": "trade_date",
-                "table_name": "sync_daily_basic",
-                "params": {"trade_date": "{date}", "fields": "ts_code,trade_date,close,turnover_rate,turnover_rate_f,volume_ratio,pe,pe_ttm,pb,ps,ps_ttm,dv_ratio,dv_ttm,total_share,float_share,free_share,total_mv,circ_mv"},
-                "primary_keys": ["ts_code", "trade_date"],
-                "api_limit": 6000,
-                "schema": {"ts_code": {"type": "SYMBOL"}, "trade_date": {"type": "DATE"}, "close": {"type": "DOUBLE"}, "turnover_rate": {"type": "DOUBLE"}, "turnover_rate_f": {"type": "DOUBLE"}, "volume_ratio": {"type": "DOUBLE"}, "pe": {"type": "DOUBLE"}, "pe_ttm": {"type": "DOUBLE"}, "pb": {"type": "DOUBLE"}, "ps": {"type": "DOUBLE"}, "ps_ttm": {"type": "DOUBLE"}, "dv_ratio": {"type": "DOUBLE"}, "dv_ttm": {"type": "DOUBLE"}, "total_share": {"type": "DOUBLE"}, "float_share": {"type": "DOUBLE"}, "free_share": {"type": "DOUBLE"}, "total_mv": {"type": "DOUBLE"}, "circ_mv": {"type": "DOUBLE"}},
-            },
-            {
-                "task_id": "sync_daily_data",
-                "api_name": "daily",
-                "description": "日线行情（开高低收、成交量、成交额）",
-                "sync_type": "incremental",
-                "date_field": "trade_date",
-                "table_name": "sync_daily_data",
-                "params": {"trade_date": "{date}", "fields": "ts_code,trade_date,open,high,low,close,pre_close,change,pct_chg,vol,amount"},
-                "primary_keys": ["ts_code", "trade_date"],
-                "api_limit": 5000,
-                "schema": {"ts_code": {"type": "SYMBOL"}, "trade_date": {"type": "DATE"}, "open": {"type": "DOUBLE"}, "high": {"type": "DOUBLE"}, "low": {"type": "DOUBLE"}, "close": {"type": "DOUBLE"}, "pre_close": {"type": "DOUBLE"}, "change": {"type": "DOUBLE"}, "pct_chg": {"type": "DOUBLE"}, "vol": {"type": "DOUBLE"}, "amount": {"type": "DOUBLE"}},
-            },
-            {
-                "task_id": "sync_stk_limit",
-                "api_name": "stk_limit",
-                "description": "每日涨跌停价格（涨停价、跌停价、昨日收盘价）",
-                "sync_type": "incremental",
-                "date_field": "trade_date",
-                "table_name": "sync_stk_limit",
-                "params": {"trade_date": "{date}", "fields": "ts_code,trade_date,pre_close,up_limit,down_limit"},
-                "primary_keys": ["ts_code", "trade_date"],
-                "api_limit": 5000,
-                "schema": {"ts_code": {"type": "SYMBOL"}, "trade_date": {"type": "DATE"}, "pre_close": {"type": "DOUBLE"}, "up_limit": {"type": "DOUBLE"}, "down_limit": {"type": "DOUBLE"}},
-            },
+            # ==================== 全量同步 ====================
             {
                 "task_id": "sync_stock_basic",
                 "api_name": "stock_basic",
@@ -379,72 +308,12 @@ class SeedDataManager:
                 "sync_type": "full",
                 "date_field": "",
                 "table_name": "sync_stock_basic",
-                "params": {"exchange": "", "list_status": "", "fields": "ts_code,symbol,name,area,industry,market,list_date"},
+                "params": {
+                    "exchange": "",
+                    "list_status": "",
+                    "fields": "ts_code,symbol,name,area,industry,market,list_date",
+                },
                 "primary_keys": ["ts_code"],
-                "api_limit": 5000,
-                "schema": {"ts_code": {"type": "SYMBOL"}, "symbol": {"type": "STRING"}, "name": {"type": "STRING"}, "area": {"type": "STRING"}, "industry": {"type": "STRING"}, "market": {"type": "STRING"}, "list_date": {"type": "STRING"}},
-            },
-            {
-                "task_id": "sync_stock_st",
-                "api_name": "stock_st",
-                "description": "ST股票列表（每日ST/退市风险警示股票）",
-                "sync_type": "incremental",
-                "date_field": "trade_date",
-                "table_name": "sync_stock_st",
-                "params": {"trade_date": "{date}", "fields": "ts_code,name,trade_date,type,type_name"},
-                "primary_keys": ["ts_code", "trade_date"],
-                "api_limit": 1000,
-                "schema": {"ts_code": {"type": "SYMBOL"}, "name": {"type": "STRING"}, "trade_date": {"type": "DATE"}, "type": {"type": "STRING"}, "type_name": {"type": "STRING"}},
-            },
-            {
-                "task_id": "sync_suspend_d",
-                "api_name": "suspend_d",
-                "description": "每日停复牌信息（停牌/复牌类型、日内停牌时间段）",
-                "sync_type": "incremental",
-                "date_field": "trade_date",
-                "table_name": "sync_suspend_d",
-                "params": {"trade_date": "{date}", "fields": "ts_code,trade_date,suspend_timing,suspend_type"},
-                "primary_keys": ["ts_code", "trade_date", "suspend_type"],
-                "api_limit": 5000,
-                "schema": {"ts_code": {"type": "SYMBOL"}, "trade_date": {"type": "DATE"}, "suspend_timing": {"type": "STRING"}, "suspend_type": {"type": "STRING"}},
-            },
-            {
-                "task_id": "sync_sw_index_member_N",
-                "api_name": "index_member_all",
-                "description": "申万行业成分构成（三级分类，含纳入/剔除日期）",
-                "sync_type": "full",
-                "date_field": "",
-                "table_name": "sync_sw_index_member_N",
-                "params": {"is_new": "N", "fields": "l1_code,l1_name,l2_code,l2_name,l3_code,l3_name,ts_code,name,in_date,out_date,is_new"},
-                "primary_keys": [],
-                "api_limit": 2000,
-                "schema": {"l1_code": {"type": "SYMBOL"}, "l1_name": {"type": "STRING"}, "l2_code": {"type": "SYMBOL"}, "l2_name": {"type": "STRING"}, "l3_code": {"type": "SYMBOL"}, "l3_name": {"type": "STRING"}, "ts_code": {"type": "SYMBOL"}, "name": {"type": "STRING"}, "in_date": {"type": "DATE"}, "out_date": {"type": "DATE"}, "is_new": {"type": "STRING"}},
-            },
-            {
-                "task_id": "sync_sw_index_member_Y",
-                "api_name": "index_member_all",
-                "description": "申万行业成分构成（三级分类，含纳入/剔除日期）",
-                "sync_type": "full",
-                "date_field": "",
-                "table_name": "sync_sw_index_member_Y",
-                "params": {"is_new": "Y", "fields": "l1_code,l1_name,l2_code,l2_name,l3_code,l3_name,ts_code,name,in_date,out_date,is_new"},
-                "primary_keys": [],
-                "api_limit": 2000,
-                "schema": {"l1_code": {"type": "SYMBOL"}, "l1_name": {"type": "STRING"}, "l2_code": {"type": "SYMBOL"}, "l2_name": {"type": "STRING"}, "l3_code": {"type": "SYMBOL"}, "l3_name": {"type": "STRING"}, "ts_code": {"type": "SYMBOL"}, "name": {"type": "STRING"}, "in_date": {"type": "DATE"}, "out_date": {"type": "DATE"}, "is_new": {"type": "STRING"}},
-            },
-            {
-                "task_id": "sync_trade_cal",
-                "api_name": "trade_cal",
-                "description": "交易日历（A股交易日、休市日）",
-                "sync_type": "full",
-                "date_field": "cal_date",
-                "table_name": "sync_trade_cal",
-                "params": {"exchange": "SSE", "start_date": "20100101", "end_date": "20301231", "fields": "exchange,cal_date,is_open,pretrade_date"},
-                "primary_keys": ["exchange", "cal_date"],
-                "api_limit": 10000,
-                "schema": {"exchange": {"type": "SYMBOL"}, "cal_date": {"type": "DATE"}, "is_open": {"type": "INT"}, "pretrade_date": {"type": "DATE"}},
-            },
-        ],
                 "api_limit": 5000,
                 "schema": {
                     "ts_code": {"type": "SYMBOL"},
@@ -718,101 +587,48 @@ class SeedDataManager:
 
     def _get_default_etl_tasks(self) -> list[dict]:
         """获取默认 ETL 任务配置"""
+        db_meta = self.conn.db_path
+        db_ts = "dfs://quant_ts"
+
+        script_index_member = (
+            f't_sw = select l1_code, l1_name, l2_code, l2_name, l3_code, l3_name, '
+            f'ts_code, in_date, out_date, "sw" as source '
+            f'from loadTable("{db_meta}", "sync_sw_index_member_Y"); '
+            f't_ci = select l1_code, l1_name, l2_code, l2_name, l3_code, l3_name, '
+            f'ts_code, in_date, out_date, "ci" as source '
+            f'from loadTable("{db_meta}", "sync_ci_index_member_Y"); '
+            f'unionAll([t_sw, t_ci], false)'
+        )
+
+        script_index_member_daily = (
+            f'daily = select trade_date, ts_code from loadTable("{db_ts}", "sync_daily_data"); '
+            f'etl = select ts_code, source, l1_code, l1_name, l2_code, l2_name, l3_code, l3_name, in_date, out_date '
+            f'from loadTable("{db_meta}", "etl_index_member"); '
+            f'joined = lj(daily, etl, `ts_code); '
+            f'select trade_date, ts_code, source, l1_code, l1_name, l2_code, l2_name, l3_code, l3_name '
+            f'from joined where isNull(in_date) or (trade_date >= temporalParse(in_date, "yyyyMMdd") '
+            f'and (isNull(out_date) or out_date = "" or trade_date < temporalParse(out_date, "yyyyMMdd")))'
+        )
+
+        script_stock_daily_info = (
+            f'daily = select trade_date, ts_code, open, high, low, close, pre_close, pct_chg, vol, amount '
+            f'from loadTable("{db_ts}", "sync_daily_data"); '
+            f'basic = select trade_date, ts_code, pe_ttm, pb, total_mv, circ_mv, turnover_rate '
+            f'from loadTable("{db_ts}", "sync_daily_basic"); '
+            f'ind = select trade_date, ts_code, source, l1_code, l1_name, l2_code, l2_name, l3_code, l3_name '
+            f'from loadTable("{db_meta}", "etl_index_member_daily"); '
+            f't1 = lj(daily, basic, `trade_date`ts_code); '
+            f'lj(t1, ind, `trade_date`ts_code)'
+        )
+
         return [
             {
                 "task_id": "etl_index_member",
                 "description": "合并申万+中信行业成员表（当前有效分类）",
-                "script": (
-                    't_ci_y = select l1_code, l1_name, l2_code, l2_name, l3_code, l3_name,
-                ts_code, name, in_date, out_date, is_new, "ci" as source
-         from loadTable("dfs://quant", "sync_ci_index_member_Y")
-
-t_ci_n = select l1_code, l1_name, l2_code, l2_name, l3_code, l3_name,
-                ts_code, name, in_date, out_date, is_new, "ci" as source
-         from loadTable("dfs://quant", "sync_ci_index_member_N")
-
-t_sw_y = select l1_code, l1_name, l2_code, l2_name, l3_code, l3_name,
-                ts_code, name, in_date, out_date, is_new, "sw" as source
-         from loadTable("dfs://quant", "sync_sw_index_member_Y")
-
-t_sw_n = select l1_code, l1_name, l2_code, l2_name, l3_code, l3_name,
-                ts_code, name, in_date, out_date, is_new, "sw" as source
-         from loadTable("dfs://quant", "sync_sw_index_member_N")
-
-select source,is_new,ts_code,l1_name,l2_name,in_date,out_date 
-from unionAll([t_ci_y, t_ci_n, t_sw_y, t_sw_n], false)'
-                ),
+                "script": script_index_member,
                 "sync_type": "full",
                 "date_field": "",
-                "table_name": "etl_index_member",
-                "primary_keys": [],
-                "schema": {},
-            },
-            {
-                "task_id": "etl_index_member_daily",
-                "description": "每只股票每个交易日所属行业（行情左关联行业成员）",
-                "script": (
-                    'daily = select trade_date, ts_code
-        from loadTable("dfs://quant", "sync_daily_data")
-        where trade_date={date};
-
-etl = select ts_code, source,  l1_name,  l2_name, 
-             in_date, case when out_date is null then {date} else out_date end as out_date
-      from loadTable("dfs://quant", "etl_index_member")
-      where source =\'sw\';
-
-joined = lj(daily, etl, `ts_code);
-
-
-select trade_date, ts_code,  l1_name,  l2_name
-from joined
-where trade_date >= in_date and trade_date <=out_date
-'
-                ),
-                "sync_type": "incremental",
-                "date_field": "trade_date",
-                "table_name": "etl_index_member_daily",
-                "primary_keys": [],
-                "schema": {},
-            },
-            {
-                "task_id": "etl_stock_daily_info",
-                "description": "行情+基本面+行业宽表（每日全量刷新）",
-                "script": (
-                    '
-db = database("dfs://quant")
-daily    = SELECT ts_code, trade_date, close FROM loadTable(db, "sync_daily_data") WHERE trade_date =  {date} ;
-
-st_codes = exec ts_code FROM loadTable(db, "sync_stock_st") WHERE trade_date =  {date} ;
-
-sus_full = exec ts_code FROM loadTable(db, "sync_suspend_d") WHERE trade_date =  {date}  AND suspend_type = "S" AND strlen(suspend_timing) == 0;
-
-sus_part = exec ts_code FROM loadTable(db, "sync_suspend_d") WHERE trade_date =  {date}  AND suspend_type = "S" AND strlen(suspend_timing) > 0;
-
-lim = SELECT ts_code, trade_date, up_limit, down_limit FROM loadTable(db, "sync_stk_limit") WHERE trade_date =  {date} ;
-
-t = lj(daily, lim, `ts_code);
-
-price_info = SELECT ts_code, trade_date, iif(ts_code IN st_codes, 1, 0) AS is_st, iif(ts_code IN sus_full, 1, iif(ts_code IN sus_part, 2, 0)) AS is_suspend, iif(isNull(up_limit), 0, iif(close >= up_limit, 1, iif(close <= down_limit, -1, 0))) AS is_limit FROM t
-
-
-industry=SELECT * FROM loadTable("dfs://quant", "etl_index_member_daily") WHERE trade_date= {date} ;
-
-select ts_code,trade_date,is_st,is_suspend,is_limit,l1_name,l2_name
-from lj(price_info, industry, `ts_code);
-
-
-
-
-'
-                ),
-                "sync_type": "incremental",
-                "date_field": "trade_date",
-                "table_name": "etl_stock_daily_info",
-                "primary_keys": [],
-                "schema": {},
-            },
-        ],
+                "primary_keys": ["ts_code", "source", "l3_code"],
                 "table_name": "etl_index_member",
                 "source_tables": ["sync_sw_index_member_Y", "sync_ci_index_member_Y"],
             },
@@ -842,212 +658,12 @@ from lj(price_info, industry, `ts_code);
         """获取默认因子定义"""
         return [
             {
-                "factor_id": "factor_ma_20",
-                "description": "20日移动平均线",
-                "category": "technical",
-                "compute_mode": "incremental",
-                "storage_target": "factor_values",
-                "depends_on": ["sync_daily_data"],
-                "params": {"window": 20},
-                "code": (
-                    "import polars as pl
-def compute(df, params):
-    window = params.get('window', 20)
-    return (
-        df.sort(['ts_code', 'trade_date'])
-        .with_columns(
-            pl.col('close').rolling_mean(window_size=window)
-            .over('ts_code').alias('factor_value')
-        )
-        .select(['ts_code', 'trade_date', 'factor_value'])
-    )
-"
-                ),
-            },
-            {
                 "factor_id": "factor_ma_5",
                 "description": "5日移动平均线",
                 "category": "technical",
                 "compute_mode": "incremental",
                 "storage_target": "factor_values",
-                "depends_on": ["sync_daily_data"],
-                "params": {"window": 5},
-                "code": (
-                    "import polars as pl
-def compute(df, params):
-    window = params.get('window', 5)
-    return (
-        df.sort(['ts_code', 'trade_date'])
-        .with_columns(
-            pl.col('close').rolling_mean(window_size=window)
-            .over('ts_code').alias('factor_value')
-        )
-        .select(['ts_code', 'trade_date', 'factor_value'])
-    )
-"
-                ),
-            },
-            {
-                "factor_id": "factor_momentum_20",
-                "description": "20日价格动量（当日收盘价 / 20日前收盘价 - 1）",
-                "category": "momentum",
-                "compute_mode": "incremental",
-                "storage_target": "factor_values",
-                "depends_on": ["sync_daily_data"],
-                "params": {"window": 20},
-                "code": (
-                    "import polars as pl
-def compute(df, params):
-    window = params.get('window', 20)
-    return (
-        df.sort(['ts_code', 'trade_date'])
-        .with_columns(
-            (pl.col('close') / pl.col('close').shift(window).over('ts_code') - 1)
-            .alias('factor_value')
-        )
-        .select(['ts_code', 'trade_date', 'factor_value'])
-    )
-"
-                ),
-            },
-            {
-                "factor_id": "factor_pb_rank",
-                "description": "PB百分位排名（截面，0~1）",
-                "category": "value",
-                "compute_mode": "incremental",
-                "storage_target": "factor_values",
-                "depends_on": ["sync_daily_basic"],
-                "params": {},
-                "code": (
-                    "import polars as pl
-def compute(df, params):
-    return (
-        df.sort(['trade_date', 'ts_code'])
-        .with_columns(
-            pl.col('pb').rank(method='average').over('trade_date').alias('_rank'),
-            pl.col('pb').count().over('trade_date').alias('_total'),
-        )
-        .with_columns(
-            (pl.col('_rank') / pl.col('_total')).alias('factor_value')
-        )
-        .select(['ts_code', 'trade_date', 'factor_value'])
-    )
-"
-                ),
-            },
-            {
-                "factor_id": "factor_pe_rank",
-                "description": "PE百分位排名（截面，0~1）",
-                "category": "value",
-                "compute_mode": "incremental",
-                "storage_target": "factor_values",
-                "depends_on": ["sync_daily_basic"],
-                "params": {},
-                "code": (
-                    "import polars as pl
-def compute(df, params):
-    return (
-        df.sort(['trade_date', 'ts_code'])
-        .with_columns(
-            pl.col('pe_ttm').rank(method='average').over('trade_date').alias('_rank'),
-            pl.col('pe_ttm').count().over('trade_date').alias('_total'),
-        )
-        .with_columns(
-            (pl.col('_rank') / pl.col('_total')).alias('factor_value')
-        )
-        .select(['ts_code', 'trade_date', 'factor_value'])
-    )
-"
-                ),
-            },
-            {
-                "factor_id": "factor_rsi_14",
-                "description": "14日相对强弱指数（RSI，Wilder EWM法）",
-                "category": "technical",
-                "compute_mode": "incremental",
-                "storage_target": "factor_values",
-                "depends_on": ["sync_daily_data"],
-                "params": {"window": 14},
-                "code": (
-                    "import polars as pl
-def compute(df, params):
-    window = params.get('window', 14)
-    alpha = 1.0 / window
-    return (
-        df.sort(['ts_code', 'trade_date'])
-        .with_columns(
-            pl.col('close').diff().over('ts_code').alias('delta')
-        )
-        .with_columns(
-            pl.when(pl.col('delta') > 0).then(pl.col('delta')).otherwise(0.0).alias('gain'),
-            pl.when(pl.col('delta') < 0).then(-pl.col('delta')).otherwise(0.0).alias('loss'),
-        )
-        .with_columns(
-            pl.col('gain').ewm_mean(alpha=alpha, adjust=False).over('ts_code').alias('avg_gain'),
-            pl.col('loss').ewm_mean(alpha=alpha, adjust=False).over('ts_code').alias('avg_loss'),
-        )
-        .with_columns(
-            (100.0 - 100.0 / (1.0 + pl.col('avg_gain') / (pl.col('avg_loss') + 1e-10)))
-            .alias('factor_value')
-        )
-        .select(['ts_code', 'trade_date', 'factor_value'])
-    )
-"
-                ),
-            },
-            {
-                "factor_id": "factor_volatility_10",
-                "description": "10日收益率波动率（年化）",
-                "category": "technical",
-                "compute_mode": "incremental",
-                "storage_target": "factor_values",
-                "depends_on": ["sync_daily_data"],
-                "params": {"window": 10},
-                "code": (
-                    "import polars as pl
-def compute(df, params):
-    window = params.get('window', 10)
-    return (
-        df.sort(['ts_code', 'trade_date'])
-        .with_columns(
-            pl.col('close').pct_change().over('ts_code').alias('ret')
-        )
-        .with_columns(
-            (pl.col('ret').rolling_std(window_size=window).over('ts_code') * (252 ** 0.5))
-            .alias('factor_value')
-        )
-        .select(['ts_code', 'trade_date', 'factor_value'])
-    )
-"
-                ),
-            },
-            {
-                "factor_id": "factor_volatility_20",
-                "description": "20日收益率波动率（年化）",
-                "category": "technical",
-                "compute_mode": "incremental",
-                "storage_target": "factor_values",
-                "depends_on": ["sync_daily_data"],
-                "params": {"window": 20},
-                "code": (
-                    "import polars as pl
-def compute(df, params):
-    window = params.get('window', 20)
-    return (
-        df.sort(['ts_code', 'trade_date'])
-        .with_columns(
-            pl.col('close').pct_change().over('ts_code').alias('ret')
-        )
-        .with_columns(
-            (pl.col('ret').rolling_std(window_size=window).over('ts_code') * (252 ** 0.5))
-            .alias('factor_value')
-        )
-        .select(['ts_code', 'trade_date', 'factor_value'])
-    )
-"
-                ),
-            },
-        ]),
+                "depends_on": json.dumps(["sync_daily_data"]),
                 "params": json.dumps({"window": 5}),
                 "code": (
                     "import polars as pl\n"

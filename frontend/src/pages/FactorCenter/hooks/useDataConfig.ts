@@ -40,10 +40,17 @@ export const useDataConfig = () => {
   }, []);
 
   const loadColumnsForTable = async (tableName: string) => {
-    if (!tableName || tableColumns[tableName]) return;
+    if (!tableName) return;
+
+    // 检查缓存，但如果是空数组则重新加载
+    const cached = tableColumns[tableName];
+    if (cached && cached.length > 0) return;
+
     try {
       const res = await dataApi.getTableInfo(tableName);
-      const cols: string[] = (res.data?.columns || []).map((c: any) => c.name || c);
+      // 后端返回的 columns 已经是字符串数组，不需要 map
+      const cols: string[] = res.data?.columns || [];
+      console.log(`Loaded columns for ${tableName}:`, cols);
       setTableColumns(prev => ({ ...prev, [tableName]: cols }));
     } catch (error) {
       console.error(`Failed to load columns for table ${tableName}:`, error);
