@@ -59,6 +59,10 @@ load_config() {
     BACKEND_PORT=$(echo "$REACT_APP_API_BASE_URL" | grep -oE '[0-9]+$' || echo "8000")
     # DolphinDB Web 管理端口 = 数据端口 + 1
     DOLPHINDB_WEB_PORT=$((DOLPHINDB_PORT + 1))
+
+    # Export 环境变量，确保 docker-compose 可以访问
+    export DOLPHINDB_DATA_DIR
+    export PREFECT_DATA_DIR="${PREFECT_DATA_DIR:-./data/prefect}"
 }
 
 print_header() {
@@ -291,12 +295,20 @@ start_docker_services() {
 
     cd "$SCRIPT_DIR"
 
-    # 确保 DolphinDB 数据目录存在
+    # 确保 DolphinDB 数据目录存在并设置权限
     if [ ! -d "$DOLPHINDB_DATA_DIR" ]; then
         print_warning "创建 DolphinDB 数据目录: $DOLPHINDB_DATA_DIR"
         mkdir -p "$DOLPHINDB_DATA_DIR"
     fi
 
+    # 创建必要的子目录结构
+    mkdir -p "$DOLPHINDB_DATA_DIR/local8848/storage"
+    mkdir -p "$DOLPHINDB_DATA_DIR/local8848/storage/LOG"
+
+    # 设置目录权限（确保容器可写）
+    chmod -R 777 "$DOLPHINDB_DATA_DIR"
+
+    export DOLPHINDB_DATA_DIR
     docker-compose up -d
     print_success "Docker 服务已启动"
 }
@@ -369,7 +381,7 @@ init_database() {
     # ensure_meta_tables() 创建 sync_task_config 等维度表
     # seed_sync_task_config() 写入默认同步任务定义
     # seed_factor_data_config() 写入因子数据配置
-    python init_meta_tables.py
+    python database/init_meta_tables.py
     print_success "数据库初始化完成"
 }
 

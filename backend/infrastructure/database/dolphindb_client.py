@@ -168,6 +168,15 @@ class DolphinDBClient:
         """插入或更新日线数据"""
         return self._data_operations.upsert_daily(df)
 
+    def append(
+        self,
+        table_name: str,
+        df: pl.DataFrame,
+        known_columns: Optional[List[str]] = None,
+    ) -> int:
+        """追加数据到表"""
+        return self._data_operations.append(table_name, df, known_columns)
+
     def bulk_copy(
         self,
         table_name: str,

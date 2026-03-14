@@ -10,12 +10,13 @@ from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 
 from store.dolphindb_client import db_client
-from engine.production.engine import ProductionEngine
+from services.factor_compute_service import FactorComputeService
 from engine.production.registry import FactorDefinition, StorageConfig
+from engine.production.engine import ProductionEngine
 from app.core.logger import logger
 
 router = APIRouter()
-prod_engine = ProductionEngine(db_client)
+factor_service = FactorComputeService(db_client)
 
 
 # ==================== Pydantic Models ====================
@@ -66,7 +67,7 @@ async def run_production(req: ProductionRunRequest):
     """运行生产任务"""
     try:
         preprocess = req.preprocess.model_dump() if req.preprocess else None
-        success = prod_engine.run_task(
+        result = factor_service.compute_factor(
             factor_id=req.factor_id,
             mode=req.mode,
             target_date=req.target_date,
@@ -74,7 +75,7 @@ async def run_production(req: ProductionRunRequest):
             end_date=req.end_date,
             preprocess=preprocess,
         )
-        return {"status": "success", "data": {"completed": success}}
+        return {"status": "success", "data": {"completed": result.success}}
     except Exception as e:
         logger.error(f"Production run failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -87,14 +88,14 @@ async def batch_run_production(req: BatchRunRequest):
     results = []
     for fid in req.factor_ids:
         try:
-            success = prod_engine.run_task(
+            result = factor_service.compute_factor(
                 factor_id=fid,
                 mode=req.mode,
                 start_date=req.start_date,
                 end_date=req.end_date,
                 preprocess=preprocess,
             )
-            results.append({"factor_id": fid, "success": success})
+            results.append({"factor_id": fid, "success": result.success})
         except Exception as e:
             results.append({"factor_id": fid, "success": False, "error": str(e)})
     return {"status": "success", "data": results}
@@ -113,7 +114,7 @@ async def get_production_history(factor_id: Optional[str] = None, limit: int = 2
         params.append(limit)
 
         df = db_client.query(f"""
-            SELECT * FROM factor_task_run
+            SELECT * FROM factor_run_log
             {where}
             ORDER BY created_at DESC LIMIT %s
         """, tuple(params))
@@ -121,6 +122,7 @@ async def get_production_history(factor_id: Optional[str] = None, limit: int = 2
         if not df.is_empty():
             for row in df.to_dicts():
                 row["created_at"] = str(row["created_at"]) if row.get("created_at") else None
+                row["finished_at"] = str(row["finished_at"]) if row.get("finished_at") else None
                 data.append(row)
         return {"status": "success", "data": data}
     except Exception as e:
@@ -254,32 +256,25 @@ async def test_factor_code(req: FactorTestRequest):
     log("data", f"预处理配置: adjust_price={opts['adjust_price']}, filter_st={opts['filter_st']}, filter_new_stock={opts['filter_new_stock']}, handle_suspension={opts['handle_suspension']}, mark_limit={opts['mark_limit']}")
 
     try:
-        mock_def = FactorDefinition(
-            factor_id="__test__",
-            description="test",
-            func=compute_func,
-            depends_on=depends_on,
-            category="test",
-            params=func_params,
-            compute_mode="full",
-            storage=StorageConfig(),
-        )
-        df = prod_engine._load_data(mock_def, req.start_date, req.end_date, adjust_price=opts["adjust_price"])
+        # 直接从数据库加载数据
+        df = None
+        for table in depends_on:
+            table_df = db_client.query(
+                f"SELECT * FROM {table} WHERE trade_date >= %s AND trade_date <= %s ORDER BY ts_code, trade_date",
+                (req.start_date, req.end_date)
+            )
+            if df is None:
+                df = table_df
+            else:
+                # 合并数据（使用 outer join 保留所有记录）
+                df = df.join(table_df, on=["ts_code", "trade_date"], how="outer")
+
         if df is None or df.is_empty():
             return make_error("data", f"日期范围 {req.start_date}~{req.end_date} 无数据")
+
         log("data", f"加载完成: {df.shape[0]} 行 × {df.shape[1]} 列 ({(time.time()-t0)*1000:.0f}ms)")
     except Exception as e:
         return make_error("data", f"数据加载失败:\n{traceback.format_exc()}")
-
-    # 应用预处理
-    log("preprocess", "应用预处理...")
-    t0 = time.time()
-    try:
-        df = prod_engine._apply_adjust(df, opts["adjust_price"])
-        df = prod_engine._apply_stock_status(df, opts)
-        log("preprocess", f"预处理完成 ({(time.time()-t0)*1000:.0f}ms)")
-    except Exception as e:
-        return make_error("preprocess", f"预处理失败:\n{traceback.format_exc()}")
 
     # 4. 执行因子计算
     log("compute", "执行因子计算...")

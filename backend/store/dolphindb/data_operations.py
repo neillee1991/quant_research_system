@@ -274,7 +274,8 @@ class DataOperations:
             safe_data_type = self.query._escape_value(data_type)
             sql = (
                 f'SELECT last_date FROM loadTable("{self.conn.db_path}", "sync_log") '
-                f'WHERE source = {safe_source} AND data_type = {safe_data_type}'
+                f'WHERE source = {safe_source} AND data_type = {safe_data_type} '
+                f'ORDER BY updated_at DESC LIMIT 1'
             )
             with self.conn.lock:
                 self.conn._ensure_connected()

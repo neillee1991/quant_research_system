@@ -33,6 +33,8 @@ export interface FactorDefinition {
   created_at?: string;
   updated_at?: string;
   enabled?: boolean;
+  latest_date?: string;
+  source?: 'code' | 'db';
 }
 
 export interface FactorValue {

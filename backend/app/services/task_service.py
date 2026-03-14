@@ -335,6 +335,218 @@ class TaskService(Generic[T]):
         logger.info(f"Deleted (soft) {self.task_type} task {task_id}")
         return True
 
+    def inspect_data(self, task_id: str) -> Dict[str, Any]:
+        """
+        数据探查：检查表中的数据完整性
+
+        Args:
+            task_id: 任务 ID
+
+        Returns:
+            包含数据统计和缺失交易日的字典
+        """
+        # 获取任务配置
+        task = self.get_task(task_id)
+        if not task:
+            raise ValueError(f"Task {task_id} not found")
+
+        # 获取表名
+        # 对于因子任务，使用 factor_values 表
+        table_name = getattr(task, 'table_name', None)
+        if not table_name:
+            # 如果没有 table_name，可能是因子任务
+            if hasattr(task, 'factor_id'):
+                table_name = 'factor_values'
+            else:
+                raise ValueError(f"Task {task_id} does not have a table_name")
+
+        # 检查表是否存在
+        if not db_client.table_exists(table_name):
+            return {
+                "table_name": table_name,
+                "exists": False,
+                "message": f"Table {table_name} does not exist yet"
+            }
+
+        # 获取日期字段名（优先使用 date_field，否则使用 trade_date）
+        date_field = getattr(task, 'date_field', None)
+        if not date_field or date_field == '':
+            date_field = 'trade_date'
+
+        logger.info(f"Task: {task_id}, date_field from task: {getattr(task, 'date_field', 'NOT_FOUND')}, using: {date_field}")
+
+        # 构建 WHERE 子句（用于因子任务）
+        where_clause = ""
+        if hasattr(task, 'factor_id'):
+            where_clause = f"WHERE factor_id = '{task.factor_id}'"
+
+        # 查询表中的日期范围
+        try:
+            # 先检查表是否有数据
+            count_sql = f"SELECT count(*) as total FROM loadTable('dfs://quant', '{table_name}') {where_clause} limit 1"
+            count_result = db_client.query(count_sql)
+
+            if count_result.is_empty() or count_result['total'][0] == 0:
+                return {
+                    "table_name": table_name,
+                    "exists": True,
+                    "has_data": False,
+                    "message": f"Table {table_name} exists but has no data"
+                }
+
+            # 查询最小和最大日期
+            date_range_sql = f"""
+                SELECT
+                    min({date_field}) as min_date,
+                    max({date_field}) as max_date
+                FROM loadTable("dfs://quant", "{table_name}")
+                {where_clause}
+            """
+            result = db_client.query(date_range_sql)
+
+            if result.is_empty() or result['min_date'][0] is None:
+                return {
+                    "table_name": table_name,
+                    "exists": True,
+                    "has_data": False,
+                    "message": f"Table {table_name} exists but has no valid date data"
+                }
+
+            min_date = result['min_date'][0]
+            max_date = result['max_date'][0]
+
+            # 转换日期为字符串格式
+            # DolphinDB 日期字段可能是 DATE 类型（整数 YYYYMMDD）或 DATETIME 类型
+            if isinstance(min_date, (int, str)):
+                # 如果是整数或字符串，直接使用
+                min_date_str = str(min_date).replace('-', '').replace(' ', '').replace(':', '')[:8]
+                max_date_str = str(max_date).replace('-', '').replace(' ', '').replace(':', '')[:8]
+            elif hasattr(min_date, 'strftime'):
+                # 如果是 datetime 对象
+                min_date_str = min_date.strftime('%Y%m%d')
+                max_date_str = max_date.strftime('%Y%m%d')
+            else:
+                # 其他情况，尝试转换为字符串
+                min_date_str = str(min_date).replace('-', '')[:8]
+                max_date_str = str(max_date).replace('-', '')[:8]
+
+            logger.info(f"Date range: {min_date} to {max_date}, converted to {min_date_str} - {max_date_str}")
+
+            # 获取表中实际存在的不同日期
+            # 注意：DolphinDB 的 DATE 类型需要使用 date() 函数或者不加引号的整数
+            actual_dates_sql = f"""
+                SELECT DISTINCT {date_field}
+                FROM loadTable("dfs://quant", "{table_name}")
+                {where_clause}
+                ORDER BY {date_field}
+            """
+            actual_dates_result = db_client.query(actual_dates_sql)
+            logger.info(f"Actual dates query columns: {actual_dates_result.columns}")
+            logger.info(f"Actual dates result shape: {actual_dates_result.shape}")
+
+            # 使用第一列（无论列名是什么）
+            if actual_dates_result.is_empty():
+                actual_dates = set()
+            else:
+                all_dates = actual_dates_result[actual_dates_result.columns[0]].to_list()
+                logger.info(f"Sample dates from DB: {all_dates[:5]}, types: {[type(d) for d in all_dates[:5]]}")
+
+                # 过滤到指定日期范围内
+                min_date_int = int(min_date_str)
+                max_date_int = int(max_date_str)
+
+                # 转换日期为整数进行比较
+                actual_dates = set()
+                for d in all_dates:
+                    if isinstance(d, int):
+                        date_int = d
+                    elif isinstance(d, str):
+                        date_int = int(d.replace('-', '').replace(' ', '').replace(':', '')[:8])
+                    elif hasattr(d, 'strftime'):
+                        date_int = int(d.strftime('%Y%m%d'))
+                    else:
+                        continue
+
+                    if min_date_int <= date_int <= max_date_int:
+                        actual_dates.add(date_int)
+
+            date_count = len(actual_dates)
+            logger.info(f"Filtered actual_dates count: {date_count}")
+
+            # 获取交易日历（SSE 上交所）
+            trading_days_sql = f"""
+                SELECT cal_date
+                FROM loadTable("dfs://quant", "sync_trade_cal")
+                WHERE exchange = 'SSE'
+                  AND is_open = 1
+                ORDER BY cal_date
+            """
+
+            try:
+                trading_days_result = db_client.query(trading_days_sql)
+                all_trading_days = trading_days_result['cal_date'].to_list()
+                logger.info(f"Sample trading days: {all_trading_days[:5]}, types: {[type(d) for d in all_trading_days[:5]]}")
+
+                # 过滤到指定日期范围内并转换为整数
+                min_date_int = int(min_date_str)
+                max_date_int = int(max_date_str)
+
+                trading_days = set()
+                for d in all_trading_days:
+                    if isinstance(d, int):
+                        date_int = d
+                    elif isinstance(d, str):
+                        date_int = int(d.replace('-', '').replace(' ', '').replace(':', '')[:8])
+                    elif hasattr(d, 'strftime'):
+                        date_int = int(d.strftime('%Y%m%d'))
+                    else:
+                        continue
+
+                    if min_date_int <= date_int <= max_date_int:
+                        trading_days.add(date_int)
+
+                expected_count = len(trading_days)
+                logger.info(f"Filtered trading_days count: {expected_count}")
+            except Exception as e:
+                logger.warning(f"Failed to load trading calendar: {e}")
+                # 如果交易日历表不存在，返回基本信息
+                return {
+                    "table_name": table_name,
+                    "exists": True,
+                    "has_data": True,
+                    "date_field": date_field,
+                    "min_date": str(min_date),
+                    "max_date": str(max_date),
+                    "actual_dates": int(date_count),
+                    "trading_calendar_available": False,
+                    "message": "Trading calendar not available, cannot check missing dates"
+                }
+
+            # 找出缺失的交易日（actual_dates 已经在前面查询过了）
+            missing_dates = sorted(trading_days - actual_dates)
+
+            # 计算覆盖率
+            coverage = (len(actual_dates) / expected_count * 100) if expected_count > 0 else 0
+
+            return {
+                "table_name": table_name,
+                "exists": True,
+                "has_data": True,
+                "date_field": date_field,
+                "min_date": str(min_date),
+                "max_date": str(max_date),
+                "actual_dates": len(actual_dates),
+                "expected_dates": expected_count,
+                "missing_dates": [str(d) for d in missing_dates],
+                "missing_count": len(missing_dates),
+                "coverage_percent": round(coverage, 2),
+                "trading_calendar_available": True
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to inspect data for task {task_id}: {e}")
+            raise ValueError(f"Failed to inspect data: {e}")
+
 
 # 创建三个服务实例
 sync_service = TaskService[SyncTaskConfig](

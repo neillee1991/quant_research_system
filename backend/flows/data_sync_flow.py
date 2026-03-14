@@ -38,14 +38,14 @@ def compute_factor(factor_id: str, target_date: Optional[str] = None):
     logger.info(f"开始计算因子: {factor_id}, 目标日期: {target_date}")
 
     try:
-        # 尝试使用 production engine
-        from engine.production.engine import ProductionEngine
-        engine = ProductionEngine(db_client)
-        result = engine.run_task(factor_id, target_date=target_date)
+        # 使用新的 FactorComputeService
+        from services.factor_compute_service import FactorComputeService
+        service = FactorComputeService(db_client)
+        result = service.compute_factor(factor_id, target_date=target_date)
         logger.info(f"因子 {factor_id} 计算完成")
-        return result
+        return result.success
     except ImportError:
-        logger.warning(f"ProductionEngine 不可用，跳过因子 {factor_id}")
+        logger.warning(f"FactorComputeService 不可用，跳过因子 {factor_id}")
         return None
     except Exception as e:
         logger.error(f"因子 {factor_id} 计算失败: {e}")

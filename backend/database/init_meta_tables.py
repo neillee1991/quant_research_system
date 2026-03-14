@@ -4,7 +4,8 @@
 """
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+# Add backend directory to Python path so imports work correctly
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from store.dolphindb_client import db_client
 from app.core.logger import logger

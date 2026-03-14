@@ -190,13 +190,13 @@ const FactorManageTab: React.FC = () => {
         );
       }
     },
-    { title: '上次计算', dataIndex: 'last_computed_at', key: 'computed', width: 130,
+    { title: '最新日期', dataIndex: 'latest_date', key: 'latest_date', width: 130,
       render: (v: string) => {
         if (!v) return '-';
         return (
           <Tooltip content={v}>
             <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-secondary)', fontSize: '12px' }}>
-              {v.slice(0, 16)}
+              {v.slice(0, 10)}
             </div>
           </Tooltip>
         );
@@ -230,13 +230,10 @@ const FactorManageTab: React.FC = () => {
         );
       }
     },
-    { title: '模式', dataIndex: 'mode', key: 'mode', width: 60,
-      render: (v: string) => <Tag size="small" color={v === 'incremental' ? 'cyan' : 'orange'}>{v === 'incremental' ? '增量' : '全量'}</Tag>
-    },
     { title: '状态', dataIndex: 'status', key: 'status', width: 70,
       render: (v: string) => <Tag size="small" color={v === 'success' ? 'green' : v === 'running' ? 'blue' : 'red'}>{v}</Tag>
     },
-    { title: '行数', dataIndex: 'rows_affected', key: 'rows', width: 100,
+    { title: '行数', dataIndex: 'rows', key: 'rows', width: 100,
       render: (v: number) => {
         const formatted = v?.toLocaleString() || '-';
         return (
@@ -246,7 +243,7 @@ const FactorManageTab: React.FC = () => {
         );
       }
     },
-    { title: '耗时', dataIndex: 'duration_seconds', key: 'dur', width: 80,
+    { title: '耗时', dataIndex: 'elapsed_seconds', key: 'dur', width: 80,
       render: (v: number) => {
         const formatted = v ? `${v.toFixed(1)}s` : '-';
         return (

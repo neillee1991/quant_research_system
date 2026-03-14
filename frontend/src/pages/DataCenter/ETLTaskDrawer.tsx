@@ -25,6 +25,7 @@ import dayjs from 'dayjs';
 import { dataApi } from '../../api';
 import { useThemeStore } from '../../store';
 import type { ETLTask } from '../../types';
+import { DataInspection } from '../../components/DataInspection';
 
 interface ETLTaskDrawerProps {
   visible: boolean;
@@ -858,6 +859,9 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
           {!isNew && (
             <TabPane tab="历史记录" itemKey="history">
               <div style={{ paddingTop: 8 }}>
+                {/* 数据探查组件 - 仅增量任务显示 */}
+                {task && <DataInspection taskType="etl" taskId={task.task_id} syncType={task.sync_type} />}
+
                 <Table
                   dataSource={etlLogs}
                   rowKey={(record: any) => `${record.sync_date}-${record.created_at}`}

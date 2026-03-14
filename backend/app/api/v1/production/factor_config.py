@@ -87,7 +87,11 @@ async def update_data_config(req: DataConfigUpdateRequest):
 
 @router.get("/production/data-config/resolved")
 async def get_resolved_data_config():
-    """返回简化的 field_key → source_label + values 字典，供前端注解显示"""
+    """返回简化的 field_key → source_label + values 字典，供前端注解显示
+
+    注意：只返回 factor_data_config 中配置的特殊字段
+    depends_on 表的字段会自动可用，不需要在这里配置
+    """
     cached = api_cache.get("production:data-config:resolved")
     if cached is not None:
         return cached
@@ -119,10 +123,54 @@ async def get_resolved_data_config():
                 else:
                     source_label = "未配置"
 
-                result[fk] = {"source": source_label, "values": values}
+                result[fk] = {"source_label": source_label, "values": values}
 
         response = {"status": "success", "data": result}
         api_cache.set("production:data-config:resolved", response, ttl=120)
+        return response
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/production/available-tables")
+async def get_available_tables():
+    """获取所有可用的数据表（sync任务表 + ETL任务表）"""
+    cached = api_cache.get("production:available-tables")
+    if cached is not None:
+        return cached
+    try:
+        tables = []
+
+        # 获取所有 sync 任务表
+        try:
+            sync_df = db_client.query("SELECT task_id, table_name, description FROM sync_task_config WHERE enabled = true ORDER BY task_id")
+            if not sync_df.is_empty():
+                for row in sync_df.to_dicts():
+                    tables.append({
+                        "value": row["table_name"],
+                        "label": row["table_name"],
+                        "description": row.get("description", ""),
+                        "type": "sync"
+                    })
+        except Exception as e:
+            logger.warning(f"Failed to load sync tasks: {e}")
+
+        # 获取所有 ETL 任务表
+        try:
+            etl_df = db_client.query("SELECT task_id, table_name, description FROM etl_task_config WHERE enabled = true ORDER BY task_id")
+            if not etl_df.is_empty():
+                for row in etl_df.to_dicts():
+                    tables.append({
+                        "value": row["table_name"],
+                        "label": row["table_name"],
+                        "description": row.get("description", ""),
+                        "type": "etl"
+                    })
+        except Exception as e:
+            logger.warning(f"Failed to load ETL tasks: {e}")
+
+        response = {"status": "success", "data": tables}
+        api_cache.set("production:available-tables", response, ttl=300)
         return response
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

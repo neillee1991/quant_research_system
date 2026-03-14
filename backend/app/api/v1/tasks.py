@@ -78,6 +78,23 @@ class VersionResponse(BaseModel):
     message: str
 
 
+class DataInspectionResponse(BaseModel):
+    """数据探查响应"""
+    table_name: str
+    exists: bool
+    has_data: Optional[bool] = None
+    date_field: Optional[str] = None
+    min_date: Optional[str] = None
+    max_date: Optional[str] = None
+    actual_dates: Optional[int] = None
+    expected_dates: Optional[int] = None
+    missing_dates: Optional[list[str]] = None
+    missing_count: Optional[int] = None
+    coverage_percent: Optional[float] = None
+    trading_calendar_available: Optional[bool] = None
+    message: Optional[str] = None
+
+
 # ==================== 辅助函数 ====================
 
 def _get_service(task_type: str) -> TaskService:
@@ -301,14 +318,16 @@ def execute_task(
             message = f"ETL task {task_id} executed successfully"
 
         elif task_type == "factor":
-            from engine.production.engine import ProductionEngine
-            engine = ProductionEngine()
-            result = engine.run_task(
+            from services.factor_compute_service import FactorComputeService
+            from store.dolphindb_client import db_client
+            service = FactorComputeService(db_client)
+            compute_result = service.compute_factor(
                 factor_id=task_id,
                 start_date=request.start_date if request else None,
                 end_date=request.end_date if request else None,
                 mode="full" if not request or not request.start_date else "incremental"
             )
+            result = {"success": compute_result.success, "rows": compute_result.rows}
             message = f"Factor task {task_id} executed successfully"
 
         return TaskExecuteResponse(
@@ -359,3 +378,34 @@ def get_config_version():
     except Exception as e:
         logger.error(f"Failed to get config version: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/tasks/{task_type}/{task_id}/inspect", response_model=DataInspectionResponse)
+def inspect_task_data(
+    task_type: str = Path(..., description="任务类型 (sync/etl/factor)"),
+    task_id: str = Path(..., description="任务 ID")
+):
+    """
+    数据探查：检查任务表的数据完整性
+
+    返回：
+    - 表的存在性
+    - 数据日期范围（最早/最晚日期）
+    - 实际数据天数 vs 预期交易日天数
+    - 缺失的交易日列表
+    - 数据覆盖率
+    """
+    try:
+        service = _get_service(task_type)
+        result = service.inspect_data(task_id)
+
+        return DataInspectionResponse(**result)
+
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to inspect data for {task_type} task {task_id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Data inspection failed: {str(e)}"
+        )

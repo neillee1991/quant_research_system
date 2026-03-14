@@ -167,6 +167,7 @@ export const productionApi = {
   getDataConfig: () => api.get('/production/data-config'),
   updateDataConfig: (mappings: DataFieldMapping[]) => api.put('/production/data-config', { mappings }),
   getResolvedDataConfig: () => api.get('/production/data-config/resolved'),
+  getAvailableTables: () => api.get('/production/available-tables'),
 
   // 指数股票池管理
   listIndexPools: () => api.get('/index-pool/list'),

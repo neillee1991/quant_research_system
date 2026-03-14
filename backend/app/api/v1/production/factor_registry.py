@@ -259,6 +259,23 @@ async def delete_factor(factor_id: str, delete_data: bool = False):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/production/factors/{factor_id}/logs")
+async def get_factor_logs(factor_id: str, limit: int = 20):
+    """获取因子运行日志"""
+    try:
+        logs_df = db_client.query(
+            f"SELECT * FROM factor_run_log WHERE factor_id = '{factor_id}' ORDER BY created_at DESC LIMIT {limit}"
+        )
+        if logs_df.is_empty():
+            return {"status": "success", "data": []}
+
+        logs = logs_df.to_dicts()
+        return {"status": "success", "data": logs}
+    except Exception as e:
+        logger.error(f"Failed to get factor logs: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/production/factors/{factor_id}/code")
 async def get_factor_code(factor_id: str):
     """获取因子源代码（优先从数据库读取，备用从文件读取）"""

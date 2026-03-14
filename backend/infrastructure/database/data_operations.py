@@ -194,6 +194,47 @@ class DataOperations:
         """
         self.upsert("sync_daily_data", df, ["trade_date", "ts_code"])
 
+    def append(
+        self,
+        table_name: str,
+        df: pl.DataFrame,
+        known_columns: Optional[List[str]] = None,
+    ) -> int:
+        """
+        追加数据到表（不删除现有数据）
+
+        Args:
+            table_name: 目标表名
+            df: Polars DataFrame
+            known_columns: 已知列顺序（跳过 schema 查询）
+
+        Returns:
+            写入的行数
+        """
+        if df.is_empty():
+            return 0
+
+        db_path = self._table_manager._resolve_db_path(table_name)
+        rows = len(df)
+
+        try:
+            with self._conn.lock:
+                self._conn._ensure_connected()
+                ordered_cols, tmp_var = self._prepare_upload_df(
+                    table_name, df, db_path, known_columns, "append"
+                )
+                col_select = ", ".join(ordered_cols)
+                self._conn.session.run(
+                    f"{table_name}_handle = loadTable('{db_path}', '{table_name}');"
+                    f"tableInsert({table_name}_handle, select {col_select} from {tmp_var});"
+                    f"undef('{tmp_var}')"
+                )
+            logger.info(f"追加 {rows} 行到 {table_name}")
+            return rows
+        except Exception as e:
+            logger.error(f"追加数据失败 [{table_name}]: {e}")
+            raise
+
     def bulk_copy(
         self,
         table_name: str,
@@ -257,7 +298,8 @@ class DataOperations:
             safe_data_type = self._sql_adapter._type_converter.escape_value(data_type)
             sql = (
                 f'SELECT last_date FROM loadTable("{self._conn.db_path}", "sync_log") '
-                f'WHERE source = {safe_source} AND data_type = {safe_data_type} LIMIT 1'
+                f'WHERE source = {safe_source} AND data_type = {safe_data_type} '
+                f'ORDER BY updated_at DESC LIMIT 1'
             )
             with self._conn.lock:
                 self._conn._ensure_connected()

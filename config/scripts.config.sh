@@ -56,8 +56,9 @@ VENV_DIR=".venv"
 
 # ==================== DolphinDB 配置 ====================
 
-# DolphinDB 数据目录（可通过 .env 中 DOLPHINDB_DATA_DIR 覆盖）
-DOLPHINDB_DATA_DIR="${DOLPHINDB_DATA_DIR:-$SCRIPT_DIR/data/dolphindb}"
+# DolphinDB 数据目录（可通过环境变量 DOLPHINDB_DATA_DIR 覆盖）
+# 默认使用独立的数据目录，避免与项目文件混在一起
+DOLPHINDB_DATA_DIR="${DOLPHINDB_DATA_DIR:-/Users/lisheng/Code/application/dolphin}"
 
 # DolphinDB 健康检查
 DB_INIT_WAIT=10

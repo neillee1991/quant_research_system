@@ -159,6 +159,7 @@ class SyncLogManager:
                 SELECT last_date, updated_at
                 FROM sync_log
                 WHERE source = %s AND data_type = %s
+                ORDER BY updated_at DESC
                 LIMIT 1
             """
             result = self.repository.query(sql, params=("tushare_config", task_id))

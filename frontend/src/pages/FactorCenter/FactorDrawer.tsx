@@ -18,6 +18,7 @@ import type { PreprocessOptions, FactorValue, FactorAnalysisResult } from '../..
 import type { FactorDrawerProps, FactorCodeInfo, DataConfigLabel } from './types';
 import { formatRunParams } from './types';
 import TestPanel from './TestPanel';
+import { DataInspection } from '../../components/DataInspection';
 
 const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, onClose, onSaved }) => {
   const { mode } = useThemeStore();
@@ -29,7 +30,6 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
   const [editCategory, setEditCategory] = useState<string>('');
   const [editComputeMode, setEditComputeMode] = useState<string>('');
   const [editDependsOn, setEditDependsOn] = useState<string[]>([]);
-  const [editWindow, setEditWindow] = useState<number | undefined>(undefined);
   const [editLookbackDays, setEditLookbackDays] = useState<number>(60);
   const [editSaving, setEditSaving] = useState<boolean>(false);
 
@@ -56,6 +56,9 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
 
   // 数据源注解
   const [dataConfigLabels, setDataConfigLabels] = useState<Record<string, DataConfigLabel>>({});
+
+  // 可用表列表
+  const [availableTables, setAvailableTables] = useState<Array<{value: string; label: string; description: string; type: string}>>([]);
 
   // 编辑器引用
   const codeEditorRef = useRef<unknown>(null);
@@ -90,7 +93,6 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
     const rawDeps = factor.depends_on;
     setEditDependsOn(Array.isArray(rawDeps) ? rawDeps : (rawDeps ? (() => { try { return JSON.parse(rawDeps); } catch { return []; } })() : []));
     const params = factor.params as any;
-    setEditWindow(params?.window ?? undefined);
     setEditLookbackDays(params?.lookback_days ?? 60);
 
     // 预处理
@@ -122,6 +124,11 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
     // 数据源注解
     productionApi.getResolvedDataConfig().then(r => setDataConfigLabels(r.data?.data || {})).catch((error) => {
       console.error('Failed to load data config labels:', error);
+    });
+
+    // 加载可用表列表
+    productionApi.getAvailableTables().then(r => setAvailableTables(r.data?.data || [])).catch((error) => {
+      console.error('Failed to load available tables:', error);
     });
   }, [factor, open, initialTab, factorId]);
 
@@ -167,7 +174,6 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
         ...(factor.params || {}),
         preprocess: ppEdit,
         lookback_days: editLookbackDays,
-        ...(editWindow !== undefined ? { window: editWindow } : {}),
       };
       const values = { description: editDesc, category: editCategory, compute_mode: editComputeMode, depends_on: editDependsOn, params: newParams };
       console.log('[FactorDrawer] 保存预处理配置:', ppEdit);
@@ -205,9 +211,6 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
   ];
 
   const logColumns = [
-    { title: '模式', dataIndex: 'mode', key: 'mode', width: 80,
-      render: (v: string) => <Tag color={v === 'incremental' ? 'cyan' : 'orange'}>{v === 'incremental' ? '增量' : '全量'}</Tag>
-    },
     { title: '状态', dataIndex: 'status', key: 'status', width: 80,
       render: (v: string) => <Tag color={v === 'success' ? 'green' : v === 'running' ? 'blue' : 'red'}>{v}</Tag>
     },
@@ -217,10 +220,10 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
         return <Tooltip content={text}><span style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>{text}</span></Tooltip>;
       }
     },
-    { title: '行数', dataIndex: 'rows_affected', key: 'rows', width: 100,
+    { title: '行数', dataIndex: 'rows', key: 'rows', width: 100,
       render: (v: number) => v?.toLocaleString() || '-'
     },
-    { title: '耗时', dataIndex: 'duration_seconds', key: 'dur', width: 80,
+    { title: '耗时', dataIndex: 'elapsed_seconds', key: 'dur', width: 80,
       render: (v: number) => v ? `${v.toFixed(1)}s` : '-'
     },
     { title: '时间', dataIndex: 'created_at', key: 'time',
@@ -263,20 +266,19 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
                   <Select
                     size="small" multiple style={{ width: '100%' }} value={editDependsOn}
                     onChange={(v) => setEditDependsOn(v as string[])}
-                    optionList={['sync_daily_data', 'sync_adj_factor', 'sync_daily_basic', 'sync_moneyflow'].map(v => ({ label: v, value: v }))}
+                    optionList={availableTables.map(t => ({
+                      label: t.label,
+                      value: t.value,
+                      ...(t.description ? { otherKey: t.description } : {})
+                    }))}
+                    filter
+                    placeholder="选择数据表"
                   />
                 </div>
-                <div style={{ display: 'flex', gap: 16, marginTop: 8 }}>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>窗口期 (可选)</div>
-                    <InputNumber size="small" min={1} max={250} value={editWindow} style={{ width: '100%' }}
-                      onChange={(v) => setEditWindow(v as number | undefined)} placeholder="不设置" />
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>回溯天数</div>
-                    <InputNumber size="small" min={1} max={500} value={editLookbackDays} style={{ width: '100%' }}
-                      onChange={(v) => setEditLookbackDays((v as number) || 60)} />
-                  </div>
+                <div style={{ marginTop: 8 }}>
+                  <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>回溯天数</div>
+                  <InputNumber size="small" min={1} max={500} value={editLookbackDays} style={{ width: '100%' }}
+                    onChange={(v) => setEditLookbackDays((v as number) || 60)} />
                 </div>
               </Collapse.Panel>
 
@@ -291,7 +293,9 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
                         { label: '后复权', value: 'backward' },
                         { label: '不复权', value: 'none' },
                       ]} />
-                    {dataConfigLabels.adj_factor && <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>数据源: {dataConfigLabels.adj_factor.source_label}</div>}
+                    <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>
+                      数据源: {editDependsOn.includes('sync_adj_factor') ? 'sync_adj_factor.adj_factor' : '需要添加 sync_adj_factor 到数据依赖'}
+                    </div>
                   </div>
                   <div style={{ flex: '1 1 200px' }}>
                     <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>新股排除天数</div>
@@ -303,30 +307,40 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
                 <div style={{ display: 'flex', gap: 16, marginTop: 12, flexWrap: 'wrap' }}>
                   <span>
                     <Checkbox checked={ppEdit.filter_st} onChange={(e) => setPpEdit(p => ({ ...p, filter_st: !!e.target.checked }))}>过滤 ST</Checkbox>
-                    {dataConfigLabels.is_st && (
+                    {dataConfigLabels.is_st ? (
                       <Tooltip content={dataConfigLabels.is_st.values ? Object.entries(dataConfigLabels.is_st.values).map(([k, v]) => `${k}: ${v}`).join('\n') : undefined} position="bottom">
                         <span style={{ fontSize: 10, color: 'var(--text-muted)', cursor: dataConfigLabels.is_st.values ? 'help' : undefined }}> ({dataConfigLabels.is_st.source_label})</span>
                       </Tooltip>
+                    ) : (
+                      <span style={{ fontSize: 10, color: 'var(--text-muted)' }}> (需配置数据源)</span>
                     )}
                   </span>
                   <span>
                     <Checkbox checked={ppEdit.filter_new_stock} onChange={(e) => setPpEdit(p => ({ ...p, filter_new_stock: !!e.target.checked }))}>过滤新股</Checkbox>
-                    {dataConfigLabels.list_date && <span style={{ fontSize: 10, color: 'var(--text-muted)' }}> ({dataConfigLabels.list_date.source_label})</span>}
+                    {dataConfigLabels.list_date ? (
+                      <span style={{ fontSize: 10, color: 'var(--text-muted)' }}> ({dataConfigLabels.list_date.source_label})</span>
+                    ) : (
+                      <span style={{ fontSize: 10, color: 'var(--text-muted)' }}> (需配置数据源)</span>
+                    )}
                   </span>
                   <span>
                     <Checkbox checked={ppEdit.handle_suspension} onChange={(e) => setPpEdit(p => ({ ...p, handle_suspension: !!e.target.checked }))}>停牌处理</Checkbox>
-                    {dataConfigLabels.is_suspend && (
+                    {dataConfigLabels.is_suspend ? (
                       <Tooltip content={dataConfigLabels.is_suspend.values ? Object.entries(dataConfigLabels.is_suspend.values).map(([k, v]) => `${k}: ${v}`).join('\n') : undefined} position="bottom">
                         <span style={{ fontSize: 10, color: 'var(--text-muted)', cursor: dataConfigLabels.is_suspend.values ? 'help' : undefined }}> ({dataConfigLabels.is_suspend.source_label})</span>
                       </Tooltip>
+                    ) : (
+                      <span style={{ fontSize: 10, color: 'var(--text-muted)' }}> (需配置数据源)</span>
                     )}
                   </span>
                   <span>
                     <Checkbox checked={ppEdit.mark_limit} onChange={(e) => setPpEdit(p => ({ ...p, mark_limit: !!e.target.checked }))}>涨跌停标记</Checkbox>
-                    {dataConfigLabels.is_limit && (
+                    {dataConfigLabels.is_limit ? (
                       <Tooltip content={dataConfigLabels.is_limit.values ? Object.entries(dataConfigLabels.is_limit.values).map(([k, v]) => `${k}: ${v}`).join('\n') : undefined} position="bottom">
                         <span style={{ fontSize: 10, color: 'var(--text-muted)', cursor: dataConfigLabels.is_limit.values ? 'help' : undefined }}> ({dataConfigLabels.is_limit.source_label})</span>
                       </Tooltip>
+                    ) : (
+                      <span style={{ fontSize: 10, color: 'var(--text-muted)' }}> (需配置数据源)</span>
                     )}
                   </span>
                 </div>
@@ -371,6 +385,9 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
 
         <TabPane itemKey="data" tab={<span><IconServer size="small" /> 数据</span>}>
           <div>
+            {/* 数据探查组件 */}
+            {factorId && <DataInspection taskType="factor" taskId={factorId} />}
+
             <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
               <Input size="small" placeholder="股票代码" style={{ width: 120 }} showClear
                 onChange={v => setDataFilter(f => ({ ...f, ts_code: v || undefined }))} />

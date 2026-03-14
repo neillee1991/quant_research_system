@@ -16,7 +16,7 @@ from app.core.logger import logger
 from app.core.utils import DateUtils, TradingCalendar
 from engine.production.registry import get_factor, discover_factors, FactorDefinition
 from engine.production.data_config import DataConfigLoader
-from config.preprocess_loader import get_preprocess_loader
+# Removed: preprocess_config.yaml is no longer used
 from infrastructure.processor.pipeline import ProcessContext
 from infrastructure.processor.pipeline_factory import PipelineFactory
 
@@ -50,7 +50,6 @@ class FactorComputeService:
         self.db = db_client
         self.trading_cal = TradingCalendar.get_instance(db_client)
         self.data_config = DataConfigLoader(db_client)
-        self.preprocess_loader = get_preprocess_loader()
         self.pipeline_factory = PipelineFactory(db_client, self.data_config, self.trading_cal)
 
         # 注册配置表
@@ -147,6 +146,14 @@ class FactorComputeService:
             # 4. 创建运行记录
             run_id = self._create_run_record(factor_id, calc_start, calc_end, compute_mode)
 
+            # 保存运行上下文用于后续更新
+            run_context = {
+                "factor_id": factor_id,
+                "calc_start": calc_start,
+                "calc_end": calc_end,
+                "compute_mode": compute_mode
+            }
+
             # 5. 构建处理上下文
             context = ProcessContext(
                 factor_id=factor_id,
@@ -179,7 +186,7 @@ class FactorComputeService:
 
             # 10. 完成运行记录
             elapsed = (datetime.now() - started_at).total_seconds()
-            self._finish_run_record(run_id, "success", rows, started_at)
+            self._finish_run_record(run_id, "success", rows, started_at, run_context)
 
             logger.info(f"Factor {factor_id} completed: {rows} rows in {elapsed:.1f}s")
 
@@ -198,8 +205,8 @@ class FactorComputeService:
             logger.error(f"Factor {factor_id} failed: {e}", exc_info=True)
 
             # 更新运行记录为失败
-            if 'run_id' in locals():
-                self._finish_run_record(run_id, "failed", 0, started_at, str(e))
+            if 'run_id' in locals() and 'run_context' in locals():
+                self._finish_run_record(run_id, "failed", 0, started_at, run_context, str(e))
 
             return ComputeResult(
                 success=False,
@@ -218,24 +225,28 @@ class FactorComputeService:
         explicit_options: Optional[Dict[str, Any]],
         profile_name: Optional[str]
     ) -> Dict[str, Any]:
-        """解析预处理选项（多层优先级）
+        """解析预处理选项（简化版）
 
-        优先级：显式传入 > profile > DB > 代码 > 默认配置
+        优先级：显式传入 > DB配置 > 代码定义 > 系统默认
 
         Args:
             factor_id: 因子ID
             definition: 因子定义
             explicit_options: 显式传入的选项
-            profile_name: 配置名称
+            profile_name: 配置名称（已废弃，保留参数兼容性）
 
         Returns:
             合并后的预处理选项
         """
-        # 1. 加载基础配置（profile 或 default）
-        if profile_name:
-            base_options = self.preprocess_loader.get_profile(profile_name)
-        else:
-            base_options = self.preprocess_loader.get_default_profile()
+        # 1. 系统默认配置
+        base_options = {
+            "adjust_price": "forward",
+            "filter_st": True,
+            "filter_new_stock": True,
+            "new_stock_days": 60,
+            "handle_suspension": True,
+            "mark_limit": True,
+        }
 
         # 2. 合并代码中的因子定义
         factor_options = definition.params.get("preprocess", {}) if definition.params else {}
@@ -302,7 +313,8 @@ class FactorComputeService:
         """从数据库获取因子的预处理配置"""
         try:
             result = self.db.query(
-                f"SELECT params FROM factor_metadata WHERE factor_id = '{factor_id}'"
+                "SELECT params FROM factor_metadata WHERE factor_id = %s",
+                (factor_id,)
             )
             if not result.is_empty():
                 params = result["params"][0]
@@ -316,11 +328,16 @@ class FactorComputeService:
         """获取因子最后计算日期"""
         try:
             result = self.db.query(
-                f"SELECT max(trade_date) as last_date FROM factor_values "
-                f"WHERE factor_id = '{factor_id}'"
+                "SELECT max(trade_date) as last_date FROM factor_values "
+                "WHERE factor_id = %s",
+                (factor_id,)
             )
             if not result.is_empty() and result["last_date"][0]:
-                return str(result["last_date"][0])
+                last_date = str(result["last_date"][0])
+                # 转换日期格式：2026-03-13 00:00:00 -> 20260313
+                if " " in last_date:
+                    last_date = last_date.split()[0].replace("-", "")
+                return last_date
         except Exception as e:
             logger.debug(f"Failed to get last computed date: {e}")
         return None
@@ -331,6 +348,7 @@ class FactorComputeService:
         """创建运行记录"""
         run_id = f"{factor_id}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
         try:
+            now = datetime.now()
             record = pl.DataFrame({
                 "run_id": [run_id],
                 "factor_id": [factor_id],
@@ -338,7 +356,11 @@ class FactorComputeService:
                 "end_date": [calc_end],
                 "mode": [mode],
                 "status": ["running"],
-                "created_at": [datetime.now().strftime("%Y-%m-%d %H:%M:%S")]
+                "rows": [0],
+                "elapsed_seconds": [0.0],
+                "message": [""],
+                "created_at": [now],
+                "finished_at": [now]  # 临时值，后续会更新
             })
             self.db.append("factor_run_log", record)
         except Exception as e:
@@ -351,22 +373,38 @@ class FactorComputeService:
         status: str,
         rows: int,
         started_at: datetime,
+        run_context: Dict[str, Any],
         message: Optional[str] = None
     ):
         """完成运行记录"""
         try:
             elapsed = (datetime.now() - started_at).total_seconds()
-            update_df = pl.DataFrame({
+            # 先删除旧记录（使用DolphinDB原生语法）
+            delete_script = f"""
+                t = loadTable("dfs://quant", "factor_run_log");
+                delete from t where run_id = '{run_id}';
+            """
+            self.db._session.run(delete_script)
+
+            # 插入完整记录
+            now = datetime.now()
+            record = pl.DataFrame({
                 "run_id": [run_id],
+                "factor_id": [run_context["factor_id"]],
+                "start_date": [run_context["calc_start"]],
+                "end_date": [run_context["calc_end"]],
+                "mode": [run_context["compute_mode"]],
                 "status": [status],
                 "rows": [rows],
                 "elapsed_seconds": [elapsed],
                 "message": [message or ""],
-                "finished_at": [datetime.now().strftime("%Y-%m-%d %H:%M:%S")]
+                "created_at": [started_at],
+                "finished_at": [now]
             })
-            self.db.upsert("factor_run_log", update_df)
+            self.db.append("factor_run_log", record)
+            logger.info(f"Finished run record: {run_id}, status={status}, rows={rows}, elapsed={elapsed:.1f}s")
         except Exception as e:
-            logger.warning(f"Failed to finish run record: {e}")
+            logger.warning(f"Failed to finish run record: {e}", exc_info=True)
 
     def _update_metadata(
         self, factor_id: str, definition: FactorDefinition, last_date: str, rows: int
@@ -379,6 +417,249 @@ class FactorComputeService:
                 "total_rows": [rows],
                 "updated_at": [datetime.now().strftime("%Y-%m-%d %H:%M:%S")]
             })
-            self.db.upsert("factor_metadata", update_df)
+            self.db.upsert("factor_metadata", update_df, key_columns=["factor_id"])
         except Exception as e:
             logger.warning(f"Failed to update metadata: {e}")
+
+    # ==================== 迁移的独有功能 ====================
+
+    def _save_to_custom_table(
+        self,
+        df: pl.DataFrame,
+        table_name: str,
+        primary_keys: list,
+        compute_mode: str = "incremental"
+    ) -> int:
+        """保存结果到自定义表 (迁移自 ProductionEngine)
+
+        Args:
+            df: 要保存的数据
+            table_name: 目标表名
+            primary_keys: 主键列表
+            compute_mode: 计算模式 ("full" 或 "incremental")
+
+        Returns:
+            写入的行数
+        """
+        try:
+            # 自动建表
+            if not self.db.table_exists(table_name):
+                # 根据 DataFrame schema 自动推断列类型
+                schema = {}
+                for col in df.columns:
+                    dtype = df[col].dtype
+                    if dtype == pl.Utf8:
+                        col_type = "STRING"
+                    elif dtype == pl.Int64:
+                        col_type = "LONG"
+                    elif dtype == pl.Float64:
+                        col_type = "DOUBLE"
+                    elif dtype == pl.Date:
+                        col_type = "DATE"
+                    elif dtype == pl.Datetime:
+                        col_type = "TIMESTAMP"
+                    else:
+                        col_type = "STRING"  # 默认
+
+                    schema[col] = {
+                        "type": col_type,
+                        "nullable": col not in primary_keys
+                    }
+
+                self.db.create_table(table_name, schema, primary_keys)
+                logger.info(f"Created custom factor table: {table_name}")
+
+            # 保存数据
+            if compute_mode == "full":
+                # 全量模式：清空整个表
+                self.db.upsert(table_name, df, primary_keys, is_full_sync=True)
+            else:
+                # 增量模式：按 trade_date 逐个清空并写入
+                if "trade_date" in df.columns:
+                    trade_dates = df["trade_date"].unique().to_list()
+                    for trade_date in trade_dates:
+                        date_df = df.filter(pl.col("trade_date") == trade_date)
+                        self.db.upsert(
+                            table_name, date_df, primary_keys,
+                            is_full_sync=False, trade_date=trade_date
+                        )
+                else:
+                    # 没有 trade_date 列，直接写入
+                    self.db.upsert(table_name, df, primary_keys, is_full_sync=False)
+
+            logger.info(f"Saved {len(df)} rows to custom table: {table_name}")
+            return len(df)
+
+        except Exception as e:
+            logger.error(f"Failed to save to custom table {table_name}: {e}", exc_info=True)
+            raise
+
+    def _filter_new_stock(
+        self, df: pl.DataFrame, data_start: str, new_stock_days: int
+    ) -> pl.DataFrame:
+        """过滤新股（上市未满 N 个交易日）(迁移自 ProductionEngine)
+
+        Args:
+            df: 输入数据
+            data_start: 数据起始日期
+            new_stock_days: 新股排除天数
+
+        Returns:
+            过滤后的数据
+        """
+        try:
+            ld_cfg = self.data_config.get("list_date")
+            ld_table = ld_cfg.get("table_name") or "sync_stock_basic"
+            ld_column = ld_cfg.get("column_name") or "list_date"
+
+            stock_info = self.db.query(f'SELECT ts_code, {ld_column} FROM {ld_table}')
+            if stock_info.is_empty():
+                return df
+
+            before = len(df)
+            if self.trading_cal.is_loaded:
+                # 用交易日历精确计算每只股票的 cutoff
+                cutoff_map = {}
+                for row in stock_info.to_dicts():
+                    ld = row.get(ld_column)
+                    if ld:
+                        cutoff_map[row["ts_code"]] = self.trading_cal.offset_trading_days(
+                            ld, new_stock_days
+                        )
+                if cutoff_map:
+                    cutoff_df = pl.DataFrame({
+                        "ts_code": list(cutoff_map.keys()),
+                        "_ipo_cutoff": list(cutoff_map.values()),
+                    })
+                    df = df.join(cutoff_df, on="ts_code", how="left")
+                    df = df.filter(
+                        pl.col("_ipo_cutoff").is_null() |
+                        (pl.col("trade_date") >= pl.col("_ipo_cutoff"))
+                    )
+                    df = df.drop("_ipo_cutoff")
+            else:
+                # 无交易日历：静态排除
+                from datetime import timedelta
+                dt = DateUtils.parse_date(data_start)
+                ipo_cutoff = (dt - timedelta(days=int(new_stock_days * 1.5))).strftime("%Y%m%d")
+                new_codes = stock_info.filter(
+                    pl.col(ld_column).is_not_null() & (pl.col(ld_column) > ipo_cutoff)
+                )["ts_code"].to_list()
+                if new_codes:
+                    df = df.filter(~pl.col("ts_code").is_in(new_codes))
+
+            dropped = before - len(df)
+            if dropped > 0:
+                logger.info(f"新股过滤: 移除 {dropped} 行")
+            return df
+
+        except Exception as e:
+            logger.warning(f"新股过滤失败 ({e})，跳过")
+            return df
+
+    def _get_factor_preprocess(self, factor_id: str) -> Dict[str, Any]:
+        """从数据库加载因子的预处理配置 (迁移自 ProductionEngine)
+
+        Args:
+            factor_id: 因子ID
+
+        Returns:
+            预处理配置字典
+        """
+        try:
+            result = self.db.query(
+                "SELECT params FROM factor_metadata WHERE factor_id = %s",
+                (factor_id,)
+            )
+            if result.is_empty():
+                return {}
+
+            params = result["params"][0]
+            if isinstance(params, dict):
+                return params.get("preprocess", {})
+            elif isinstance(params, str):
+                import json
+                try:
+                    params_dict = json.loads(params)
+                    return params_dict.get("preprocess", {})
+                except json.JSONDecodeError:
+                    return {}
+            return {}
+
+        except Exception as e:
+            logger.warning(f"Failed to load preprocess config for {factor_id}: {e}")
+            return {}
+
+    def _insert_run_record(
+        self,
+        factor_id: str,
+        mode: str,
+        start_date: Optional[str],
+        end_date: Optional[str],
+        opts: Optional[Dict[str, Any]] = None
+    ) -> Optional[str]:
+        """插入运行记录,包含所有预处理选项 (增强版,迁移自 ProductionEngine)
+
+        Args:
+            factor_id: 因子ID
+            mode: 计算模式
+            start_date: 开始日期
+            end_date: 结束日期
+            opts: 预处理选项
+
+        Returns:
+            run_id (时间戳字符串)
+        """
+        import json
+        try:
+            now = datetime.now()
+            run_id = now.strftime("%Y%m%d%H%M%S%f")
+
+            # 格式化 timestamp 为 DolphinDB TIMESTAMP 格式（含毫秒）
+            now_ts = now.strftime("%Y.%m.%dT%H:%M:%S.") + f"{now.microsecond // 1000:03d}"
+            opts = opts or {}
+            opts_str = json.dumps(opts).replace('"', '\\"')  # 转义双引号
+
+            # 提取预处理参数
+            filter_st = "true" if opts.get("filter_st", True) else "false"
+            filter_new_stock = "true" if opts.get("filter_new_stock", True) else "false"
+            new_stock_days = opts.get("new_stock_days", 60)
+            handle_suspension = "true" if opts.get("handle_suspension", True) else "false"
+            mark_limit = "true" if opts.get("mark_limit", True) else "false"
+            adjust_price = opts.get("adjust_price", "none")
+
+            # 列顺序必须与 factor_task_run 表定义一致
+            meta_db = self.db._db_path
+            with self.db._lock:
+                self.db._ensure_connected()
+                self.db._session.run(
+                    f'ts_val = [temporalParse("{now_ts}", "yyyy.MM.ddTHH:mm:ss.SSS")];'
+                    f'tmpRun = table('
+                    f'["{factor_id}"] as factor_id, '
+                    f'["{mode or ""}"] as mode, '
+                    f'["running"] as status, '
+                    f'["{start_date or ""}"] as start_date, '
+                    f'["{end_date or ""}"] as end_date, '
+                    f'[0] as rows_affected, '
+                    f'[0.0] as duration_seconds, '
+                    f'[{filter_st}] as filter_st, '
+                    f'[{filter_new_stock}] as filter_new_stock, '
+                    f'[{new_stock_days}] as new_stock_days, '
+                    f'[{handle_suspension}] as handle_suspension, '
+                    f'[{mark_limit}] as mark_limit, '
+                    f'["{adjust_price}"] as adjust_price, '
+                    f'["{opts_str}"] as preprocess, '
+                    f'["{run_id}"] as run_id, '
+                    f'[""] as error_message, '
+                    f'ts_val as created_at'
+                    f');'
+                    f'ptr = loadTable("{meta_db}", "factor_task_run");'
+                    f'ptr.append!(tmpRun);'
+                )
+            logger.info(f"Inserted run record: {run_id} for factor {factor_id}")
+            return run_id
+
+        except Exception as e:
+            import traceback
+            logger.error(f"Failed to insert run record for {factor_id}: {e}\n{traceback.format_exc()}")
+            return None

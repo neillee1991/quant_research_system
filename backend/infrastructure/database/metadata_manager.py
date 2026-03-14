@@ -144,6 +144,26 @@ class MetadataManager:
             "array(TIMESTAMP,0) as created_at)",
             ["ts_code", "factor_id", "trade_date"],
         ),
+        "trade_cal": (
+            "table("
+            "array(SYMBOL,0) as exchange,"
+            "array(DATE,0) as cal_date,"
+            "array(INT,0) as is_open,"
+            "array(DATE,0) as pretrade_date)",
+            ["exchange", "cal_date"],
+        ),
+        "stock_basic": (
+            "table("
+            "array(SYMBOL,0) as ts_code,"
+            "array(STRING,0) as symbol,"
+            "array(STRING,0) as name,"
+            "array(STRING,0) as area,"
+            "array(STRING,0) as industry,"
+            "array(STRING,0) as market,"
+            "array(DATE,0) as list_date,"
+            "array(STRING,0) as list_status)",
+            ["ts_code"],
+        ),
     }
 
     def __init__(self, connection, data_operations):

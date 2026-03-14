@@ -51,7 +51,7 @@ class PipelineFactory:
         # 2. 复权处理（可选）
         if preprocess_options.get("adjust_price") in ("forward", "backward"):
             pipeline.add_stage(
-                AdjustmentProcessor(self.db)
+                AdjustmentProcessor(self.db, self.data_config)
             )
 
         # 3. 状态过滤（ST、新股、涨跌停）

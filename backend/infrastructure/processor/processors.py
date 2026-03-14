@@ -34,41 +34,52 @@ class DataLoaderProcessor(IProcessor):
             logger.warning(f"Factor {context.factor_id} has no depends_on, returning empty DataFrame")
             return pl.DataFrame()
 
-        # 加载数据配置
+        # 转换日期格式
+        ddb_start = f"{data_start[:4]}.{data_start[4:6]}.{data_start[6:]}"
+        ddb_end = f"{calc_end[:4]}.{calc_end[4:6]}.{calc_end[6:]}"
+
+        # 加载数据配置（优先使用用户配置）
         config = self.data_config.load()
 
         # 加载并合并所有依赖表
         merged_df = None
         for dep in depends_on:
+            # 1. 优先使用用户配置（factor_data_config 表）
             dep_config = config.get(dep)
-            if not dep_config:
-                logger.warning(f"Data config not found for {dep}")
-                continue
 
-            table_name = dep_config["table_name"]
-            field_mapping = dep_config["field_mapping"]
+            if dep_config and dep_config.get("table_name"):
+                # 用户已配置此数据源
+                table_name = dep_config["table_name"]
+                column_name = dep_config.get("column_name", "")
 
-            # 构建查询列
-            select_cols = ["ts_code", "trade_date"] + list(field_mapping.keys())
-            col_str = ", ".join(select_cols)
+                if column_name:
+                    # 单列配置
+                    query = (
+                        f"SELECT ts_code, trade_date, {column_name} FROM {table_name} "
+                        f"WHERE trade_date >= {ddb_start} AND trade_date <= {ddb_end}"
+                    )
+                else:
+                    # 多列配置（需要从 extra_config 解析）
+                    query = (
+                        f"SELECT * FROM {table_name} "
+                        f"WHERE trade_date >= {ddb_start} AND trade_date <= {ddb_end}"
+                    )
 
-            # 转换日期格式
-            ddb_start = f"{data_start[:4]}.{data_start[4:6]}.{data_start[6:]}"
-            ddb_end = f"{calc_end[:4]}.{calc_end[4:6]}.{calc_end[6:]}"
+                logger.debug(f"Loading {dep} from user config: {table_name}")
+                dep_df = self.db.query(query)
 
-            # 查询数据
-            query = (
-                f"SELECT {col_str} FROM {table_name} "
-                f"WHERE trade_date >= {ddb_start} AND trade_date <= {ddb_end}"
-            )
-            dep_df = self.db.query(query)
+                if dep_df.is_empty():
+                    logger.warning(f"No data loaded from {table_name} (user config)")
+                    continue
 
-            if dep_df.is_empty():
-                logger.warning(f"No data loaded from {table_name}")
-                continue
+                logger.info(f"Loaded {len(dep_df)} rows from {dep} (user config)")
 
-            # 应用字段映射
-            dep_df = dep_df.rename(field_mapping)
+            else:
+                # 数据源未配置
+                raise ValueError(
+                    f"Data source '{dep}' not configured in factor_data_config table. "
+                    f"Please add configuration for this data source before running the factor."
+                )
 
             # 合并数据
             if merged_df is None:
@@ -81,8 +92,10 @@ class DataLoaderProcessor(IProcessor):
                 )
 
         if merged_df is None or merged_df.is_empty():
-            logger.warning("No data loaded from any dependency")
+            logger.warning(f"No data loaded from any dependency for factor {context.factor_id}")
             return pl.DataFrame()
+
+        logger.info(f"Loaded total {len(merged_df)} rows for factor {context.factor_id}")
 
         # 保存原始数据到共享状态（用于后续质量检查）
         context.set_state("raw_data", merged_df)
@@ -93,8 +106,9 @@ class DataLoaderProcessor(IProcessor):
 class AdjustmentProcessor(IProcessor):
     """复权处理器 - 应用前复权/后复权"""
 
-    def __init__(self, db_client):
+    def __init__(self, db_client, data_config):
         self.db = db_client
+        self.data_config = data_config
 
     @property
     def name(self) -> str:
@@ -111,17 +125,33 @@ class AdjustmentProcessor(IProcessor):
         data_start = context.data_start
         calc_end = context.calc_end
 
-        # 加载复权因子
+        # 转换日期格式
         ddb_start = f"{data_start[:4]}.{data_start[4:6]}.{data_start[6:]}"
         ddb_end = f"{calc_end[:4]}.{calc_end[4:6]}.{calc_end[6:]}"
 
+        # 1. 优先使用用户配置的复权因子表
+        config = self.data_config.load()
+        adj_config = config.get("adj_factor")
+
+        if adj_config and adj_config.get("table_name"):
+            # 用户配置了复权因子表
+            table_name = adj_config["table_name"]
+            column_name = adj_config.get("column_name", "adj_factor")
+            logger.debug(f"Loading adj_factor from user config: {table_name}")
+        else:
+            # 2. 使用系统默认配置
+            table_name = "sync_adj_factor"
+            column_name = "adj_factor"
+            logger.debug(f"Loading adj_factor from builtin config: {table_name}")
+
+        # 加载复权因子
         adj_df = self.db.query(
-            f"SELECT ts_code, trade_date, adj_factor FROM sync_adj_factor "
+            f"SELECT ts_code, trade_date, {column_name} as adj_factor FROM {table_name} "
             f"WHERE trade_date >= {ddb_start} AND trade_date <= {ddb_end}"
         )
 
         if adj_df.is_empty():
-            logger.warning("No adj_factor data, skipping adjustment")
+            logger.warning(f"No adj_factor data from {table_name}, skipping adjustment")
             return df
 
         # 合并复权因子
@@ -151,7 +181,7 @@ class AdjustmentProcessor(IProcessor):
         # 移除复权因子列
         df = df.drop("adj_factor")
 
-        logger.info(f"Applied {adjust_mode} adjustment to {existing_price_cols}")
+        logger.info(f"Applied {adjust_mode} adjustment to {existing_price_cols} (from {table_name})")
         return df
 
 
@@ -197,19 +227,23 @@ class StatusFilterProcessor(IProcessor):
         for field_key, cfg in field_configs.items():
             if not cfg:
                 continue
-            tbl = cfg["table"]
-            col = cfg["column"]
+            tbl = cfg.get("table_name", "")
+            col = cfg.get("column_name", "")
+            if not tbl or not col:
+                logger.debug(f"Skipping {field_key}: missing table_name or column_name")
+                continue
             if tbl not in tables:
                 tables[tbl] = []
-            tables[tbl].append(col)
+            tables[tbl].append((field_key, col))
 
         # 加载状态数据
         status_dfs = []
-        for tbl, cols in tables.items():
+        for tbl, field_cols in tables.items():
             if not self.db.table_exists(tbl):
                 logger.warning(f"Status table {tbl} not exists, skipping")
                 continue
 
+            cols = [col for _, col in field_cols]
             select_cols = ["ts_code", "trade_date"] + cols
             col_str = ", ".join(select_cols)
             ddb_start = f"{data_start[:4]}.{data_start[4:6]}.{data_start[6:]}"
@@ -223,12 +257,8 @@ class StatusFilterProcessor(IProcessor):
             if status_df.is_empty():
                 continue
 
-            # 重命名列
-            rename_map = {
-                cfg["column"]: fk
-                for fk, cfg in field_configs.items()
-                if cfg and cfg["table"] == tbl
-            }
+            # 重命名列：column_name -> field_key
+            rename_map = {col: fk for fk, col in field_cols}
             if rename_map:
                 status_df = status_df.rename(rename_map)
 
@@ -264,24 +294,55 @@ class StatusFilterProcessor(IProcessor):
 
     def _filter_new_stock(self, df: pl.DataFrame, start_date: str, end_date: str, days: int) -> pl.DataFrame:
         """过滤新股（上市不足 N 天）"""
-        # 查询股票基本信息
-        basic_df = self.db.query("SELECT ts_code, list_date FROM sync_stock_basic")
-        if basic_df.is_empty():
-            logger.warning("sync_stock_basic is empty, skipping new stock filter")
+        try:
+            # 查询股票基本信息
+            basic_df = self.db.query("SELECT ts_code, list_date FROM sync_stock_basic")
+            if basic_df.is_empty():
+                logger.warning("sync_stock_basic is empty, skipping new stock filter")
+                return df
+
+            # 计算每个股票在日期范围内的上市天数
+            df = df.join(basic_df, on="ts_code", how="left")
+
+            # 转换日期为 YYYYMMDD 整数格式
+            # trade_date 可能是 datetime/date/string 类型
+            if df["trade_date"].dtype in [pl.Datetime, pl.Date]:
+                df = df.with_columns(
+                    pl.col("trade_date").dt.strftime("%Y%m%d").cast(pl.Int32).alias("trade_date_int")
+                )
+            elif df["trade_date"].dtype == pl.Utf8:
+                df = df.with_columns(
+                    pl.col("trade_date").str.replace_all("-", "").cast(pl.Int32).alias("trade_date_int")
+                )
+            else:
+                df = df.with_columns(pl.col("trade_date").cast(pl.Int32).alias("trade_date_int"))
+
+            # list_date 同样处理
+            if df["list_date"].dtype in [pl.Datetime, pl.Date]:
+                df = df.with_columns(
+                    pl.col("list_date").dt.strftime("%Y%m%d").cast(pl.Int32).alias("list_date_int")
+                )
+            elif df["list_date"].dtype == pl.Utf8:
+                df = df.with_columns(
+                    pl.col("list_date").str.replace_all("-", "").cast(pl.Int32).alias("list_date_int")
+                )
+            else:
+                df = df.with_columns(pl.col("list_date").cast(pl.Int32).alias("list_date_int"))
+
+            # 简化：使用日期差值估算交易天数（实际应该用交易日历）
+            # 假设一年约250个交易日
+            before = len(df)
+            df = df.with_columns(
+                ((pl.col("trade_date_int") - pl.col("list_date_int")) / 10000 * 250).cast(pl.Int32).alias("days_since_ipo")
+            )
+            df = df.filter(pl.col("days_since_ipo") >= days)
+            df = df.drop(["list_date", "trade_date_int", "list_date_int", "days_since_ipo"])
+
+            logger.info(f"Filtered new stocks (<{days} days): {before} -> {len(df)}")
             return df
-
-        # 计算每个股票在日期范围内的上市天数
-        df = df.join(basic_df, on="ts_code", how="left")
-
-        # 过滤：trade_date - list_date >= days
-        before = len(df)
-        df = df.filter(
-            (pl.col("trade_date").cast(pl.Int32) - pl.col("list_date").cast(pl.Int32)) >= days
-        )
-        df = df.drop("list_date")
-
-        logger.info(f"Filtered new stocks (<{days} days): {before} -> {len(df)}")
-        return df
+        except Exception as e:
+            logger.warning(f"Failed to filter new stocks: {e}, skipping filter")
+            return df
 
 
 class FactorComputeProcessor(IProcessor):
@@ -357,11 +418,25 @@ class DateRangeFilterProcessor(IProcessor):
         calc_start = context.calc_start
         calc_end = context.calc_end
 
-        before = len(df)
-        df = df.filter(
-            (pl.col("trade_date") >= calc_start) &
-            (pl.col("trade_date") <= calc_end)
-        )
+        # 转换字符串日期为 date 类型进行比较
+        if df["trade_date"].dtype in [pl.Date, pl.Datetime]:
+            # trade_date 是日期类型，需要将字符串转换为日期
+            start_date = pl.lit(calc_start).str.to_date("%Y%m%d")
+            end_date = pl.lit(calc_end).str.to_date("%Y%m%d")
+
+            before = len(df)
+            df = df.filter(
+                (pl.col("trade_date") >= start_date) &
+                (pl.col("trade_date") <= end_date)
+            )
+        else:
+            # trade_date 是字符串或整数类型
+            before = len(df)
+            df = df.filter(
+                (pl.col("trade_date") >= calc_start) &
+                (pl.col("trade_date") <= calc_end)
+            )
+
         logger.info(f"Date range filter [{calc_start}, {calc_end}]: {before} -> {len(df)}")
 
         return df
@@ -398,12 +473,13 @@ class QualityCheckerProcessor(IProcessor):
         else:
             outlier_rate = 0
 
-        # 生成质量标记
-        quality_flag = "good"
+        # 生成质量标记（使用整数：0=good, 1=warning, 2=poor）
         if null_rate > 0.5:
-            quality_flag = "poor"
+            quality_flag = 2  # poor
         elif null_rate > 0.2 or outlier_rate > 0.05:
-            quality_flag = "warning"
+            quality_flag = 1  # warning
+        else:
+            quality_flag = 0  # good
 
         # 添加质量标记列
         df = df.with_columns(pl.lit(quality_flag).alias("quality_flag"))
@@ -446,14 +522,20 @@ class ResultWriterProcessor(IProcessor):
         if "run_id" not in result_df.columns and run_id:
             result_df = result_df.with_columns(pl.lit(run_id).alias("run_id"))
 
+        if "task_version" not in result_df.columns:
+            result_df = result_df.with_columns(pl.lit(1).alias("task_version"))
+
+        if "data_version" not in result_df.columns:
+            result_df = result_df.with_columns(pl.lit("v1").alias("data_version"))
+
         if "created_at" not in result_df.columns:
             result_df = result_df.with_columns(
-                pl.lit(datetime.now().strftime("%Y-%m-%d %H:%M:%S")).alias("created_at")
+                pl.lit(datetime.now()).alias("created_at")
             )
 
         # 确定存储表
         storage_config = definition.storage
-        table_name = storage_config.table if storage_config else "factor_values"
+        table_name = storage_config.target if storage_config else "factor_values"
         primary_keys = ["ts_code", "trade_date", "factor_id"] if table_name == "factor_values" else ["ts_code", "trade_date"]
 
         # 获取计算模式

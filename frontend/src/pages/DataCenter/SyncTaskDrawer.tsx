@@ -17,8 +17,12 @@ import {
   Tooltip,
   Checkbox,
   Modal,
+  Descriptions,
+  Progress,
+  Spin,
+  Banner,
 } from '@douyinfe/semi-ui';
-import { IconCode, IconPlus, IconDelete } from '@douyinfe/semi-icons';
+import { IconCode, IconPlus, IconDelete, IconSearch } from '@douyinfe/semi-icons';
 import Editor from '@monaco-editor/react';
 import { dataApi } from '../../api';
 import { useThemeStore } from '../../store';
@@ -45,6 +49,9 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
   const [jsonText, setJsonText] = useState('');
   const [syncHistory, setSyncHistory] = useState<any[]>([]);
   const [taskStatus, setTaskStatus] = useState<any>(null);
+  const [inspectionData, setInspectionData] = useState<any>(null);
+  const [inspectionLoading, setInspectionLoading] = useState(false);
+  const [showInspection, setShowInspection] = useState(false);
   const jsonEditorRef = useRef<any>(null);
 
   // 加载任务配置
@@ -141,6 +148,24 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
       setTaskStatus(res.data);
     } catch (error) {
       console.error('Failed to load task status:', error);
+    }
+  };
+
+  const handleInspectData = async () => {
+    if (!task) return;
+    setInspectionLoading(true);
+    try {
+      const response = await fetch(
+        `http://localhost:8000/api/v1/tasks/sync/${task.task_id}/inspect`
+      );
+      const data = await response.json();
+      setInspectionData(data);
+      setShowInspection(true);
+    } catch (error) {
+      console.error('Data inspection failed:', error);
+      Toast.error('数据探查失败');
+    } finally {
+      setInspectionLoading(false);
     }
   };
 
@@ -718,6 +743,90 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
             {!isNew && (
               <TabPane tab="历史调度" itemKey="history">
                 <div style={{ paddingTop: 8 }}>
+                  {/* 数据探查按钮 - 仅增量任务显示 */}
+                  {task?.sync_type === 'incremental' && (
+                    <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <Button
+                        icon={<IconSearch />}
+                        onClick={handleInspectData}
+                        loading={inspectionLoading}
+                        theme="solid"
+                        type="primary"
+                      >
+                        数据探查
+                      </Button>
+                    </div>
+                  )}
+
+                  {/* 数据探查结果 */}
+                  {showInspection && inspectionData && (
+                    <div style={{ marginBottom: 16 }}>
+                      {!inspectionData.exists ? (
+                        <Banner
+                          type="warning"
+                          description={inspectionData.message}
+                          closeIcon={null}
+                        />
+                      ) : !inspectionData.has_data ? (
+                        <Banner
+                          type="info"
+                          description={inspectionData.message}
+                          closeIcon={null}
+                        />
+                      ) : (
+                        <Collapse defaultActiveKey={['1']}>
+                          <Collapse.Panel header="数据完整性报告" itemKey="1">
+                            <Descriptions row size="small">
+                              <Descriptions.Item itemKey="table">表名: {inspectionData.table_name}</Descriptions.Item>
+                              <Descriptions.Item itemKey="field">日期字段: {inspectionData.date_field}</Descriptions.Item>
+                              <Descriptions.Item itemKey="min">最早日期: {inspectionData.min_date}</Descriptions.Item>
+                              <Descriptions.Item itemKey="max">最晚日期: {inspectionData.max_date}</Descriptions.Item>
+                              <Descriptions.Item itemKey="actual">实际天数: {inspectionData.actual_dates}</Descriptions.Item>
+                              <Descriptions.Item itemKey="expected">预期天数: {inspectionData.expected_dates || '-'}</Descriptions.Item>
+                              <Descriptions.Item itemKey="missing">
+                                缺失天数: <Tag color="red">{inspectionData.missing_count || 0}</Tag>
+                              </Descriptions.Item>
+                              <Descriptions.Item itemKey="coverage">
+                                覆盖率:
+                                <Progress
+                                  percent={inspectionData.coverage_percent || 0}
+                                  stroke={inspectionData.coverage_percent >= 95 ? 'var(--semi-color-success)' : 'var(--semi-color-danger)'}
+                                  style={{ width: 200, marginLeft: 8 }}
+                                  showInfo
+                                  size="small"
+                                />
+                              </Descriptions.Item>
+                            </Descriptions>
+
+                            {inspectionData.missing_count > 0 && inspectionData.missing_dates && (
+                              <div style={{ marginTop: 16 }}>
+                                <div style={{ marginBottom: 8, fontWeight: 600 }}>缺失的交易日：</div>
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                                  {inspectionData.missing_dates.slice(0, 20).map((date: string) => (
+                                    <Tag key={date} color="red" size="small">{date}</Tag>
+                                  ))}
+                                  {inspectionData.missing_count > 20 && (
+                                    <Tag size="small">... 还有 {inspectionData.missing_count - 20} 天</Tag>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+
+                            {!inspectionData.trading_calendar_available && (
+                              <Banner
+                                type="warning"
+                                description="交易日历数据不可用，无法检查缺失日期。请先同步 sync_trade_cal 任务。"
+                                style={{ marginTop: 16 }}
+                                closeIcon={null}
+                              />
+                            )}
+                          </Collapse.Panel>
+                        </Collapse>
+                      )}
+                    </div>
+                  )}
+
+                  {/* 历史调度表格 */}
                   <Table
                     dataSource={syncHistory}
                     rowKey={(record: any) => `${record.sync_date}-${record.created_at}`}

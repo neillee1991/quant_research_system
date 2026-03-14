@@ -90,12 +90,20 @@ start_infrastructure() {
     cd "$SCRIPT_DIR"
     DOLPHINDB_DATA_DIR="/Users/lisheng/Code/application/dolphin"
 
-    # 确保 DolphinDB 数据目录存在
+    # 确保 DolphinDB 数据目录存在并设置权限
     if [ ! -d "$DOLPHINDB_DATA_DIR" ]; then
         print_warning "创建 DolphinDB 数据目录: $DOLPHINDB_DATA_DIR"
         mkdir -p "$DOLPHINDB_DATA_DIR"
     fi
 
+    # 创建必要的子目录结构
+    mkdir -p "$DOLPHINDB_DATA_DIR/local8848/storage"
+    mkdir -p "$DOLPHINDB_DATA_DIR/local8848/storage/LOG"
+
+    # 设置目录权限（确保容器可写）
+    chmod -R 777 "$DOLPHINDB_DATA_DIR"
+
+    export DOLPHINDB_DATA_DIR
     docker-compose up -d dolphindb prefect-server
 
     # 等待 DolphinDB 就绪
