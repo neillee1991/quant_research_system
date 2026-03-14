@@ -34,10 +34,14 @@ export interface TestLog {
 
 export interface TestStats {
   total_rows?: number;
-  stock_count?: number;
-  factor_mean?: number;
-  factor_std?: number;
+  count?: number;
   null_count?: number;
+  null_ratio?: number;
+  min?: number;
+  max?: number;
+  mean?: number;
+  std?: number;
+  median?: number;
 }
 
 export interface TestResultData {
@@ -106,10 +110,20 @@ def compute_custom(df: pl.DataFrame, params: dict) -> pl.DataFrame:
     )
 `;
 
+// 格式化日期：YYYYMMDD -> YYYY-MM-DD
+const formatDate = (date: string | null | undefined): string => {
+  if (!date) return '';
+  const str = String(date);
+  if (str.length === 8) {
+    return `${str.slice(0, 4)}-${str.slice(4, 6)}-${str.slice(6, 8)}`;
+  }
+  return str;
+};
+
 export const formatRunParams = (record: FactorRunRecord): string => {
   const parts: string[] = [];
-  const start = record.start_date || '';
-  const end = record.end_date || '';
+  const start = formatDate(record.start_date);
+  const end = formatDate(record.end_date);
   if (start || end) parts.push(`${start}~${end}`);
   if (record.preprocess) {
     try {

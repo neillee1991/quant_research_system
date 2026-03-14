@@ -50,13 +50,26 @@ const FactorManageTab: React.FC = () => {
   const [createCategory, setCreateCategory] = useState<string>('custom');
   const [createComputeMode, setCreateComputeMode] = useState<string>('incremental');
   const [createDependsOn, setCreateDependsOn] = useState<string[]>(['sync_daily_data']);
-  const [createWindow, setCreateWindow] = useState<number | undefined>(undefined);
   const [createLookbackDays, setCreateLookbackDays] = useState<number>(60);
   const createEditorRef = useRef<unknown>(null);
+
+  // 可用表列表
+  const [availableTables, setAvailableTables] = useState<Array<{value: string; label: string; description: string; type: string}>>([]);
 
   // 批量计算模态框
   const [batchCalcModalVisible, setBatchCalcModalVisible] = useState<boolean>(false);
   const [batchCalcDates, setBatchCalcDates] = useState<[dayjs.Dayjs | null, dayjs.Dayjs | null]>([null, null]);
+
+  // 加载可用表列表
+  useEffect(() => {
+    productionApi.getAvailableTables().then(r => {
+      const tables = r.data?.data || [];
+      console.log('[FactorManageTab] Loaded available tables:', tables.length, tables);
+      setAvailableTables(tables);
+    }).catch((error) => {
+      console.error('Failed to load available tables:', error);
+    });
+  }, []);
 
   // 格式化创建代码
   const handleFormatCreateCode = async (): Promise<void> => {
@@ -117,7 +130,6 @@ const FactorManageTab: React.FC = () => {
       const params = {
         preprocess: createPreprocess,
         lookback_days: createLookbackDays,
-        ...(createWindow !== undefined ? { window: createWindow } : {}),
       };
       await productionApi.createFactor({ ...values, params, code: createCode || undefined });
       Toast.success(`因子 ${values.factor_id} 创建成功`);
@@ -129,7 +141,6 @@ const FactorManageTab: React.FC = () => {
       setCreateCode(CODE_TEMPLATE);
       setCreatePreprocess({ ...DEFAULT_PREPROCESS });
       setCreateDependsOn(['sync_daily_data']);
-      setCreateWindow(undefined);
       setCreateLookbackDays(60);
       loadFactors();
     } catch (e: any) {
@@ -180,23 +191,25 @@ const FactorManageTab: React.FC = () => {
     { title: '模式', dataIndex: 'compute_mode', key: 'mode', width: 60,
       render: (v: string) => <Tag size="small" color={v === 'incremental' ? 'blue' : 'green'}>{v === 'incremental' ? '增量' : '全量'}</Tag>
     },
-    { title: '最新数据', dataIndex: 'latest_data_date', key: 'latest', width: 90,
+    { title: '最新数据', dataIndex: 'latest_date', key: 'latest', width: 100,
       render: (v: string) => {
         if (!v) return <span style={{ color: 'var(--text-muted)' }}>-</span>;
         return (
           <Tooltip content={v}>
-            <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--color-gain)' }}>{v}</div>
+            <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--color-gain)', fontSize: '12px' }}>{v}</div>
           </Tooltip>
         );
       }
     },
-    { title: '最新日期', dataIndex: 'latest_date', key: 'latest_date', width: 130,
-      render: (v: string) => {
-        if (!v) return '-';
+    { title: '上次计算', key: 'last_run', width: 150,
+      render: (_: any, record: any) => {
+        const lastRun = history.find(h => h.factor_id === record.factor_id);
+        if (!lastRun) return <span style={{ color: 'var(--text-muted)' }}>-</span>;
+        const dateTimeStr = lastRun.created_at?.slice(0, 19).replace('T', ' ') || '-';  // YYYY-MM-DD HH:mm:ss
         return (
-          <Tooltip content={v}>
+          <Tooltip content={lastRun.created_at}>
             <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-secondary)', fontSize: '12px' }}>
-              {v.slice(0, 10)}
+              {dateTimeStr}
             </div>
           </Tooltip>
         );
@@ -263,12 +276,12 @@ const FactorManageTab: React.FC = () => {
         );
       }
     },
-    { title: '时间', dataIndex: 'created_at', key: 'time', width: 150,
+    { title: '时间', dataIndex: 'created_at', key: 'time', width: 140,
       render: (v: string) => {
-        const formatted = v?.slice(0, 19) || '-';
+        const formatted = v?.slice(0, 16) || '-';  // 只显示到分钟
         return (
-          <Tooltip content={formatted}>
-            <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{formatted}</div>
+          <Tooltip content={v}>
+            <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '12px', color: 'var(--text-secondary)' }}>{formatted}</div>
           </Tooltip>
         );
       }
@@ -363,19 +376,25 @@ const FactorManageTab: React.FC = () => {
           <Select
             size="small" multiple style={{ width: '100%' }} value={createDependsOn}
             onChange={(v) => setCreateDependsOn(v as string[])}
-            optionList={['sync_daily_data', 'sync_adj_factor', 'sync_daily_basic', 'sync_moneyflow'].map(v => ({ label: v, value: v }))}
+            optionList={(() => {
+              const options = availableTables.map(t => ({
+                label: t.label,
+                value: t.value,
+                ...(t.description ? { otherKey: t.description } : {})
+              }));
+              console.log('[FactorManageTab] Rendering Select with options:', options.length, options.slice(0, 3));
+              return options;
+            })()}
+            filter
+            placeholder="选择数据表"
           />
         </div>
-        <div style={{ display: 'flex', gap: 16, marginBottom: 12 }}>
-          <div style={{ flex: 1 }}>
-            <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>窗口期 (可选)</div>
-            <InputNumber size="small" min={1} max={250} value={createWindow} style={{ width: '100%' }}
-              onChange={(v) => setCreateWindow(v as number | undefined)} placeholder="不设置" />
-          </div>
-          <div style={{ flex: 1 }}>
-            <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>回溯天数</div>
-            <InputNumber size="small" min={1} max={500} value={createLookbackDays} style={{ width: '100%' }}
-              onChange={(v) => setCreateLookbackDays((v as number) || 60)} />
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>回溯天数</div>
+          <InputNumber size="small" min={1} max={500} value={createLookbackDays} style={{ width: '100%' }}
+            onChange={(v) => setCreateLookbackDays((v as number) || 60)} />
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>
+            用于滚动计算时向前加载的历史数据天数
           </div>
         </div>
         <div style={{ marginBottom: 12 }}>

@@ -206,7 +206,17 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
 
   const dataColumns = [
     { title: '股票代码', dataIndex: 'ts_code', key: 'ts_code', width: 120 },
-    { title: '交易日期', dataIndex: 'trade_date', key: 'trade_date', width: 120 },
+    { title: '交易日期', dataIndex: 'trade_date', key: 'trade_date', width: 120,
+      render: (v: string) => {
+        if (!v) return '-';
+        const str = String(v);
+        // YYYYMMDD -> YYYY-MM-DD
+        if (str.length === 8) {
+          return `${str.slice(0, 4)}-${str.slice(4, 6)}-${str.slice(6, 8)}`;
+        }
+        return str;
+      }
+    },
     { title: '因子值', dataIndex: 'factor_value', key: 'factor_value', render: (v: number) => v?.toFixed(6) },
   ];
 
@@ -371,7 +381,7 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
                           }}
                           options={{ minimap: { enabled: false }, fontSize: 13, scrollBeyondLastLine: false, automaticLayout: true, tabSize: 4, wordWrap: 'on' }} />
                       </div>
-                      <TestPanel code={editedCode} dependsOn={editDependsOn} preprocess={ppEdit} />
+                      <TestPanel code={editedCode} dependsOn={editDependsOn} preprocess={ppEdit} lookbackDays={editLookbackDays} />
                     </div>
                   ) : <Empty description="未找到源代码文件" />}
                 </Spin>

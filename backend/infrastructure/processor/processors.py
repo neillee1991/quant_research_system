@@ -44,52 +44,99 @@ class DataLoaderProcessor(IProcessor):
         # 加载并合并所有依赖表
         merged_df = None
         for dep in depends_on:
-            # 1. 优先使用用户配置（factor_data_config 表）
-            dep_config = config.get(dep)
+            # 检查是否是因子依赖（以 factor: 开头）
+            if dep.startswith("factor:"):
+                factor_id = dep[7:]  # 移除 "factor:" 前缀
+                logger.debug(f"Loading factor dependency: {factor_id}")
 
-            if dep_config and dep_config.get("table_name"):
-                # 用户已配置此数据源
-                table_name = dep_config["table_name"]
-                column_name = dep_config.get("column_name", "")
-
-                if column_name:
-                    # 单列配置
-                    query = (
-                        f"SELECT ts_code, trade_date, {column_name} FROM {table_name} "
-                        f"WHERE trade_date >= {ddb_start} AND trade_date <= {ddb_end}"
-                    )
-                else:
-                    # 多列配置（需要从 extra_config 解析）
-                    query = (
-                        f"SELECT * FROM {table_name} "
-                        f"WHERE trade_date >= {ddb_start} AND trade_date <= {ddb_end}"
-                    )
-
-                logger.debug(f"Loading {dep} from user config: {table_name}")
+                query = (
+                    f"SELECT ts_code, trade_date, factor_value AS {factor_id} "
+                    f"FROM factor_values "
+                    f"WHERE factor_id = '{factor_id}' "
+                    f"AND trade_date >= {ddb_start} AND trade_date <= {ddb_end}"
+                )
                 dep_df = self.db.query(query)
 
                 if dep_df.is_empty():
-                    logger.warning(f"No data loaded from {table_name} (user config)")
+                    logger.warning(f"No data loaded for factor {factor_id}")
                     continue
 
-                logger.info(f"Loaded {len(dep_df)} rows from {dep} (user config)")
+                logger.info(f"Loaded {len(dep_df)} rows from factor {factor_id}")
 
             else:
-                # 数据源未配置
-                raise ValueError(
-                    f"Data source '{dep}' not configured in factor_data_config table. "
-                    f"Please add configuration for this data source before running the factor."
-                )
+                # 1. 优先使用用户配置（factor_data_config 表）
+                dep_config = config.get(dep)
+
+                if dep_config and dep_config.get("table_name"):
+                    # 用户已配置此数据源
+                    table_name = dep_config["table_name"]
+                    column_name = dep_config.get("column_name", "")
+
+                    if column_name:
+                        # 单列配置
+                        query = (
+                            f"SELECT ts_code, trade_date, {column_name} FROM {table_name} "
+                            f"WHERE trade_date >= {ddb_start} AND trade_date <= {ddb_end}"
+                        )
+                    else:
+                        # 多列配置（需要从 extra_config 解析）
+                        query = (
+                            f"SELECT * FROM {table_name} "
+                            f"WHERE trade_date >= {ddb_start} AND trade_date <= {ddb_end}"
+                        )
+
+                    logger.debug(f"Loading {dep} from user config: {table_name}")
+                    dep_df = self.db.query(query)
+
+                    if dep_df.is_empty():
+                        logger.warning(f"No data loaded from {table_name} (user config)")
+                        continue
+
+                    logger.info(f"Loaded {len(dep_df)} rows from {dep} (user config)")
+
+                else:
+                    # 2. 尝试直接从表名加载（适用于 sync/etl 任务表）
+                    try:
+                        logger.debug(f"Trying to load {dep} directly as table name")
+                        query = (
+                            f"SELECT * FROM {dep} "
+                            f"WHERE trade_date >= {ddb_start} AND trade_date <= {ddb_end}"
+                        )
+                        dep_df = self.db.query(query)
+
+                        if dep_df.is_empty():
+                            logger.warning(f"No data loaded from table {dep}")
+                            continue
+
+                        logger.info(f"Loaded {len(dep_df)} rows from table {dep}")
+                    except Exception as e:
+                        # 数据源未配置且表不存在
+                        raise ValueError(
+                            f"Data source '{dep}' not found. "
+                            f"Please ensure the table exists or add configuration in factor_data_config table. "
+                            f"Error: {e}"
+                        )
 
             # 合并数据
             if merged_df is None:
                 merged_df = dep_df
             else:
+                # 检查是否有重复的列名（除了 ts_code 和 trade_date）
+                common_cols = set(merged_df.columns) & set(dep_df.columns) - {"ts_code", "trade_date"}
+                if common_cols:
+                    logger.warning(f"Duplicate columns found when merging {dep}: {common_cols}")
+                    # 重命名重复列
+                    for col in common_cols:
+                        dep_df = dep_df.rename({col: f"{col}_{dep}"})
+
+                # 使用 inner join 避免产生过多的 null 值
+                # 如果需要 outer join，可以在因子代码中手动处理
                 merged_df = merged_df.join(
                     dep_df,
                     on=["ts_code", "trade_date"],
-                    how="outer"
+                    how="inner"  # 改为 inner join，只保留所有表都有的数据
                 )
+                logger.debug(f"After joining {dep}: {len(merged_df)} rows")
 
         if merged_df is None or merged_df.is_empty():
             logger.warning(f"No data loaded from any dependency for factor {context.factor_id}")
@@ -544,16 +591,22 @@ class ResultWriterProcessor(IProcessor):
         # 写入数据库（upsert）
         try:
             if compute_mode == "full":
-                # 全量模式：清空整个表
+                # 全量模式：清空整个因子的所有数据
                 rows = self.db.upsert(table_name, result_df, primary_keys, is_full_sync=True)
             else:
-                # 增量模式：按 trade_date 逐个清空并写入
+                # 增量模式：按 trade_date 逐个清空并写入（精确到 factor_id）
                 if "trade_date" in result_df.columns:
                     trade_dates = result_df["trade_date"].unique().to_list()
                     total_rows = 0
                     for trade_date in trade_dates:
                         date_df = result_df.filter(pl.col("trade_date") == trade_date)
-                        self.db.upsert(table_name, date_df, primary_keys, is_full_sync=False, trade_date=trade_date)
+                        # 传入 factor_id，确保只删除该因子在该日期的数据
+                        self.db.upsert(
+                            table_name, date_df, primary_keys,
+                            is_full_sync=False,
+                            trade_date=trade_date,
+                            factor_id=factor_id
+                        )
                         total_rows += len(date_df)
                     rows = total_rows
                 else:

@@ -158,10 +158,11 @@ class DolphinDBClient:
         known_columns: Optional[List[str]] = None,
         is_full_sync: bool = False,
         trade_date: Optional[str] = None,
+        factor_id: Optional[str] = None,
     ) -> None:
         """插入或更新数据"""
         return self._data_operations.upsert(
-            table_name, df, key_columns, known_columns, is_full_sync, trade_date
+            table_name, df, key_columns, known_columns, is_full_sync, trade_date, factor_id
         )
 
     def upsert_daily(self, df: pl.DataFrame) -> None:

@@ -16,9 +16,10 @@ interface TestPanelProps {
   code: string;
   dependsOn?: string[];
   preprocess?: PreprocessOptions;
+  lookbackDays?: number;  // 回溯天数
 }
 
-const TestPanel: React.FC<TestPanelProps> = ({ code, dependsOn, preprocess }) => {
+const TestPanel: React.FC<TestPanelProps> = ({ code, dependsOn, preprocess, lookbackDays = 60 }) => {
   const [dateRange, setDateRange] = useState<[string, string]>(['', '']);
   const [testing, setTesting] = useState<boolean>(false);
   const [testResult, setTestResult] = useState<TestResult | null>(null);
@@ -55,6 +56,7 @@ const TestPanel: React.FC<TestPanelProps> = ({ code, dependsOn, preprocess }) =>
         depends_on: dependsOn || ['sync_daily_data'],
         params: {},
         preprocess: preprocess || undefined,
+        lookback_days: lookbackDays,
       });
 
       const d = res.data;
@@ -112,7 +114,7 @@ const TestPanel: React.FC<TestPanelProps> = ({ code, dependsOn, preprocess }) =>
   return (
     <div style={{ marginTop: 8, borderTop: '1px solid var(--border-color)', paddingTop: 8 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-        <span style={{ color: 'var(--text-secondary)', fontSize: 12, whiteSpace: 'nowrap' }}>测试区间:</span>
+        <span style={{ color: 'var(--text-secondary)', fontSize: 12, whiteSpace: 'nowrap' }}>因子计算区间:</span>
         <DatePicker
           type="dateRange"
           size="small"
@@ -139,6 +141,11 @@ const TestPanel: React.FC<TestPanelProps> = ({ code, dependsOn, preprocess }) =>
           编译测试
         </Button>
       </div>
+      {dateRange[0] && dateRange[1] && (
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8, paddingLeft: 4 }}>
+          数据加载范围将根据回溯天数({lookbackDays}天)自动向前扩展
+        </div>
+      )}
 
       {/* 日志面板 */}
       {(testLogs.length > 0 || testStdout || testError) && (
@@ -196,23 +203,11 @@ const TestPanel: React.FC<TestPanelProps> = ({ code, dependsOn, preprocess }) =>
           <div style={{ display: 'flex', gap: 12, marginBottom: 8, fontSize: 12 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
               <span style={{ color: 'var(--text-secondary)' }}>总行数:</span>
-              <div style={{ color: 'var(--color-primary)', fontWeight: 600 }}>{testResult.stats?.total_rows}</div>
+              <div style={{ color: 'var(--color-primary)', fontWeight: 600 }}>{testResult.stats?.total_rows?.toLocaleString()}</div>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <span style={{ color: 'var(--text-secondary)' }}>股票数:</span>
-              <div style={{ color: 'var(--color-primary)', fontWeight: 600 }}>{testResult.stats?.stock_count}</div>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <span style={{ color: 'var(--text-secondary)' }}>均值:</span>
-              <div style={{ color: 'var(--color-primary)', fontWeight: 600 }}>
-                {testResult.stats?.factor_mean?.toFixed(4)}
-              </div>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <span style={{ color: 'var(--text-secondary)' }}>标准差:</span>
-              <div style={{ color: 'var(--color-primary)', fontWeight: 600 }}>
-                {testResult.stats?.factor_std?.toFixed(4)}
-              </div>
+              <span style={{ color: 'var(--text-secondary)' }}>有效值:</span>
+              <div style={{ color: 'var(--color-gain)', fontWeight: 600 }}>{testResult.stats?.count?.toLocaleString()}</div>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
               <span style={{ color: 'var(--text-secondary)' }}>空值数:</span>
@@ -222,7 +217,37 @@ const TestPanel: React.FC<TestPanelProps> = ({ code, dependsOn, preprocess }) =>
                   fontWeight: 600,
                 }}
               >
-                {testResult.stats?.null_count}
+                {testResult.stats?.null_count?.toLocaleString()}
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ color: 'var(--text-secondary)' }}>最小值:</span>
+              <div style={{ color: 'var(--color-primary)', fontWeight: 600 }}>
+                {testResult.stats?.min != null ? testResult.stats.min.toFixed(4) : '-'}
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ color: 'var(--text-secondary)' }}>最大值:</span>
+              <div style={{ color: 'var(--color-primary)', fontWeight: 600 }}>
+                {testResult.stats?.max != null ? testResult.stats.max.toFixed(4) : '-'}
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ color: 'var(--text-secondary)' }}>均值:</span>
+              <div style={{ color: 'var(--color-primary)', fontWeight: 600 }}>
+                {testResult.stats?.mean != null ? testResult.stats.mean.toFixed(4) : '-'}
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ color: 'var(--text-secondary)' }}>标准差:</span>
+              <div style={{ color: 'var(--color-primary)', fontWeight: 600 }}>
+                {testResult.stats?.std != null ? testResult.stats.std.toFixed(4) : '-'}
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ color: 'var(--text-secondary)' }}>中位数:</span>
+              <div style={{ color: 'var(--color-primary)', fontWeight: 600 }}>
+                {testResult.stats?.median != null ? testResult.stats.median.toFixed(4) : '-'}
               </div>
             </div>
           </div>

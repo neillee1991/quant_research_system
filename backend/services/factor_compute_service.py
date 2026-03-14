@@ -428,7 +428,8 @@ class FactorComputeService:
         df: pl.DataFrame,
         table_name: str,
         primary_keys: list,
-        compute_mode: str = "incremental"
+        compute_mode: str = "incremental",
+        factor_id: Optional[str] = None
     ) -> int:
         """保存结果到自定义表 (迁移自 ProductionEngine)
 
@@ -437,6 +438,7 @@ class FactorComputeService:
             table_name: 目标表名
             primary_keys: 主键列表
             compute_mode: 计算模式 ("full" 或 "incremental")
+            factor_id: 因子ID（用于精确删除）
 
         Returns:
             写入的行数
@@ -481,7 +483,7 @@ class FactorComputeService:
                         date_df = df.filter(pl.col("trade_date") == trade_date)
                         self.db.upsert(
                             table_name, date_df, primary_keys,
-                            is_full_sync=False, trade_date=trade_date
+                            is_full_sync=False, trade_date=trade_date, factor_id=factor_id
                         )
                 else:
                     # 没有 trade_date 列，直接写入

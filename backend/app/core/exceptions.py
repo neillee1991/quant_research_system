@@ -274,11 +274,15 @@ async def general_exception_handler(request: Request, exc: Exception) -> JSONRes
         }
     )
 
+    # 检查是否为开发环境（通过环境变量或配置）
+    import os
+    is_debug = os.getenv("DEBUG", "false").lower() == "true"
+
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={
             "error": "InternalServerError",
             "message": "An unexpected error occurred",
-            "detail": str(exc) if logger.isEnabledFor(10) else "Internal server error"
+            "detail": str(exc) if is_debug else "Internal server error"
         }
     )

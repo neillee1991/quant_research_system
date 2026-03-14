@@ -123,22 +123,16 @@ def unregister_factor(factor_id: str):
 
 
 def discover_factors(factors_dir: str = None, db_client=None, force_refresh: bool = False):
-    """自动发现并注册因子
+    """从数据库加载因子（纯数据库驱动）
 
-    优先级：
-    1. 从数据库加载（如果提供了 db_client）
-    2. 从 factors/ 目录导入 Python 文件（作为备用和初始化示例）
-
-    可安全多次调用，Python import 缓存保证幂等。
-    默认使用5分钟缓存，避免热路径重复发现。
+    不再从 Python 文件扫描，所有因子管理通过数据库完成。
+    默认使用5分钟缓存，避免热路径重复加载。
 
     Args:
-        factors_dir: Python 因子文件目录，默认为 engine/production/factors
-        db_client: DolphinDB 客户端，如果提供则从数据库加载因子
+        factors_dir: 已废弃，保留参数以兼容旧代码
+        db_client: DolphinDB 客户端（必需）
         force_refresh: 强制刷新，忽略缓存
     """
-    import os
-    import importlib
     import logging
 
     logger = logging.getLogger(__name__)
@@ -155,89 +149,18 @@ def discover_factors(factors_dir: str = None, db_client=None, force_refresh: boo
     # 更新缓存时间
     _discovery_cache["last_discovery_time"] = datetime.now()
 
-    # 1. 优先从数据库加载
-    db_loaded_factors = set()
-    if db_client is not None:
-        try:
-            before_count = len(_factor_registry)
-            load_factors_from_db(db_client)
-            after_count = len(_factor_registry)
-            db_loaded_factors = set(_factor_registry.keys())
-            logger.info(f"Loaded {after_count - before_count} factors from database")
-        except Exception as e:
-            logger.warning(f"Failed to load factors from database: {e}")
-
-    # 2. 从 Python 文件加载（仅加载数据库中没有的因子）
-    if factors_dir is None:
-        factors_dir = os.path.join(os.path.dirname(__file__), "factors")
-
-    if not os.path.isdir(factors_dir):
+    # 从数据库加载所有因子
+    if db_client is None:
+        logger.warning("No db_client provided, cannot load factors")
         return
 
-    for fname in sorted(os.listdir(factors_dir)):
-        if fname.endswith(".py") and not fname.startswith("__"):
-            module_name = f"engine.production.factors.{fname[:-3]}"
-            try:
-                # 记录导入前的因子列表
-                before_import = set(_factor_registry.keys())
-                importlib.import_module(module_name)
-                # 检查新导入的因子
-                after_import = set(_factor_registry.keys())
-                new_factors = after_import - before_import
-
-                # 如果新导入的因子已在数据库中，恢复 DB 版本（DB 优先）
-                for fid in new_factors:
-                    if fid in db_loaded_factors:
-                        logger.warning(f"Factor {fid} loaded from both DB and file {fname}, using DB version")
-                        # 恢复 DB 版本：从 db_loaded_factors 对应的注册项中取回
-                        # db_loaded_factors 是 set，需要从 _factor_registry 的备份恢复
-                        # 由于 DB 版本已被文件覆盖，需要重新从 DB 加载该因子
-                        if db_client is not None:
-                            try:
-                                _restore_factor_from_db(db_client, fid)
-                            except Exception as restore_err:
-                                logger.warning(f"Failed to restore DB version of {fid}: {restore_err}")
-
-            except Exception as e:
-                logger.warning(f"Failed to import factor module {module_name}: {e}")
-
-
-def _restore_factor_from_db(db_client, factor_id: str):
-    """从数据库重新加载单个因子，覆盖文件版本（DB 优先）"""
-    import json
-    df = db_client.query(
-        "SELECT factor_id, description, category, compute_mode, storage_target, depends_on, params, code "
-        "FROM factor_metadata WHERE factor_id = %s AND code IS NOT NULL AND code != ''",
-        (factor_id,)
-    )
-    if df.is_empty():
-        return
-    row = df.to_dicts()[0]
-    code = row.get("code", "")
-    if not code:
-        return
-    depends_on = json.loads(row.get("depends_on") or "[]")
-    params = json.loads(row.get("params") or "{}")
-    namespace = {}
-    exec(code, namespace)  # nosec - code from trusted DB, same as load_factors_from_db
-    compute_func = next(
-        (obj for name, obj in namespace.items() if callable(obj) and (name.startswith("compute") or name == "main")),
-        None
-    )
-    if compute_func is None:
-        return
-    storage = StorageConfig(target=row.get("storage_target") or "factor_values")
-    definition = FactorDefinition(
-        factor_id=factor_id,
-        func=compute_func,
-        description=row.get("description") or "",
-        category=row.get("category") or "custom",
-        compute_mode=row.get("compute_mode") or "incremental",
-        depends_on=depends_on,
-        params=params,
-        storage=storage,
-    )
-    _factor_registry[factor_id] = definition
+    try:
+        before_count = len(_factor_registry)
+        load_factors_from_db(db_client)
+        after_count = len(_factor_registry)
+        logger.info(f"Loaded {after_count - before_count} factors from database (total: {after_count})")
+    except Exception as e:
+        logger.error(f"Failed to load factors from database: {e}", exc_info=True)
 
 
 def load_factors_from_db(db_client):

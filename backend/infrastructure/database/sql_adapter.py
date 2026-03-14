@@ -71,6 +71,7 @@ class SQLAdapter:
         sql = re.sub(r"\bAVG\b", "avg", sql)
         sql = re.sub(r"\bMAX\b", "max", sql)
         sql = re.sub(r"\bMIN\b", "min", sql)
+        sql = re.sub(r"\bDISTINCT\b", "DISTINCT", sql)  # 保持 DISTINCT 大写（DolphinDB 要求）
 
         # 2. CURRENT_TIMESTAMP → now()
         sql = re.sub(r"\bCURRENT_TIMESTAMP\b", "now()", sql, flags=re.IGNORECASE)

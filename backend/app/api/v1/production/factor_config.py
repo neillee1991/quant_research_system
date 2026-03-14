@@ -134,7 +134,7 @@ async def get_resolved_data_config():
 
 @router.get("/production/available-tables")
 async def get_available_tables():
-    """获取所有可用的数据表（sync任务表 + ETL任务表）"""
+    """获取所有可用的数据表（sync任务表 + ETL任务表 + 因子表）"""
     cached = api_cache.get("production:available-tables")
     if cached is not None:
         return cached
@@ -149,7 +149,7 @@ async def get_available_tables():
                     tables.append({
                         "value": row["table_name"],
                         "label": row["table_name"],
-                        "description": row.get("description", ""),
+                        "description": row.get("description", "") or f"同步任务: {row['task_id']}",
                         "type": "sync"
                     })
         except Exception as e:
@@ -163,11 +163,26 @@ async def get_available_tables():
                     tables.append({
                         "value": row["table_name"],
                         "label": row["table_name"],
-                        "description": row.get("description", ""),
+                        "description": row.get("description", "") or f"ETL任务: {row['task_id']}",
                         "type": "etl"
                     })
         except Exception as e:
             logger.warning(f"Failed to load ETL tasks: {e}")
+
+        # 获取所有因子表（factor_values 作为可依赖的数据源）
+        try:
+            # 从 factor_metadata 获取所有因子（去重）
+            factor_df = db_client.query("SELECT DISTINCT factor_id, description FROM factor_metadata ORDER BY factor_id")
+            if not factor_df.is_empty():
+                for row in factor_df.to_dicts():
+                    tables.append({
+                        "value": f"factor:{row['factor_id']}",  # 使用 factor: 前缀区分
+                        "label": row['factor_id'],  # 不显示"因子:"前缀
+                        "description": row.get("description", "") or "因子数据",
+                        "type": "factor"
+                    })
+        except Exception as e:
+            logger.warning(f"Failed to load factors: {e}")
 
         response = {"status": "success", "data": tables}
         api_cache.set("production:available-tables", response, ttl=300)
@@ -434,4 +449,94 @@ async def delete_index_pool(index_code: str):
 
     except Exception as e:
         logger.error(f"Failed to delete index pool: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================== DataFrame Schema Preview ====================
+
+class DataFrameSchemaRequest(BaseModel):
+    """DataFrame schema 预览请求"""
+    depends_on: List[str]
+
+
+@router.post("/production/dataframe-schema")
+async def get_dataframe_schema(req: DataFrameSchemaRequest):
+    """根据依赖的数据源，返回预期的 DataFrame schema（列名和类型）
+
+    用于在因子编辑页面展示用户选择的数据依赖会产生什么样的 DataFrame
+    """
+    try:
+        if not req.depends_on:
+            return {"status": "success", "data": {"columns": []}}
+
+        columns = []
+        seen_columns = set()
+
+        # 固定列：ts_code 和 trade_date（所有表都有）
+        columns.append({"name": "ts_code", "type": "SYMBOL", "source": "所有表", "description": "股票代码"})
+        columns.append({"name": "trade_date", "type": "DATE", "source": "所有表", "description": "交易日期"})
+        seen_columns.add("ts_code")
+        seen_columns.add("trade_date")
+
+        for dep in req.depends_on:
+            # 处理因子依赖
+            if dep.startswith("factor:"):
+                factor_id = dep[7:]
+                col_name = factor_id
+                if col_name not in seen_columns:
+                    columns.append({
+                        "name": col_name,
+                        "type": "Float64",
+                        "source": f"因子: {factor_id}",
+                        "description": "因子值"
+                    })
+                    seen_columns.add(col_name)
+            else:
+                # 处理表依赖（sync/etl 任务表）
+                try:
+                    # 查询 DolphinDB 表的原始 schema
+                    schema_result = db_client._session.run(f'schema(loadTable("dfs://quant", "{dep}"))')
+                    col_defs = schema_result.get('colDefs')
+
+                    if col_defs is not None and not col_defs.empty:
+                        for _, row in col_defs.iterrows():
+                            col_name = row['name']
+                            col_type = row['typeString']
+
+                            if col_name in ["ts_code", "trade_date"]:
+                                continue  # 跳过已添加的固定列
+
+                            if col_name not in seen_columns:
+                                columns.append({
+                                    "name": col_name,
+                                    "type": col_type,  # 使用 DolphinDB 原始类型
+                                    "source": dep,
+                                    "description": ""
+                                })
+                                seen_columns.add(col_name)
+                            else:
+                                # 列名冲突，会被重命名
+                                renamed = f"{col_name}_{dep}"
+                                columns.append({
+                                    "name": renamed,
+                                    "type": col_type,
+                                    "source": dep,
+                                    "description": f"重命名（原: {col_name}）"
+                                })
+                except Exception as e:
+                    logger.warning(f"Failed to get schema for {dep}: {e}")
+                    # 表不存在或查询失败，跳过
+                    continue
+
+        return {
+            "status": "success",
+            "data": {
+                "columns": columns,
+                "total_columns": len(columns),
+                "note": "实际列名可能因数据源冲突而自动重命名"
+            }
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get dataframe schema: {e}")
         raise HTTPException(status_code=500, detail=str(e))

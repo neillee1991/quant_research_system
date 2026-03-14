@@ -114,14 +114,15 @@ class DataOperations:
         known_columns: Optional[List[str]] = None,
         is_full_sync: bool = False,
         trade_date: Optional[str] = None,
+        factor_id: Optional[str] = None,
     ) -> None:
         """
         插入或更新数据
 
         统一规则：
         - 全量任务 (is_full_sync=True): 清空整个表，然后写入新数据
-        - 增量任务 (is_full_sync=False): 清空指定 trade_date 的数据，然后写入新数据
-        - 如果 is_full_sync=False 且 trade_date=None: 直接插入（用于元数据表等无需清空的场景）
+        - 增量任务 (is_full_sync=False, trade_date提供): 清空指定 trade_date + factor_id 的数据，然后写入新数据
+        - 如果 is_full_sync=False 且 trade_date=None: 根据 key_columns 删除已存在的行，然后插入
 
         Args:
             table_name: 表名
@@ -130,6 +131,7 @@ class DataOperations:
             known_columns: 已知列顺序（跳过 schema 查询，用于刚建表后首次写入）
             is_full_sync: 是否全量同步
             trade_date: 交易日期（增量同步时提供）
+            factor_id: 因子ID（增量同步时提供，用于精确删除）
         """
         if df.is_empty():
             logger.warning(f"空 DataFrame，跳过写入: {table_name}")
@@ -154,15 +156,48 @@ class DataOperations:
                     delete_stmt = f"delete from {table_name}_handle;"
                     logger.info(f"[全量同步] 清空表 {table_name}")
                 elif trade_date:
-                    # 增量同步：只清空指定 trade_date 的数据
-                    # 需要转义日期值
+                    # 增量同步：清空指定 trade_date + factor_id 的数据
                     from infrastructure.database.type_converter import TypeConverter
                     escaped_date = TypeConverter.escape_value(trade_date)
-                    delete_stmt = f"delete from {table_name}_handle where trade_date = {escaped_date};"
-                    logger.info(f"[增量同步] 清空表 {table_name} 中 trade_date={trade_date} 的数据")
+
+                    # 如果提供了 factor_id，则精确删除 trade_date + factor_id 的数据
+                    if factor_id:
+                        escaped_factor_id = TypeConverter.escape_value(factor_id)
+                        delete_stmt = f"delete from {table_name}_handle where trade_date = {escaped_date} and factor_id = {escaped_factor_id};"
+                        logger.info(f"[增量同步] 清空表 {table_name} 中 trade_date={trade_date}, factor_id={factor_id} 的数据")
+                    else:
+                        # 兼容旧逻辑：只按 trade_date 删除（用于非因子表）
+                        delete_stmt = f"delete from {table_name}_handle where trade_date = {escaped_date};"
+                        logger.info(f"[增量同步] 清空表 {table_name} 中 trade_date={trade_date} 的数据")
                 else:
-                    # 无需清空，直接插入（元数据表等场景）
-                    delete_stmt = ""
+                    # 根据 key_columns 删除已存在的行
+                    if key_columns:
+                        from infrastructure.database.type_converter import TypeConverter
+                        # 获取要删除的 key 值
+                        key_values = []
+                        for key_col in key_columns:
+                            if key_col in df.columns:
+                                unique_vals = df[key_col].unique().to_list()
+                                key_values.append((key_col, unique_vals))
+
+                        # 构建 WHERE 条件
+                        if key_values:
+                            conditions = []
+                            for key_col, vals in key_values:
+                                if len(vals) == 1:
+                                    escaped_val = TypeConverter.escape_value(vals[0])
+                                    conditions.append(f"{key_col} = {escaped_val}")
+                                else:
+                                    escaped_vals = [TypeConverter.escape_value(v) for v in vals]
+                                    conditions.append(f"{key_col} in [{', '.join(escaped_vals)}]")
+
+                            where_clause = " and ".join(conditions)
+                            delete_stmt = f"delete from {table_name}_handle where {where_clause};"
+                            logger.info(f"[Upsert] 删除表 {table_name} 中 {where_clause} 的数据")
+                        else:
+                            delete_stmt = ""
+                    else:
+                        delete_stmt = ""
 
                 # 执行：删除 + 插入
                 if delete_stmt:
@@ -179,7 +214,7 @@ class DataOperations:
                         f"undef('{tmp_var}')"
                     )
 
-            mode_desc = "全量" if is_full_sync else (f"增量(trade_date={trade_date})" if trade_date else "直接插入")
+            mode_desc = "全量" if is_full_sync else (f"增量(trade_date={trade_date}, factor_id={factor_id})" if trade_date and factor_id else f"增量(trade_date={trade_date})" if trade_date else f"Upsert(keys={key_columns})")
             logger.info(f"写入 {len(df)} 行到 {table_name}，模式: {mode_desc}")
         except Exception as e:
             logger.error(f"写入失败 [{table_name}]: {e}")
@@ -431,7 +466,10 @@ class DataOperations:
                     pl.col(col).str.to_date("%Y%m%d", strict=False).alias(col)
                 )
 
+        # 转换为 Pandas
+        logger.debug(f"转换前 Polars DataFrame 列: {df.columns}")
         pdf = df.select(select_columns).to_pandas() if select_columns else df.to_pandas()
+        logger.debug(f"转换后 Pandas DataFrame 列: {pdf.columns.tolist()}")
 
         for col in date_cols:
             if col in pdf.columns and pd.api.types.is_datetime64_any_dtype(pdf[col]):
@@ -444,6 +482,14 @@ class DataOperations:
                 f"写入 {table_name} 时列名无交集: "
                 f"表列={table_cols}, DataFrame列={pdf.columns.tolist()}"
             )
+
+        # 调试：检查列对齐情况
+        missing_in_df = [c for c in table_cols if c not in pdf.columns]
+        if missing_in_df:
+            logger.warning(
+                f"写入 {table_name} 时，表中存在但 DataFrame 中缺失的列: {missing_in_df}"
+            )
+
         pdf = pdf[ordered_cols]
 
         # 上传临时变量

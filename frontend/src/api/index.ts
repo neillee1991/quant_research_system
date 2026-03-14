@@ -147,8 +147,12 @@ export const productionApi = {
   updateFactorCode: (factorId: string, filename: string, code: string) =>
     api.put(`/production/factors/${factorId}/code`, { filename, code }),
 
+  // DataFrame schema 预览
+  getDataFrameSchema: (dependsOn: string[]) =>
+    api.post('/production/dataframe-schema', { depends_on: dependsOn }),
+
   // 因子代码测试
-  testFactorCode: (data: { code: string; start_date: string; end_date: string; depends_on?: string[]; params?: Record<string, any>; preprocess?: PreprocessOptions }) =>
+  testFactorCode: (data: { code: string; start_date: string; end_date: string; depends_on?: string[]; params?: Record<string, any>; preprocess?: PreprocessOptions; lookback_days?: number }) =>
     longRunningApi.post('/production/factors/test', data),
 
   // 因子数据探查

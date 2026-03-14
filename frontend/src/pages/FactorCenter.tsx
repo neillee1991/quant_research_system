@@ -26,22 +26,22 @@ import type {
 } from '../types';
 
 const formatRunParams = (record: FactorRunRecord): string => {
-  const parts: string[] = [];
-  const start = record.start_date || '';
-  const end = record.end_date || '';
-  if (start || end) parts.push(`${start}~${end}`);
-  if (record.preprocess) {
-    try {
-      const pp = typeof record.preprocess === 'string' ? JSON.parse(record.preprocess) : record.preprocess;
-      const adjMap: Record<string, string> = { forward: '前复权', backward: '后复权', none: '不复权' };
-      if (pp.adjust_price) parts.push(adjMap[pp.adjust_price] || pp.adjust_price);
-      if (pp.filter_st === false) parts.push('含ST');
-      if (pp.filter_new_stock === false) parts.push('含次新');
-      if (pp.handle_suspension === false) parts.push('含停牌');
-      if (pp.mark_limit === false) parts.push('不标涨跌停');
-    } catch { /* ignore */ }
-  }
-  return parts.join(' | ') || '-';
+  const formatDate = (dateStr: string) => {
+    if (!dateStr) return '';
+    // 如果是 YYYYMMDD 格式，转换为 YYYY-MM-DD
+    if (/^\d{8}$/.test(dateStr)) {
+      return `${dateStr.slice(0, 4)}-${dateStr.slice(4, 6)}-${dateStr.slice(6, 8)}`;
+    }
+    // 如果包含时间戳，只取日期部分
+    if (dateStr.includes(' ')) {
+      return dateStr.split(' ')[0];
+    }
+    return dateStr;
+  };
+
+  const start = formatDate(record.start_date || '');
+  const end = formatDate(record.end_date || '');
+  return (start && end) ? `${start}~${end}` : (start || end || '-');
 };
 
 // ==================== 因子详情/编辑 统一 SideSheet ====================
@@ -67,14 +67,18 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
   const { mode } = useThemeStore();
   const factorId = factor?.factor_id;
   const [activeTab, setActiveTab] = useState<string>('edit');
+  // 跟踪上次加载的因子 ID，避免保存后重新加载代码
+  const lastLoadedFactorIdRef = useRef<string | null>(null);
   // 编辑 - use individual useState instead of Form.useForm()
   const [editDesc, setEditDesc] = useState<string>('');
   const [editCategory, setEditCategory] = useState<string>('');
   const [editComputeMode, setEditComputeMode] = useState<string>('');
   const [editDependsOn, setEditDependsOn] = useState<string[]>([]);
-  const [editWindow, setEditWindow] = useState<number | undefined>(undefined);
   const [editLookbackDays, setEditLookbackDays] = useState<number>(60);
   const [editSaving, setEditSaving] = useState<boolean>(false);
+  // DataFrame schema 预览
+  const [dfSchema, setDfSchema] = useState<any>(null);
+  const [schemaLoading, setSchemaLoading] = useState<boolean>(false);
   // 预处理
   const [ppEdit, setPpEdit] = useState<PreprocessOptions>({ ...DEFAULT_PREPROCESS });
   // 代码
@@ -82,7 +86,6 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
   const [editedCode, setEditedCode] = useState<string>('');
   const [codeChanged, setCodeChanged] = useState<boolean>(false);
   const [codeLoading, setCodeLoading] = useState<boolean>(false);
-  const [codeSaving, setCodeSaving] = useState<boolean>(false);
   // 统计 & 数据
   const [stats, setStats] = useState<FactorAnalysisResult | null>(null);
   const [statsLoading, setStatsLoading] = useState<boolean>(false);
@@ -94,6 +97,8 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
   const [historyLoading, setHistoryLoading] = useState<boolean>(false);
   // 数据源注解
   const [dataConfigLabels, setDataConfigLabels] = useState<Record<string, DataConfigLabel>>({});
+  // 可用表列表
+  const [availableTables, setAvailableTables] = useState<Array<{value: string; label: string; description: string; type: string}>>([]);
   // 编辑器引用
   const codeEditorRef = useRef<unknown>(null);
 
@@ -109,12 +114,58 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
     }
   };
 
+  // 加载 DataFrame schema
+  const loadDfSchema = async (dependsOn: string[]) => {
+    if (!dependsOn || dependsOn.length === 0) {
+      setDfSchema(null);
+      return;
+    }
+    setSchemaLoading(true);
+    try {
+      const res = await productionApi.getDataFrameSchema(dependsOn);
+      console.log('[DataFrame Schema] Response:', JSON.stringify(res.data, null, 2));
+      // 后端返回 { status: "success", data: { columns: [...], total_columns: N, note: "..." } }
+      const schemaData = res.data?.data || res.data;
+      console.log('[DataFrame Schema] Schema data:', schemaData);
+      setDfSchema(schemaData);
+    } catch (e: any) {
+      console.error('Failed to load DataFrame schema:', e);
+      setDfSchema(null);
+    } finally {
+      setSchemaLoading(false);
+    }
+  };
+
+  // 当依赖变化时，自动加载 schema
+  useEffect(() => {
+    if (open && editDependsOn.length > 0) {
+      loadDfSchema(editDependsOn);
+    } else if (open) {
+      // 依赖为空时清空 schema
+      setDfSchema(null);
+    }
+  }, [editDependsOn, open]);
+
   // 打开时初始化
   useEffect(() => {
-    if (!factor || !open) return;
+    if (!factor || !open) {
+      // 关闭时重置 ref
+      if (!open) {
+        lastLoadedFactorIdRef.current = null;
+      }
+      return;
+    }
     setActiveTab(initialTab || 'edit');
     setCodeChanged(false);
-    setCode(null);
+    // 只在首次打开或切换因子时重新加载代码
+    // 使用 ref 来跟踪上次加载的因子 ID，避免保存后重新加载
+    const currentFactorId = factor.factor_id;
+    const shouldReloadCode = lastLoadedFactorIdRef.current !== currentFactorId;
+
+    if (shouldReloadCode) {
+      setCode(null);
+      lastLoadedFactorIdRef.current = currentFactorId;
+    }
     setStats(null);
     setFactorData([]);
     setDataFilter({});
@@ -126,28 +177,33 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
     const rawDeps = factor.depends_on;
     setEditDependsOn(Array.isArray(rawDeps) ? rawDeps : (rawDeps ? (() => { try { return JSON.parse(rawDeps); } catch { return []; } })() : []));
     const params = factor.params as any;
-    setEditWindow(params?.window ?? undefined);
     setEditLookbackDays(params?.lookback_days ?? 60);
     // 预处理
     const pp = params?.preprocess || {};
     console.log('[FactorDrawer] 加载因子配置:', { factor_id: factor.factor_id, params: factor.params, preprocess: pp });
     setPpEdit({ ...DEFAULT_PREPROCESS, ...pp });
-    // 统计
-    setStatsLoading(true);
-    if (factorId) {
-      productionApi.getFactorStats(factorId).then(r => setStats(r.data?.data)).catch(() => {}).finally(() => setStatsLoading(false));
-    }
-    // 代码 - 直接加载
-    setCodeLoading(true);
-    if (factorId) {
-      productionApi.getFactorCode(factorId).then(res => {
-        const d = res.data?.data;
-        setCode(d);
-        setEditedCode(d?.code || '');
-      }).catch(() => setCode(null)).finally(() => setCodeLoading(false));
+    // 统计 - 暂时禁用，因为 DolphinDB COUNT(DISTINCT) 有兼容性问题
+    // setStatsLoading(true);
+    // if (factorId) {
+    //   productionApi.getFactorStats(factorId).then(r => setStats(r.data?.data)).catch(() => {}).finally(() => setStatsLoading(false));
+    // }
+    setStats(null);  // 清空统计数据
+    setStatsLoading(false);
+    // 代码 - 只在需要时加载
+    if (shouldReloadCode) {
+      setCodeLoading(true);
+      if (factorId) {
+        productionApi.getFactorCode(factorId).then(res => {
+          const d = res.data?.data;
+          setCode(d);
+          setEditedCode(d?.code || '');
+        }).catch(() => setCode(null)).finally(() => setCodeLoading(false));
+      }
     }
     // 数据源注解
     productionApi.getResolvedDataConfig().then(r => setDataConfigLabels(r.data?.data || {})).catch(() => {});
+    // 加载可用表列表
+    productionApi.getAvailableTables().then(r => setAvailableTables(r.data?.data || [])).catch(() => {});
   }, [factor, open, initialTab, factorId]);
 
   const loadData = useCallback(async () => {
@@ -173,7 +229,7 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
   useEffect(() => { if (activeTab === 'data' && factorId) loadData(); }, [activeTab, factorId, loadData]);
   useEffect(() => { if (activeTab === 'logs' && factorId) loadHistory(); }, [activeTab, factorId, loadHistory]);
 
-  // 保存编辑（基本信息 + 预处理）
+  // 保存编辑（基本信息 + 预处理 + 代码）
   const handleSave = async () => {
     if (!factor) return;
     setEditSaving(true);
@@ -182,45 +238,55 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
         Toast.error('因子ID不能为空');
         return;
       }
+
+      // 1. 保存基本信息和预处理配置
       const newParams = {
         ...(factor.params || {}),
         preprocess: ppEdit,
         lookback_days: editLookbackDays,
-        ...(editWindow !== undefined ? { window: editWindow } : {}),
       };
       const values = { description: editDesc, category: editCategory, compute_mode: editComputeMode, depends_on: editDependsOn, params: newParams };
-      console.log('[FactorDrawer] 保存预处理配置:', ppEdit);
       await productionApi.updateFactor(factorId, values);
+
+      // 2. 如果代码有修改，保存代码
+      if (codeChanged && code) {
+        await productionApi.updateFactorCode(factorId, code.filename, editedCode);
+        // 重新加载代码以确认保存成功
+        const res = await productionApi.getFactorCode(factorId);
+        const d = res.data?.data;
+        setCode(d);
+        setEditedCode(d?.code || '');
+        setCodeChanged(false);
+      }
+
       Toast.success('保存成功');
       onSaved();
     } catch (e: any) {
+      console.error('[handleSave] 保存失败:', e);
       if (e.response) Toast.error(e.response?.data?.detail || '保存失败');
     }
     setEditSaving(false);
   };
 
-  // 保存代码
-  const handleSaveCode = async () => {
-    if (!factorId || !code) return;
-    setCodeSaving(true);
-    try {
-      await productionApi.updateFactorCode(factorId, code.filename, editedCode);
-      Toast.success('代码已保存');
-      setCodeChanged(false);
-    } catch (e: any) { Toast.error(e.response?.data?.detail || '保存失败'); }
-    setCodeSaving(false);
-  };
-
   const dataColumns = [
     { title: '股票代码', dataIndex: 'ts_code', key: 'ts_code', width: 120 },
-    { title: '交易日期', dataIndex: 'trade_date', key: 'trade_date', width: 120 },
+    { title: '交易日期', dataIndex: 'trade_date', key: 'trade_date', width: 120,
+      render: (v: string) => {
+        if (!v) return '-';
+        // 格式化为 YYYY-MM-DD
+        if (/^\d{8}$/.test(v)) {
+          return `${v.slice(0, 4)}-${v.slice(4, 6)}-${v.slice(6, 8)}`;
+        }
+        if (v.includes(' ')) {
+          return v.split(' ')[0];
+        }
+        return v;
+      }
+    },
     { title: '因子值', dataIndex: 'factor_value', key: 'factor_value', render: (v: number) => v?.toFixed(6) },
   ];
 
   const logColumns = [
-    { title: '模式', dataIndex: 'mode', key: 'mode', width: 80,
-      render: (v: string) => <Tag color={v === 'incremental' ? 'cyan' : 'orange'}>{v === 'incremental' ? '增量' : '全量'}</Tag>
-    },
     { title: '状态', dataIndex: 'status', key: 'status', width: 80,
       render: (v: string) => <Tag color={v === 'success' ? 'green' : v === 'running' ? 'blue' : 'red'}>{v}</Tag>
     },
@@ -230,10 +296,10 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
         return <Tooltip content={text}><span style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>{text}</span></Tooltip>;
       }
     },
-    { title: '行数', dataIndex: 'rows_affected', key: 'rows', width: 100,
+    { title: '行数', dataIndex: 'rows', key: 'rows', width: 100,
       render: (v: number) => v?.toLocaleString() || '-'
     },
-    { title: '耗时', dataIndex: 'duration_seconds', key: 'dur', width: 80,
+    { title: '耗时', dataIndex: 'elapsed_seconds', key: 'dur', width: 80,
       render: (v: number) => v ? `${v.toFixed(1)}s` : '-'
     },
     { title: '时间', dataIndex: 'created_at', key: 'time',
@@ -274,43 +340,117 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
                   </div>
                 </div>
                 <div style={{ marginTop: 8 }}>
-                  <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>数据依赖</div>
+                  <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>同步任务数据源</div>
+                  <Select
+                    size="small" multiple style={{ width: '100%', marginBottom: 8 }}
+                    value={editDependsOn.filter(d => availableTables.find(t => t.value === d && t.type === 'sync'))}
+                    onChange={v => {
+                      const syncTables = v as string[];
+                      const otherTables = editDependsOn.filter(d => !availableTables.find(t => t.value === d && t.type === 'sync'));
+                      setEditDependsOn([...syncTables, ...otherTables]);
+                    }}
+                    optionList={availableTables.filter(t => t.type === 'sync').map(t => ({
+                      label: t.label,
+                      value: t.value,
+                      ...(t.description ? { otherKey: t.description } : {})
+                    }))}
+                    filter
+                    placeholder="选择同步任务表"
+                  />
+                  <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>ETL任务数据源</div>
+                  <Select
+                    size="small" multiple style={{ width: '100%', marginBottom: 8 }}
+                    value={editDependsOn.filter(d => availableTables.find(t => t.value === d && t.type === 'etl'))}
+                    onChange={v => {
+                      const etlTables = v as string[];
+                      const otherTables = editDependsOn.filter(d => !availableTables.find(t => t.value === d && t.type === 'etl'));
+                      setEditDependsOn([...etlTables, ...otherTables]);
+                    }}
+                    optionList={availableTables.filter(t => t.type === 'etl').map(t => ({
+                      label: t.label,
+                      value: t.value,
+                      ...(t.description ? { otherKey: t.description } : {})
+                    }))}
+                    filter
+                    placeholder="选择ETL任务表"
+                  />
+                  <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>依赖其他因子</div>
                   <Select
                     size="small" multiple style={{ width: '100%' }}
-                    value={editDependsOn}
-                    onChange={v => setEditDependsOn(v as string[])}
-                    optionList={[
-                      { label: 'sync_daily_data（日线行情 OHLCV）', value: 'sync_daily_data' },
-                      { label: 'sync_daily_basic（每日指标 PE/PB/市值）', value: 'sync_daily_basic' },
-                      { label: 'sync_adj_factor（复权因子）', value: 'sync_adj_factor' },
-                      { label: 'sync_moneyflow（资金流向）', value: 'sync_moneyflow' },
-                      { label: 'sync_stk_limit（涨跌停价格）', value: 'sync_stk_limit' },
-                      { label: 'sync_suspend_d（停牌信息）', value: 'sync_suspend_d' },
-                      { label: 'sync_stock_st（ST 状态）', value: 'sync_stock_st' },
-                      { label: 'sync_stock_basic（股票基本信息）', value: 'sync_stock_basic' },
-                    ]}
+                    value={editDependsOn.filter(d => availableTables.find(t => t.value === d && t.type === 'factor'))}
+                    onChange={v => {
+                      const factorTables = v as string[];
+                      const otherTables = editDependsOn.filter(d => !availableTables.find(t => t.value === d && t.type === 'factor'));
+                      setEditDependsOn([...factorTables, ...otherTables]);
+                    }}
+                    optionList={availableTables.filter(t => t.type === 'factor').map(t => ({
+                      label: t.label,
+                      value: t.value,
+                      ...(t.description ? { otherKey: t.description } : {})
+                    }))}
+                    filter
+                    placeholder="选择依赖的因子"
                   />
                 </div>
-                <div style={{ display: 'flex', gap: 16, marginTop: 8 }}>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>
-                      计算窗口 window
-                      <span style={{ color: 'var(--text-muted)', marginLeft: 4 }}>（滚动窗口大小，如 MA/RSI 的 N 天）</span>
+
+                {/* DataFrame Schema 预览 */}
+                {editDependsOn.length > 0 && (
+                  <div style={{ marginTop: 12, padding: 12, background: 'var(--semi-color-fill-0)', borderRadius: 4, border: '1px solid var(--semi-color-border)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                      <div style={{ color: 'var(--text-secondary)', fontSize: 12, fontWeight: 500 }}>
+                        预期 DataFrame 格式
+                      </div>
+                      {schemaLoading && <Spin size="small" />}
                     </div>
-                    <InputNumber size="small" min={1} max={500} style={{ width: '100%' }}
-                      placeholder="不填则由代码内部决定"
-                      value={editWindow}
-                      onChange={v => setEditWindow(v as number | undefined)} />
+                    {schemaLoading ? (
+                      <div style={{ textAlign: 'center', padding: '20px', color: 'var(--text-tertiary)', fontSize: 12 }}>
+                        加载中...
+                      </div>
+                    ) : dfSchema && dfSchema.columns && dfSchema.columns.length > 0 ? (
+                      <>
+                        <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginBottom: 6 }}>
+                          共 {dfSchema.total_columns} 列 · {dfSchema.note}
+                        </div>
+                        <div style={{ maxHeight: 200, overflowY: 'auto', fontSize: 11 }}>
+                          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                            <thead>
+                              <tr style={{ background: 'var(--semi-color-fill-1)', borderBottom: '1px solid var(--semi-color-border)' }}>
+                                <th style={{ padding: '4px 8px', textAlign: 'left', color: 'var(--text-secondary)', fontWeight: 500 }}>列名</th>
+                                <th style={{ padding: '4px 8px', textAlign: 'left', color: 'var(--text-secondary)', fontWeight: 500 }}>类型</th>
+                                <th style={{ padding: '4px 8px', textAlign: 'left', color: 'var(--text-secondary)', fontWeight: 500 }}>来源</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {dfSchema.columns.map((col: any, idx: number) => (
+                                <tr key={idx} style={{ borderBottom: '1px solid var(--semi-color-border)' }}>
+                                  <td style={{ padding: '4px 8px', fontFamily: 'monospace', color: 'var(--color-primary)' }}>{col.name}</td>
+                                  <td style={{ padding: '4px 8px', fontFamily: 'monospace', color: 'var(--text-secondary)' }}>{col.type}</td>
+                                  <td style={{ padding: '4px 8px', fontSize: 10, color: 'var(--text-tertiary)' }}>
+                                    {col.source}
+                                    {col.description && <span style={{ marginLeft: 4, color: 'var(--semi-color-warning)' }}>({col.description})</span>}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </>
+                    ) : (
+                      <div style={{ textAlign: 'center', padding: '20px', color: 'var(--text-tertiary)', fontSize: 12 }}>
+                        无法获取数据格式，请检查数据源配置
+                      </div>
+                    )}
                   </div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>
-                      向前回溯天数 lookback_days
-                      <span style={{ color: 'var(--text-muted)', marginLeft: 4 }}>（增量计算时额外加载的历史数据天数，默认 60）</span>
-                    </div>
-                    <InputNumber size="small" min={1} max={1000} style={{ width: '100%' }}
-                      value={editLookbackDays}
-                      onChange={v => setEditLookbackDays((v as number) || 60)} />
+                )}
+
+                <div style={{ marginTop: 8 }}>
+                  <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>
+                    向前回溯天数 lookback_days
+                    <span style={{ color: 'var(--text-muted)', marginLeft: 4 }}>（增量计算时额外加载的历史数据天数，默认 60）</span>
                   </div>
+                  <InputNumber size="small" min={1} max={1000} style={{ width: '100%' }}
+                    value={editLookbackDays}
+                    onChange={v => setEditLookbackDays((v as number) || 60)} />
                 </div>
                 {/* 统计概览 */}
                 <Spin spinning={statsLoading}>
@@ -405,11 +545,7 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
                   {code ? (
                     <div>
                       <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginBottom: 8 }}>
-                        <div style={{ display: 'flex', gap: 8 }}>
-                          <Button size="small" icon={<IconCode />} onClick={handleFormatCode}>格式化</Button>
-                          <Button size="small" theme="solid" icon={<IconSave />} disabled={!codeChanged}
-                            loading={codeSaving} onClick={handleSaveCode}>保存代码</Button>
-                        </div>
+                        <Button size="small" icon={<IconCode />} onClick={handleFormatCode}>格式化</Button>
                       </div>
                       <div style={{ border: '1px solid var(--border-color)', borderRadius: 4, overflow: 'hidden' }}>
                         <Editor height="320px" language="python" theme={mode === 'dark' ? 'vs-dark' : 'vs-light'}
@@ -425,7 +561,7 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
                           }}
                           options={{ minimap: { enabled: false }, fontSize: 13, scrollBeyondLastLine: false, automaticLayout: true, tabSize: 4, wordWrap: 'on' }} />
                       </div>
-                      <CodeTestPanel code={editedCode} preprocess={ppEdit} />
+                      <CodeTestPanel code={editedCode} dependsOn={editDependsOn} preprocess={ppEdit} lookbackDays={editLookbackDays} />
                     </div>
                   ) : <Empty description="未找到源代码文件" />}
                 </Spin>
@@ -480,10 +616,14 @@ interface TestLog {
 
 interface TestStats {
   total_rows?: number;
-  stock_count?: number;
-  factor_mean?: number;
-  factor_std?: number;
+  count?: number;
   null_count?: number;
+  null_ratio?: number;
+  min?: number;
+  max?: number;
+  mean?: number;
+  std?: number;
+  median?: number;
 }
 
 interface TestResultData {
@@ -525,7 +665,7 @@ def compute_custom(df: pl.DataFrame, params: dict) -> pl.DataFrame:
     )
 `;
 
-const CodeTestPanel: React.FC<{ code: string; dependsOn?: string[]; preprocess?: PreprocessOptions }> = ({ code, dependsOn, preprocess }) => {
+const CodeTestPanel: React.FC<{ code: string; dependsOn?: string[]; preprocess?: PreprocessOptions; lookbackDays?: number }> = ({ code, dependsOn, preprocess, lookbackDays = 60 }) => {
   const [dateRange, setDateRange] = useState<[string, string]>(['', '']);
   const [testing, setTesting] = useState<boolean>(false);
   const [testResult, setTestResult] = useState<TestResult | null>(null);
@@ -554,6 +694,7 @@ const CodeTestPanel: React.FC<{ code: string; dependsOn?: string[]; preprocess?:
         depends_on: dependsOn || ['sync_daily_data'],
         params: {},
         preprocess: preprocess || undefined,
+        lookback_days: lookbackDays,
       });
       const d = res.data;
       if (d.status === 'error') {
@@ -580,7 +721,19 @@ const CodeTestPanel: React.FC<{ code: string; dependsOn?: string[]; preprocess?:
 
   const resultColumns = [
     { title: '股票代码', dataIndex: 'ts_code', key: 'ts_code', width: 120 },
-    { title: '交易日期', dataIndex: 'trade_date', key: 'trade_date', width: 110 },
+    { title: '交易日期', dataIndex: 'trade_date', key: 'trade_date', width: 110,
+      render: (v: string) => {
+        if (!v) return '-';
+        // 格式化为 YYYY-MM-DD
+        if (/^\d{8}$/.test(v)) {
+          return `${v.slice(0, 4)}-${v.slice(4, 6)}-${v.slice(6, 8)}`;
+        }
+        if (v.includes(' ')) {
+          return v.split(' ')[0];
+        }
+        return v;
+      }
+    },
     { title: '因子值', dataIndex: 'factor_value', key: 'factor_value', width: 140,
       render: (v: number) => v != null ? v.toFixed(6) : <span style={{ color: 'var(--text-muted)' }}>null</span> },
   ];
@@ -653,23 +806,35 @@ const CodeTestPanel: React.FC<{ code: string; dependsOn?: string[]; preprocess?:
           <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
             <div style={{ flex: 1 }}>
               <div style={{ color: 'var(--text-secondary)', fontSize: 11 }}>总行数</div>
-              <div style={{ color: 'var(--color-primary)', fontSize: 14, fontWeight: 600 }}>{testResult.stats?.total_rows}</div>
+              <div style={{ color: 'var(--color-primary)', fontSize: 14, fontWeight: 600 }}>{testResult.stats?.total_rows?.toLocaleString()}</div>
             </div>
             <div style={{ flex: 1 }}>
-              <div style={{ color: 'var(--text-secondary)', fontSize: 11 }}>股票数</div>
-              <div style={{ color: 'var(--color-gain)', fontSize: 14, fontWeight: 600 }}>{testResult.stats?.stock_count}</div>
-            </div>
-            <div style={{ flex: 1 }}>
-              <div style={{ color: 'var(--text-secondary)', fontSize: 11 }}>均值</div>
-              <div style={{ color: 'var(--text-primary)', fontSize: 14 }}>{testResult.stats?.factor_mean != null ? Number(testResult.stats.factor_mean).toFixed(4) : '-'}</div>
-            </div>
-            <div style={{ flex: 1 }}>
-              <div style={{ color: 'var(--text-secondary)', fontSize: 11 }}>标准差</div>
-              <div style={{ color: 'var(--text-primary)', fontSize: 14 }}>{testResult.stats?.factor_std != null ? Number(testResult.stats.factor_std).toFixed(4) : '-'}</div>
+              <div style={{ color: 'var(--text-secondary)', fontSize: 11 }}>有效值</div>
+              <div style={{ color: 'var(--color-gain)', fontSize: 14, fontWeight: 600 }}>{testResult.stats?.count?.toLocaleString()}</div>
             </div>
             <div style={{ flex: 1 }}>
               <div style={{ color: 'var(--text-secondary)', fontSize: 11 }}>空值</div>
-              <div style={{ fontSize: 14, color: (testResult.stats?.null_count ?? 0) > 0 ? 'var(--color-loss)' : 'var(--color-gain)' }}>{testResult.stats?.null_count ?? 0}</div>
+              <div style={{ fontSize: 14, color: (testResult.stats?.null_count ?? 0) > 0 ? 'var(--color-loss)' : 'var(--color-gain)' }}>{testResult.stats?.null_count?.toLocaleString() ?? 0}</div>
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ color: 'var(--text-secondary)', fontSize: 11 }}>最小值</div>
+              <div style={{ color: 'var(--text-primary)', fontSize: 14 }}>{testResult.stats?.min != null ? Number(testResult.stats.min).toFixed(4) : '-'}</div>
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ color: 'var(--text-secondary)', fontSize: 11 }}>最大值</div>
+              <div style={{ color: 'var(--text-primary)', fontSize: 14 }}>{testResult.stats?.max != null ? Number(testResult.stats.max).toFixed(4) : '-'}</div>
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ color: 'var(--text-secondary)', fontSize: 11 }}>均值</div>
+              <div style={{ color: 'var(--text-primary)', fontSize: 14 }}>{testResult.stats?.mean != null ? Number(testResult.stats.mean).toFixed(4) : '-'}</div>
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ color: 'var(--text-secondary)', fontSize: 11 }}>标准差</div>
+              <div style={{ color: 'var(--text-primary)', fontSize: 14 }}>{testResult.stats?.std != null ? Number(testResult.stats.std).toFixed(4) : '-'}</div>
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ color: 'var(--text-secondary)', fontSize: 11 }}>中位数</div>
+              <div style={{ color: 'var(--text-primary)', fontSize: 14 }}>{testResult.stats?.median != null ? Number(testResult.stats.median).toFixed(4) : '-'}</div>
             </div>
           </div>
           {testResult.truncated && <Banner type="warning" description="结果已截断，仅显示前 2000 行" closeIcon={null} style={{ marginBottom: 8, fontSize: 12 }} />}
@@ -716,9 +881,13 @@ const FactorManageTab: React.FC = () => {
   const [createCategory, setCreateCategory] = useState<string>('custom');
   const [createComputeMode, setCreateComputeMode] = useState<string>('incremental');
   const [createDependsOn, setCreateDependsOn] = useState<string[]>(['sync_daily_data']);
-  const [createWindow, setCreateWindow] = useState<number | undefined>(undefined);
   const [createLookbackDays, setCreateLookbackDays] = useState<number>(60);
   const createEditorRef = useRef<unknown>(null);
+  // 新建因子的 DataFrame schema
+  const [createDfSchema, setCreateDfSchema] = useState<any>(null);
+  const [createSchemaLoading, setCreateSchemaLoading] = useState<boolean>(false);
+  // 可用表列表
+  const [availableTables, setAvailableTables] = useState<Array<{value: string; label: string; description: string; type: string}>>([]);
 
   // 格式化创建代码
   const handleFormatCreateCode = async (): Promise<void> => {
@@ -731,6 +900,35 @@ const FactorManageTab: React.FC = () => {
       Toast.error(errorMessage);
     }
   };
+
+  // 加载新建因子的 DataFrame schema
+  const loadCreateDfSchema = async (dependsOn: string[]) => {
+    if (!dependsOn || dependsOn.length === 0) {
+      setCreateDfSchema(null);
+      return;
+    }
+    setCreateSchemaLoading(true);
+    try {
+      const res = await productionApi.getDataFrameSchema(dependsOn);
+      const schemaData = res.data?.data || res.data;
+      setCreateDfSchema(schemaData);
+    } catch (e: any) {
+      console.error('Failed to load create DataFrame schema:', e);
+      setCreateDfSchema(null);
+    } finally {
+      setCreateSchemaLoading(false);
+    }
+  };
+
+  // 当新建因子的依赖变化时，自动加载 schema
+  useEffect(() => {
+    if (createModal && createDependsOn.length > 0) {
+      loadCreateDfSchema(createDependsOn);
+    } else if (createModal) {
+      setCreateDfSchema(null);
+    }
+  }, [createDependsOn, createModal]);
+
   // 批量计算模态框
   const [batchCalcModalVisible, setBatchCalcModalVisible] = useState<boolean>(false);
   const [batchCalcDates, setBatchCalcDates] = useState<[dayjs.Dayjs | null, dayjs.Dayjs | null]>([null, null]);
@@ -756,7 +954,18 @@ const FactorManageTab: React.FC = () => {
     }
   }, []);
 
-  useEffect(() => { loadFactors(); loadHistory(); }, [loadFactors, loadHistory]);
+  useEffect(() => {
+    loadFactors();
+    loadHistory();
+    // 加载可用表列表
+    productionApi.getAvailableTables().then(r => {
+      const tables = r.data?.data || [];
+      console.log('[FactorManageTab] Loaded available tables:', tables.length);
+      setAvailableTables(tables);
+    }).catch((error) => {
+      console.error('Failed to load available tables:', error);
+    });
+  }, [loadFactors, loadHistory]);
 
   const handleRun = async (factorId: string, runMode: string, startDate?: string, endDate?: string) => {
     setRunLoading(factorId);
@@ -805,14 +1014,13 @@ const FactorManageTab: React.FC = () => {
       const params = {
         preprocess: createPreprocess,
         lookback_days: createLookbackDays,
-        ...(createWindow !== undefined ? { window: createWindow } : {}),
       };
       await productionApi.createFactor({ ...values, params, code: createCode || undefined });
       Toast.success(`因子 ${values.factor_id} 创建成功`);
       setCreateModal(false);
       setCreateFactorId(''); setCreateDesc(''); setCreateCategory('custom'); setCreateComputeMode('incremental');
       setCreateCode(CODE_TEMPLATE);
-      setCreatePreprocess({ ...DEFAULT_PREPROCESS }); setCreateDependsOn(['sync_daily_data']); setCreateWindow(undefined); setCreateLookbackDays(60);
+      setCreatePreprocess({ ...DEFAULT_PREPROCESS }); setCreateDependsOn(['sync_daily_data']); setCreateLookbackDays(60);
       loadFactors();
     } catch (e: any) {
       if (e.response) Toast.error(e.response?.data?.detail || '创建失败');
@@ -865,9 +1073,11 @@ const FactorManageTab: React.FC = () => {
     { title: '最新数据', dataIndex: 'latest_data_date', key: 'latest', width: 90,
       render: (v: string) => {
         if (!v) return <span style={{ color: 'var(--text-muted)' }}>-</span>;
+        // 格式化为日期格式（去掉时间部分）
+        const dateStr = v.includes(' ') ? v.split(' ')[0] : v;
         return (
-          <Tooltip content={v}>
-            <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--color-gain)' }}>{v}</div>
+          <Tooltip content={dateStr}>
+            <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--color-gain)' }}>{dateStr}</div>
           </Tooltip>
         );
       }
@@ -875,10 +1085,12 @@ const FactorManageTab: React.FC = () => {
     { title: '上次计算', dataIndex: 'last_computed_at', key: 'computed', width: 130,
       render: (v: string) => {
         if (!v) return '-';
+        // 格式化为日期格式（YYYY-MM-DD）
+        const dateStr = v.includes(' ') ? v.split(' ')[0] : v.slice(0, 10);
         return (
           <Tooltip content={v}>
             <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-secondary)', fontSize: '12px' }}>
-              {v.slice(0, 16)}
+              {dateStr}
             </div>
           </Tooltip>
         );
@@ -911,13 +1123,10 @@ const FactorManageTab: React.FC = () => {
         </Tooltip>
       )
     },
-    { title: '模式', dataIndex: 'mode', key: 'mode', width: 60,
-      render: (v: string) => <Tag size="small" color={v === 'incremental' ? 'blue' : 'green'}>{v === 'incremental' ? '增量' : '全量'}</Tag>
-    },
     { title: '状态', dataIndex: 'status', key: 'status', width: 80,
       render: (v: string) => <Tag size="small" color={v === 'success' ? 'green' : v === 'running' ? 'blue' : 'red'}>{v}</Tag>
     },
-    { title: '行数', dataIndex: 'rows_affected', key: 'rows', width: 90,
+    { title: '行数', dataIndex: 'rows', key: 'rows', width: 90,
       render: (v: number) => {
         const formatted = v?.toLocaleString() || '-';
         return (
@@ -927,7 +1136,7 @@ const FactorManageTab: React.FC = () => {
         );
       }
     },
-    { title: '耗时', dataIndex: 'duration_seconds', key: 'dur', width: 80,
+    { title: '耗时', dataIndex: 'elapsed_seconds', key: 'dur', width: 80,
       render: (v: number) => {
         const formatted = v ? `${v.toFixed(1)}s` : '-';
         return (
@@ -1043,19 +1252,109 @@ const FactorManageTab: React.FC = () => {
           </div>
         </div>
         <div style={{ marginBottom: 12 }}>
-          <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>数据依赖 <span style={{ color: 'var(--color-loss)' }}>*</span></div>
+          <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>同步任务数据源</div>
+          <Select
+            size="small" multiple style={{ width: '100%', marginBottom: 8 }}
+            value={createDependsOn.filter(d => availableTables.find(t => t.value === d && t.type === 'sync'))}
+            onChange={v => {
+              const syncTables = v as string[];
+              const otherTables = createDependsOn.filter(d => !availableTables.find(t => t.value === d && t.type === 'sync'));
+              setCreateDependsOn([...syncTables, ...otherTables]);
+            }}
+            optionList={availableTables.filter(t => t.type === 'sync').map(t => ({
+              label: t.label,
+              value: t.value,
+              ...(t.description ? { otherKey: t.description } : {})
+            }))}
+            filter
+            placeholder="选择同步任务表"
+          />
+          <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>ETL任务数据源</div>
+          <Select
+            size="small" multiple style={{ width: '100%', marginBottom: 8 }}
+            value={createDependsOn.filter(d => availableTables.find(t => t.value === d && t.type === 'etl'))}
+            onChange={v => {
+              const etlTables = v as string[];
+              const otherTables = createDependsOn.filter(d => !availableTables.find(t => t.value === d && t.type === 'etl'));
+              setCreateDependsOn([...etlTables, ...otherTables]);
+            }}
+            optionList={availableTables.filter(t => t.type === 'etl').map(t => ({
+              label: t.label,
+              value: t.value,
+              ...(t.description ? { otherKey: t.description } : {})
+            }))}
+            filter
+            placeholder="选择ETL任务表"
+          />
+          <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>依赖其他因子</div>
           <Select
             size="small" multiple style={{ width: '100%' }}
-            value={createDependsOn}
-            onChange={v => setCreateDependsOn(v as string[])}
-            optionList={[
-              { label: 'sync_daily_data（日线行情 OHLCV）', value: 'sync_daily_data' },
-              { label: 'sync_daily_basic（每日指标 PE/PB/市值）', value: 'sync_daily_basic' },
-              { label: 'sync_adj_factor（复权因子）', value: 'sync_adj_factor' },
-              { label: 'sync_moneyflow（资金流向）', value: 'sync_moneyflow' },
-            ]}
+            value={createDependsOn.filter(d => availableTables.find(t => t.value === d && t.type === 'factor'))}
+            onChange={v => {
+              const factorTables = v as string[];
+              const otherTables = createDependsOn.filter(d => !availableTables.find(t => t.value === d && t.type === 'factor'));
+              setCreateDependsOn([...factorTables, ...otherTables]);
+            }}
+            optionList={availableTables.filter(t => t.type === 'factor').map(t => ({
+              label: t.label,
+              value: t.value,
+              ...(t.description ? { otherKey: t.description } : {})
+            }))}
+            filter
+            placeholder="选择依赖的因子"
           />
         </div>
+
+        {/* DataFrame Schema 预览 */}
+        {createDependsOn.length > 0 && (
+          <div style={{ marginTop: 12, marginBottom: 12, padding: 12, background: 'var(--semi-color-fill-0)', borderRadius: 4, border: '1px solid var(--semi-color-border)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+              <div style={{ color: 'var(--text-secondary)', fontSize: 12, fontWeight: 500 }}>
+                预期 DataFrame 格式
+              </div>
+              {createSchemaLoading && <Spin size="small" />}
+            </div>
+            {createSchemaLoading ? (
+              <div style={{ textAlign: 'center', padding: '20px', color: 'var(--text-tertiary)', fontSize: 12 }}>
+                加载中...
+              </div>
+            ) : createDfSchema && createDfSchema.columns && createDfSchema.columns.length > 0 ? (
+              <>
+                <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginBottom: 6 }}>
+                  共 {createDfSchema.total_columns} 列 · {createDfSchema.note}
+                </div>
+                <div style={{ maxHeight: 200, overflowY: 'auto', fontSize: 11 }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr style={{ background: 'var(--semi-color-fill-1)', borderBottom: '1px solid var(--semi-color-border)' }}>
+                        <th style={{ padding: '4px 8px', textAlign: 'left', color: 'var(--text-secondary)', fontWeight: 500 }}>列名</th>
+                        <th style={{ padding: '4px 8px', textAlign: 'left', color: 'var(--text-secondary)', fontWeight: 500 }}>类型</th>
+                        <th style={{ padding: '4px 8px', textAlign: 'left', color: 'var(--text-secondary)', fontWeight: 500 }}>来源</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {createDfSchema.columns.map((col: any, idx: number) => (
+                        <tr key={idx} style={{ borderBottom: '1px solid var(--semi-color-border)' }}>
+                          <td style={{ padding: '4px 8px', fontFamily: 'monospace', color: 'var(--color-primary)' }}>{col.name}</td>
+                          <td style={{ padding: '4px 8px', fontFamily: 'monospace', color: 'var(--text-secondary)' }}>{col.type}</td>
+                          <td style={{ padding: '4px 8px', fontSize: 10, color: 'var(--text-tertiary)' }}>
+                            {col.source}
+                            {col.description && <span style={{ marginLeft: 4, color: 'var(--semi-color-warning)' }}>({col.description})</span>}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            ) : (
+              <div style={{ textAlign: 'center', padding: '20px', color: 'var(--text-tertiary)', fontSize: 12 }}>
+                无法获取数据格式，请检查数据源配置
+              </div>
+            )}
+          </div>
+        )}
+
         <div style={{ display: 'flex', gap: 16, marginBottom: 8 }}>
           <Checkbox checked={createPreprocess.filter_st} onChange={(e) => setCreatePreprocess(p => ({ ...p, filter_st: !!e.target.checked }))}>过滤 ST</Checkbox>
           <Checkbox checked={createPreprocess.filter_new_stock} onChange={(e) => setCreatePreprocess(p => ({ ...p, filter_new_stock: !!e.target.checked }))}>过滤新股</Checkbox>
@@ -1069,26 +1368,14 @@ const FactorManageTab: React.FC = () => {
               onChange={(v) => setCreatePreprocess(p => ({ ...p, new_stock_days: (v as number) || 60 }))} />
           </div>
         )}
-        <div style={{ display: 'flex', gap: 16, marginBottom: 8, marginTop: 8 }}>
-          <div style={{ flex: 1 }}>
-            <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>
-              计算窗口 window
-              <span style={{ color: 'var(--text-muted)', marginLeft: 4 }}>（滚动窗口大小，如 MA/RSI 的 N 天）</span>
-            </div>
-            <InputNumber size="small" min={1} max={500} style={{ width: '100%' }}
-              placeholder="不填则由代码内部决定"
-              value={createWindow}
-              onChange={v => setCreateWindow(v as number | undefined)} />
+        <div style={{ marginBottom: 8, marginTop: 8 }}>
+          <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>
+            向前回溯天数 lookback_days
+            <span style={{ color: 'var(--text-muted)', marginLeft: 4 }}>（增量计算时额外加载的历史数据天数，默认 60）</span>
           </div>
-          <div style={{ flex: 1 }}>
-            <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>
-              向前回溯天数 lookback_days
-              <span style={{ color: 'var(--text-muted)', marginLeft: 4 }}>（增量计算时额外加载的历史数据天数，默认 60）</span>
-            </div>
-            <InputNumber size="small" min={1} max={1000} style={{ width: '100%' }}
-              value={createLookbackDays}
-              onChange={v => setCreateLookbackDays((v as number) || 60)} />
-          </div>
+          <InputNumber size="small" min={1} max={1000} style={{ width: '100%' }}
+            value={createLookbackDays}
+            onChange={v => setCreateLookbackDays((v as number) || 60)} />
         </div>
         <div style={{ marginTop: 8 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
@@ -1109,7 +1396,7 @@ const FactorManageTab: React.FC = () => {
               }}
               options={{ minimap: { enabled: false }, fontSize: 13, scrollBeyondLastLine: false, automaticLayout: true, tabSize: 4, wordWrap: 'on' }} />
           </div>
-          <CodeTestPanel code={createCode} preprocess={createPreprocess} />
+          <CodeTestPanel code={createCode} dependsOn={createDependsOn} preprocess={createPreprocess} lookbackDays={createLookbackDays} />
         </div>
       </SideSheet>
 

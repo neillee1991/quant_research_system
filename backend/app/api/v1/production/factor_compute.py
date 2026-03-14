@@ -53,11 +53,12 @@ class BatchRunRequest(BaseModel):
 class FactorTestRequest(BaseModel):
     """因子测试请求"""
     code: str
-    start_date: str
-    end_date: str
+    start_date: str  # 因子计算起始日期
+    end_date: str    # 因子计算结束日期
     params: Dict[str, Any] = {}
     depends_on: List[str] = ["sync_daily_data"]
     preprocess: Optional[Dict[str, Any]] = None
+    lookback_days: int = 60  # 向前回溯天数，用于自动计算数据加载起始日期
 
 
 # ==================== API Endpoints ====================
@@ -123,6 +124,15 @@ async def get_production_history(factor_id: Optional[str] = None, limit: int = 2
             for row in df.to_dicts():
                 row["created_at"] = str(row["created_at"]) if row.get("created_at") else None
                 row["finished_at"] = str(row["finished_at"]) if row.get("finished_at") else None
+                # 格式化日期字段：YYYYMMDD -> YYYY-MM-DD
+                if row.get("start_date"):
+                    date_str = str(row["start_date"])
+                    if len(date_str) == 8:
+                        row["start_date"] = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
+                if row.get("end_date"):
+                    date_str = str(row["end_date"])
+                    if len(date_str) == 8:
+                        row["end_date"] = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
                 data.append(row)
         return {"status": "success", "data": data}
     except Exception as e:
@@ -246,7 +256,15 @@ async def test_factor_code(req: FactorTestRequest):
         return make_error("resolve", "未找到因子计算函数。请使用 @factor 装饰器注册，或定义 compute_xxx 函数。")
 
     # 3. 加载真实数据
-    log("data", f"加载数据 {req.start_date}~{req.end_date} (depends_on={depends_on})...")
+    # 计算数据加载起始日期：因子计算起始日期 - lookback_days
+    from app.core.utils import TradingCalendar
+    lookback_days = req.lookback_days
+    trading_cal = TradingCalendar.get_instance(db_client)
+    data_start_date = trading_cal.offset_trading_days(req.start_date, -lookback_days)
+
+    log("data", f"因子计算区间: {req.start_date}~{req.end_date}")
+    log("data", f"数据加载区间: {data_start_date}~{req.end_date} (向前回溯 {lookback_days} 个交易日)")
+    log("data", f"依赖数据源: {depends_on}")
     t0 = time.time()
 
     preprocess_opts = func_params.get("preprocess", {})
@@ -256,12 +274,12 @@ async def test_factor_code(req: FactorTestRequest):
     log("data", f"预处理配置: adjust_price={opts['adjust_price']}, filter_st={opts['filter_st']}, filter_new_stock={opts['filter_new_stock']}, handle_suspension={opts['handle_suspension']}, mark_limit={opts['mark_limit']}")
 
     try:
-        # 直接从数据库加载数据
+        # 直接从数据库加载数据（使用计算后的数据起始日期）
         df = None
         for table in depends_on:
             table_df = db_client.query(
                 f"SELECT * FROM {table} WHERE trade_date >= %s AND trade_date <= %s ORDER BY ts_code, trade_date",
-                (req.start_date, req.end_date)
+                (data_start_date, req.end_date)
             )
             if df is None:
                 df = table_df
@@ -270,7 +288,7 @@ async def test_factor_code(req: FactorTestRequest):
                 df = df.join(table_df, on=["ts_code", "trade_date"], how="outer")
 
         if df is None or df.is_empty():
-            return make_error("data", f"日期范围 {req.start_date}~{req.end_date} 无数据")
+            return make_error("data", f"数据加载区间 {data_start_date}~{req.end_date} 无数据")
 
         log("data", f"加载完成: {df.shape[0]} 行 × {df.shape[1]} 列 ({(time.time()-t0)*1000:.0f}ms)")
     except Exception as e:
@@ -296,24 +314,117 @@ async def test_factor_code(req: FactorTestRequest):
         if "factor_value" not in result.columns:
             return make_error("stats", "结果缺少 'factor_value' 列")
 
+        log("stats", f"计算结果: {result.shape[0]} 行 × {result.shape[1]} 列")
+
+        # 过滤结果：只保留测试区间内的数据
+        if "trade_date" in result.columns:
+            # 确保 trade_date 是字符串类型，格式为 YYYYMMDD
+            original_dtype = result["trade_date"].dtype
+            log("stats", f"trade_date 原始类型: {original_dtype}")
+
+            if result["trade_date"].dtype == pl.Utf8:
+                # 已经是字符串，检查格式并转换为 YYYYMMDD
+                # 可能是 "2026-03-02" 或 "20260302" 格式
+                result = result.with_columns(
+                    pl.col("trade_date").str.replace_all("-", "").alias("trade_date")
+                )
+            elif result["trade_date"].dtype in [pl.Date, pl.Datetime]:
+                # 日期类型，转换为 YYYYMMDD 字符串格式
+                result = result.with_columns(
+                    pl.col("trade_date").dt.strftime("%Y%m%d").alias("trade_date")
+                )
+            else:
+                # 其他类型，先转字符串再去掉连字符
+                result = result.with_columns(
+                    pl.col("trade_date").cast(pl.Utf8).str.replace_all("-", "").alias("trade_date")
+                )
+
+            log("stats", f"已将 trade_date 转换为 YYYYMMDD 格式")
+            log("stats", f"过滤前行数: {result.shape[0]}, 过滤条件: {req.start_date} <= trade_date <= {req.end_date}")
+
+            result = result.filter(
+                (pl.col("trade_date") >= req.start_date) &
+                (pl.col("trade_date") <= req.end_date)
+            )
+            log("stats", f"过滤后行数: {result.shape[0]}")
+
         preview = result.head(100).to_dicts()
+
+        # 使用 DolphinDB 的 stat 函数计算统计指标
+        total_rows = result.shape[0]
+        null_count = result["factor_value"].null_count()
+        null_ratio = null_count / total_rows if total_rows > 0 else 0
+
         stats = {
-            "total_rows": result.shape[0],
-            "null_count": result["factor_value"].null_count(),
-            "null_ratio": result["factor_value"].null_count() / result.shape[0] if result.shape[0] > 0 else 0,
+            "total_rows": total_rows,
+            "null_count": null_count,
+            "null_ratio": null_ratio,
         }
 
+        # 使用 DolphinDB stat 函数计算统计指标
         valid = result.filter(pl.col("factor_value").is_not_null())
         if valid.shape[0] > 0:
-            stats.update({
-                "mean": float(valid["factor_value"].mean()),
-                "std": float(valid["factor_value"].std()),
-                "min": float(valid["factor_value"].min()),
-                "max": float(valid["factor_value"].max()),
-                "median": float(valid["factor_value"].median()),
-            })
+            try:
+                # 创建临时表名
+                import uuid
+                temp_table = f"temp_factor_test_{uuid.uuid4().hex[:8]}"
+
+                # 使用 DolphinDB 原生方法上传数据
+                log("stats", f"上传数据到临时表 {temp_table}...")
+
+                # 将 Polars DataFrame 转换为 Pandas（DolphinDB Python API 需要）
+                import pandas as pd
+                temp_df = valid.select(["factor_value"]).to_pandas()
+
+                # 上传到 DolphinDB 内存表
+                db_client._session.upload({temp_table: temp_df})
+
+                # 使用 stat 函数计算统计指标
+                log("stats", "使用 DolphinDB stat 函数计算统计指标...")
+                stat_result = db_client._session.run(f"stat({temp_table}.factor_value)")
+
+                # 解析 stat 返回的结果
+                if stat_result is not None:
+                    # stat 返回一个 DataFrame，包含 Size, Count, Max, Min, Avg, Stdev, Median 等字段
+                    stats.update({
+                        "count": int(stat_result.get("Count", [0])[0]) if "Count" in stat_result else valid.shape[0],
+                        "mean": float(stat_result.get("Avg", [0])[0]) if "Avg" in stat_result else None,
+                        "std": float(stat_result.get("Stdev", [0])[0]) if "Stdev" in stat_result else None,
+                        "min": float(stat_result.get("Min", [0])[0]) if "Min" in stat_result else None,
+                        "max": float(stat_result.get("Max", [0])[0]) if "Max" in stat_result else None,
+                        "median": float(stat_result.get("Median", [0])[0]) if "Median" in stat_result else None,
+                    })
+                    log("stats", f"DolphinDB stat 结果: count={stats.get('count')}, mean={stats.get('mean'):.6f}, std={stats.get('std'):.6f}")
+                else:
+                    # Fallback to Polars
+                    stats.update({
+                        "count": valid.shape[0],
+                        "mean": float(valid["factor_value"].mean()),
+                        "std": float(valid["factor_value"].std()),
+                        "min": float(valid["factor_value"].min()),
+                        "max": float(valid["factor_value"].max()),
+                        "median": float(valid["factor_value"].median()),
+                    })
+
+                # 清理临时表
+                try:
+                    db_client._session.run(f"undef(`{temp_table}, SHARED)")
+                except:
+                    pass
+
+            except Exception as e:
+                log("stats", f"DolphinDB stat 计算失败，使用 Polars fallback: {e}", "warning")
+                # Fallback to Polars
+                stats.update({
+                    "count": valid.shape[0],
+                    "mean": float(valid["factor_value"].mean()),
+                    "std": float(valid["factor_value"].std()),
+                    "min": float(valid["factor_value"].min()),
+                    "max": float(valid["factor_value"].max()),
+                    "median": float(valid["factor_value"].median()),
+                })
         else:
-            stats.update({"mean": None, "std": None, "min": None, "max": None, "median": None})
+            stats.update({"count": 0, "mean": None, "std": None, "min": None, "max": None, "median": None})
 
         log("stats", f"统计完成: {stats['total_rows']} 行, {stats['null_count']} 空值 ({stats['null_ratio']:.2%})")
 

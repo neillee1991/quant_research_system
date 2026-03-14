@@ -1,8 +1,6 @@
 """因子注册和元数据管理 API 端点"""
 import json
-import os
 import re
-import inspect
 from datetime import datetime
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -17,7 +15,6 @@ from app.core.cache import api_cache
 
 router = APIRouter()
 
-FACTORS_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "engine", "production", "factors")
 _SAFE_FACTOR_ID_RE = re.compile(r'^[a-zA-Z0-9_\-]+$')
 
 
@@ -70,12 +67,13 @@ async def list_registered_factors():
 
     discover_factors(db_client=db_client)
 
-    # 装饰器注册的因子
-    code_factors = {f["factor_id"]: f for f in list_factors()}
+    # 从数据库加载因子（不再从代码文件自动种子）
+    code_factors = {}  # 空字典，因为不再从代码加载
 
     # 优化：使用单个查询获取元数据和最新日期（消除N+1查询）
     db_meta = {}
     latest_dates: Dict[str, str] = {}
+    last_computed: Dict[str, str] = {}
     try:
         # 先查 factor_metadata
         meta_df = db_client.query("SELECT * FROM factor_metadata ORDER BY factor_id")
@@ -90,63 +88,49 @@ async def list_registered_factors():
             )
             if not fv_df.is_empty():
                 for row in fv_df.to_dicts():
-                    latest_dates[row["factor_id"]] = row["latest_date"]
+                    date_val = row["latest_date"]
+                    if date_val:
+                        date_str = str(date_val)
+                        # 格式化日期：YYYYMMDD -> YYYY-MM-DD
+                        if len(date_str) == 8:
+                            latest_dates[row["factor_id"]] = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
+                        else:
+                            latest_dates[row["factor_id"]] = date_str
         except Exception as e:
             logger.debug(f"查询因子最新日期失败: {e}")
+
+        # 查询上次计算时间
+        try:
+            run_df = db_client.query(
+                "SELECT factor_id, max(created_at) AS last_run FROM factor_run_log WHERE status = 'success' GROUP BY factor_id"
+            )
+            if not run_df.is_empty():
+                for row in run_df.to_dicts():
+                    last_computed[row["factor_id"]] = str(row["last_run"]) if row.get("last_run") else None
+        except Exception as e:
+            logger.debug(f"查询因子上次计算时间失败: {e}")
     except Exception as e:
         logger.debug(f"查询因子元数据失败: {e}")
 
-    # 自动种子：代码因子不在 DB 中时自动写入（包含代码）
-    for fid, fdef in code_factors.items():
-        if fid not in db_meta:
-            try:
-                now = datetime.now()
-
-                # 提取因子函数的源代码
-                code_str = ""
-                if "func" in fdef and callable(fdef["func"]):
-                    try:
-                        code_str = inspect.getsource(fdef["func"])
-                    except (OSError, TypeError):
-                        pass
-
-                seed_df = pl.DataFrame({
-                    "factor_id": [fid],
-                    "description": [fdef.get("description", "")],
-                    "category": [fdef.get("category", "custom")],
-                    "compute_mode": [fdef.get("compute_mode", "incremental")],
-                    "storage_target": [fdef.get("storage_target", "factor_values")],
-                    "depends_on": [json.dumps(fdef.get("depends_on", []))],
-                    "params": [json.dumps(fdef.get("params", {}))],
-                    "code": [code_str],
-                    "created_at": [now],
-                    "updated_at": [now],
-                })
-                db_client.upsert("factor_metadata", seed_df, ["factor_id"])
-                db_meta[fid] = {"factor_id": fid, "description": fdef.get("description", ""),
-                                "category": fdef.get("category", "custom")}
-            except Exception as e:
-                logger.warning(f"自动种子因子 {fid} 失败: {e}")
-
-    # 合并：DB 元数据优先（用户手动修改），代码定义作为 fallback
-    all_ids = set(code_factors.keys()) | set(db_meta.keys())
+    # 合并：只使用数据库中的因子
+    all_ids = set(db_meta.keys())
     merged = []
     for fid in sorted(all_ids):
-        item = code_factors.get(fid, {})
         meta = db_meta.get(fid, {})
         db_params = safe_json_parse(meta.get("params"))
         db_depends_on = safe_json_parse(meta.get("depends_on"), default=[])
 
         merged.append({
             "factor_id": fid,
-            "description": meta.get("description") or item.get("description", ""),
-            "category": meta.get("category") or item.get("category", "custom"),
-            "compute_mode": meta.get("compute_mode") or item.get("compute_mode", "incremental"),
-            "depends_on": db_depends_on if db_depends_on else item.get("depends_on", []),
-            "storage_target": meta.get("storage_target") or item.get("storage_target", "factor_values"),
-            "params": db_params if db_params else item.get("params", {}),
-            "latest_date": latest_dates.get(fid),
-            "source": "code" if fid in code_factors else "db",
+            "description": meta.get("description", ""),
+            "category": meta.get("category", "custom"),
+            "compute_mode": meta.get("compute_mode", "incremental"),
+            "depends_on": db_depends_on,
+            "storage_target": meta.get("storage_target", "factor_values"),
+            "params": db_params,
+            "latest_data_date": latest_dates.get(fid),
+            "last_computed_at": last_computed.get(fid),
+            "source": "db",
         })
 
     result = {"status": "success", "data": merged}
@@ -175,6 +159,7 @@ async def create_factor(req: FactorCreateRequest):
             "depends_on": [json.dumps(req.depends_on)],
             "params": [json.dumps(req.params)],
             "code": [req.code or ""],
+            "enabled": [True],
             "created_at": [now],
             "updated_at": [now],
         })
@@ -231,19 +216,12 @@ async def update_factor(factor_id: str, req: FactorUpdateRequest):
 
 @router.delete("/production/factors/{factor_id}")
 async def delete_factor(factor_id: str, delete_data: bool = False):
-    """删除因子元数据、代码文件和注册表条目，可选删除因子值数据"""
+    """删除因子元数据和注册表条目，可选删除因子值数据"""
     _validate_factor_id(factor_id)
     try:
         db_client.execute("DELETE FROM factor_metadata WHERE factor_id = %s", (factor_id,))
         if delete_data:
             db_client.execute("DELETE FROM factor_values WHERE factor_id = %s", (factor_id,))
-
-        # 删除对应的代码文件（如果存在）
-        factors_dir = os.path.normpath(FACTORS_DIR)
-        code_file = os.path.join(factors_dir, f"{factor_id}.py")
-        if os.path.isfile(code_file):
-            os.remove(code_file)
-            logger.info(f"Deleted factor code file: {code_file}")
 
         # 从内存注册表中移除
         unregister_factor(factor_id)
@@ -278,8 +256,7 @@ async def get_factor_logs(factor_id: str, limit: int = 20):
 
 @router.get("/production/factors/{factor_id}/code")
 async def get_factor_code(factor_id: str):
-    """获取因子源代码（优先从数据库读取，备用从文件读取）"""
-    # 1. 优先从数据库读取
+    """获取因子源代码（从数据库读取）"""
     try:
         df = db_client.query(
             "SELECT code FROM factor_metadata WHERE factor_id = %s", (factor_id,)
@@ -287,24 +264,15 @@ async def get_factor_code(factor_id: str):
         if not df.is_empty():
             code = df["code"][0]
             if code and code.strip():
-                return {"status": "success", "data": {"filename": f"{factor_id}.py", "code": code}}
+                return {
+                    "status": "success",
+                    "data": {
+                        "filename": f"{factor_id}.py",
+                        "code": code
+                    }
+                }
     except Exception as e:
         logger.warning(f"Failed to read code from database: {e}")
-
-    # 2. 备用：从文件读取（兼容旧的因子）
-    factors_dir = os.path.normpath(FACTORS_DIR)
-    for fname in os.listdir(factors_dir):
-        if not fname.endswith(".py") or fname.startswith("__"):
-            continue
-        fpath = os.path.join(factors_dir, fname)
-        try:
-            with open(fpath, "r", encoding="utf-8") as f:
-                content = f.read()
-            if factor_id in content:
-                return {"status": "success", "data": {"filename": fname, "code": content}}
-        except Exception as e:
-            logger.debug(f"读取文件 {fname} 失败: {e}")
-            continue
 
     raise HTTPException(status_code=404, detail=f"因子 {factor_id} 的源代码未找到")
 
@@ -378,7 +346,15 @@ async def get_factor_data(
             f"SELECT ts_code, trade_date, factor_value FROM factor_values WHERE {where} ORDER BY trade_date DESC, ts_code LIMIT %s",
             tuple(params),
         )
-        data = df.to_dicts() if not df.is_empty() else []
+        data = []
+        if not df.is_empty():
+            for row in df.to_dicts():
+                # 格式化日期字段：YYYYMMDD -> YYYY-MM-DD
+                if row.get("trade_date"):
+                    date_str = str(row["trade_date"])
+                    if len(date_str) == 8:
+                        row["trade_date"] = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
+                data.append(row)
         return {"status": "success", "data": data, "total": len(data)}
     except Exception as e:
         if "does not exist" in str(e):
@@ -397,7 +373,7 @@ async def get_factor_stats(factor_id: str):
                 MIN(trade_date) AS min_date,
                 MAX(trade_date) AS max_date,
                 AVG(factor_value) AS mean_val,
-                SQRT(AVG(POWER(factor_value - AVG(factor_value), 2))) AS std_val,
+                std(factor_value) AS std_val,
                 MIN(factor_value) AS min_val,
                 MAX(factor_value) AS max_val
             FROM factor_values WHERE factor_id = %s
@@ -409,6 +385,12 @@ async def get_factor_stats(factor_id: str):
         for k, v in row.items():
             if v is not None and not isinstance(v, (str, int)):
                 row[k] = float(v)
+        # 格式化日期字段：YYYYMMDD -> YYYY-MM-DD
+        for date_field in ["min_date", "max_date"]:
+            if row.get(date_field):
+                date_str = str(row[date_field])
+                if len(date_str) == 8:
+                    row[date_field] = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
         return {"status": "success", "data": row}
     except Exception as e:
         if "does not exist" in str(e):
