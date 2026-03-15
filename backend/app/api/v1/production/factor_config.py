@@ -429,16 +429,14 @@ async def delete_index_pool(index_code: str):
     """删除指定指数及其所有成分股数据"""
     try:
         # 删除成分股数据
-        db_client._session.run(f"""
-            constituents_table = loadTable("dfs://quant", "index_constituents");
-            delete from constituents_table where index_code = "{index_code}";
-        """)
+        db_client.execute(
+            "DELETE FROM index_constituents WHERE index_code = %s", (index_code,)
+        )
 
         # 删除元数据
-        db_client._session.run(f"""
-            metadata_table = loadTable("dfs://quant", "index_metadata");
-            delete from metadata_table where index_code = "{index_code}";
-        """)
+        db_client.execute(
+            "DELETE FROM index_metadata WHERE index_code = %s", (index_code,)
+        )
 
         logger.info(f"Deleted index pool: {index_code}")
 
@@ -495,13 +493,14 @@ async def get_dataframe_schema(req: DataFrameSchemaRequest):
                 # 处理表依赖（sync/etl 任务表）
                 try:
                     # 查询 DolphinDB 表的原始 schema
-                    schema_result = db_client._session.run(f'schema(loadTable("dfs://quant", "{dep}"))')
-                    col_defs = schema_result.get('colDefs')
+                    schema_df = db_client.query(
+                        f"SELECT name, typeString FROM schema(loadTable('dfs://quant', '{dep}')).colDefs"
+                    )
 
-                    if col_defs is not None and not col_defs.empty:
-                        for _, row in col_defs.iterrows():
-                            col_name = row['name']
-                            col_type = row['typeString']
+                    if not schema_df.is_empty():
+                        for row in schema_df.to_dicts():
+                            col_name = row["name"]
+                            col_type = row["typeString"]
 
                             if col_name in ["ts_code", "trade_date"]:
                                 continue  # 跳过已添加的固定列
