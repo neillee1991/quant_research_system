@@ -77,6 +77,7 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
 
   // 打开时初始化
   useEffect(() => {
+    console.log('[FactorDrawer] useEffect triggered, factor=', factor?.factor_id, 'open=', open, 'factorId=', factorId);
     if (!factor || !open) return;
     setActiveTab(initialTab || 'edit');
     setCodeChanged(false);
@@ -109,16 +110,23 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
     }
 
     // 代码 - 直接加载
-    setCodeLoading(true);
     if (factorId) {
+      setCodeLoading(true);
+      console.log('[FactorDrawer] 开始加载代码, factorId=', factorId);
       productionApi.getFactorCode(factorId).then(res => {
+        console.log('[FactorDrawer] 代码加载成功, data=', res.data?.data);
         const d = res.data?.data;
         setCode(d);
         setEditedCode(d?.code || '');
       }).catch((error) => {
-        console.error('Failed to load factor code:', error);
+        console.error('[FactorDrawer] 代码加载失败:', error);
         setCode(null);
-      }).finally(() => setCodeLoading(false));
+      }).finally(() => {
+        console.log('[FactorDrawer] finally: setCodeLoading(false)');
+        setCodeLoading(false);
+      });
+    } else {
+      console.warn('[FactorDrawer] factorId 为空，跳过代码加载');
     }
 
     // 数据源注解

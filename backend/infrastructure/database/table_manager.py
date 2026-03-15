@@ -18,7 +18,8 @@ class TableManager:
     _META_TABLES = frozenset({
         "sync_log", "sync_log_history", "stock_basic", "factor_metadata",
         "factor_analysis", "dag_run_log", "dag_task_log", "factor_task_run",
-        "sync_task_config", "etl_task_config", "factor_data_config", "trade_cal"
+        "sync_task_config", "etl_task_config", "factor_data_config", "trade_cal",
+        "factor_run_log", "index_metadata"
     })
 
     # TSDB 表集合（时间序列表，存储在 TSDB 数据库）

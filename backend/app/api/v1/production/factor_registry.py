@@ -128,7 +128,7 @@ async def list_registered_factors():
             "depends_on": db_depends_on,
             "storage_target": meta.get("storage_target", "factor_values"),
             "params": db_params,
-            "latest_data_date": latest_dates.get(fid),
+            "latest_date": latest_dates.get(fid),
             "last_computed_at": last_computed.get(fid),
             "source": "db",
         })

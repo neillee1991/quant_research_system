@@ -35,35 +35,55 @@ print_error() {
     echo -e "${RED}✗ $1${NC}"
 }
 
-# 检查服务是否运行
+# 检查服务是否运行（按端口和进程名，不依赖 PID 文件）
 check_running() {
-    if [ -f "$BACKEND_PID" ] && kill -0 $(cat "$BACKEND_PID") 2>/dev/null; then
-        print_warning "后端服务已在运行 (PID: $(cat "$BACKEND_PID"))"
-        return 0
+    local running=0
+    if lsof -ti ":$BACKEND_PORT" > /dev/null 2>&1; then
+        print_warning "后端端口 $BACKEND_PORT 已被占用"
+        running=1
     fi
-    if [ -f "$FRONTEND_PID" ] && kill -0 $(cat "$FRONTEND_PID") 2>/dev/null; then
-        print_warning "前端服务已在运行 (PID: $(cat "$FRONTEND_PID"))"
-        return 0
+    if lsof -ti ":$FRONTEND_PORT" > /dev/null 2>&1; then
+        print_warning "前端端口 $FRONTEND_PORT 已被占用"
+        running=1
     fi
-    return 1
+    return $running
 }
 
-# 停止已有服务
+# 停止已有服务（按进程名 + 端口双重清理）
 stop_services() {
     print_warning "正在停止已有服务..."
 
+    # 按 PID 文件停止
     for pid_file in "$BACKEND_PID" "$FRONTEND_PID" "$PREFECT_WORKER_PID"; do
         if [ -f "$pid_file" ]; then
             PID_NUM=$(cat "$pid_file")
             if kill -0 "$PID_NUM" 2>/dev/null; then
-                kill "$PID_NUM"
-                print_success "已停止进程 $PID_NUM"
+                pkill -P "$PID_NUM" 2>/dev/null || true
+                kill "$PID_NUM" 2>/dev/null || true
             fi
             rm -f "$pid_file"
         fi
     done
 
+    # 按进程名兜底
+    pkill -f "uvicorn app.main:app" 2>/dev/null || true
+    pkill -f "react-scripts start" 2>/dev/null || true
+    pkill -f "flows/serve.py" 2>/dev/null || true
+
+    # 等待端口释放
     sleep 2
+
+    # 强制释放端口（最后保障）
+    for port in $BACKEND_PORT $FRONTEND_PORT; do
+        local pids
+        pids=$(lsof -ti ":$port" 2>/dev/null || true)
+        if [ -n "$pids" ]; then
+            echo "$pids" | xargs kill -9 2>/dev/null || true
+            print_warning "强制释放端口 $port"
+        fi
+    done
+
+    print_success "已有服务已停止"
 }
 
 # 检查 Docker

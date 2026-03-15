@@ -164,6 +164,31 @@ class MetadataManager:
             "array(STRING,0) as list_status)",
             ["ts_code"],
         ),
+        "factor_run_log": (
+            "table("
+            "array(SYMBOL,0) as factor_id,"
+            "array(SYMBOL,0) as mode,"
+            "array(SYMBOL,0) as status,"
+            "array(STRING,0) as start_date,"
+            "array(STRING,0) as end_date,"
+            "array(INT,0) as rows_affected,"
+            "array(DOUBLE,0) as duration_seconds,"
+            "array(STRING,0) as error_message,"
+            "array(STRING,0) as run_id,"
+            "array(TIMESTAMP,0) as created_at)",
+            ["factor_id", "created_at"],
+        ),
+        "index_metadata": (
+            "table("
+            "array(SYMBOL,0) as index_code,"
+            "array(STRING,0) as index_name,"
+            "array(STRING,0) as description,"
+            "array(INT,0) as stock_count,"
+            "array(DATE,0) as latest_date,"
+            "array(TIMESTAMP,0) as created_at,"
+            "array(TIMESTAMP,0) as updated_at)",
+            ["index_code"],
+        ),
     }
 
     def __init__(self, connection, data_operations):

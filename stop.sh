@@ -12,42 +12,60 @@ echo -e "${BLUE}   量化研究系统 - 停止服务${NC}"
 echo -e "${BLUE}========================================${NC}"
 echo ""
 
-# 停止后端
-if [ -f "$BACKEND_PID" ]; then
-    BACKEND_PID_NUM=$(cat "$BACKEND_PID")
-    if kill -0 "$BACKEND_PID_NUM" 2>/dev/null; then
-        kill "$BACKEND_PID_NUM"
-        echo -e "${GREEN}✓ 后端服务已停止 (PID: $BACKEND_PID_NUM)${NC}"
-    else
-        echo -e "${YELLOW}⚠️  后端服务未运行${NC}"
-    fi
-    rm -f "$BACKEND_PID"
-else
-    echo -e "${YELLOW}⚠️  后端服务未运行${NC}"
-fi
+# 统一停止函数：先用 PID 文件，再按进程名兜底
+kill_service() {
+    local name="$1"
+    local pid_file="$2"
+    local pattern="$3"
 
-# 停止前端
-if [ -f "$FRONTEND_PID" ]; then
-    FRONTEND_PID_NUM=$(cat "$FRONTEND_PID")
-    if kill -0 "$FRONTEND_PID_NUM" 2>/dev/null; then
-        # 使用 pkill 停止整个进程树（包括 npm 和 webpack-dev-server）
-        pkill -P "$FRONTEND_PID_NUM" 2>/dev/null
-        kill "$FRONTEND_PID_NUM" 2>/dev/null
-        echo -e "${GREEN}✓ 前端服务已停止 (PID: $FRONTEND_PID_NUM)${NC}"
-    else
-        echo -e "${YELLOW}⚠️  前端服务未运行${NC}"
-    fi
-    rm -f "$FRONTEND_PID"
-else
-    echo -e "${YELLOW}⚠️  前端服务未运行${NC}"
-fi
+    local killed=0
 
-# 额外清理：强制停止所有 node 进程（如果 PID 文件不存在）
-if pgrep -f "react-scripts start" > /dev/null 2>&1; then
-    echo -e "${YELLOW}检测到残留的前端进程，正在清理...${NC}"
-    pkill -f "react-scripts start"
-    echo -e "${GREEN}✓ 前端残留进程已清理${NC}"
-fi
+    # 1. 先用 PID 文件
+    if [ -f "$pid_file" ]; then
+        local pid_num
+        pid_num=$(cat "$pid_file")
+        if kill -0 "$pid_num" 2>/dev/null; then
+            pkill -P "$pid_num" 2>/dev/null || true
+            kill "$pid_num" 2>/dev/null && killed=1
+        fi
+        rm -f "$pid_file"
+    fi
+
+    # 2. 按进程名兜底（捕获 PID 文件之外的游离进程）
+    local leftover
+    leftover=$(pgrep -f "$pattern" 2>/dev/null || true)
+    if [ -n "$leftover" ]; then
+        pkill -f "$pattern" 2>/dev/null || true
+        killed=1
+    fi
+
+    if [ "$killed" -eq 1 ]; then
+        echo -e "${GREEN}✓ $name 已停止${NC}"
+    else
+        echo -e "${YELLOW}⚠️  $name 未运行${NC}"
+    fi
+}
+
+# 停止后端（匹配 uvicorn app.main:app）
+kill_service "后端服务" "$BACKEND_PID" "uvicorn app.main:app"
+
+# 停止前端（匹配 react-scripts start）
+kill_service "前端服务" "$FRONTEND_PID" "react-scripts start"
+
+# 停止 Prefect Worker
+kill_service "Prefect Worker" "$PREFECT_WORKER_PID" "flows/serve.py"
+
+# 等待端口释放
+sleep 1
+
+# 验证端口已释放
+for port in 8000 3000; do
+    if lsof -ti ":$port" > /dev/null 2>&1; then
+        echo -e "${YELLOW}端口 $port 仍被占用，强制释放...${NC}"
+        lsof -ti ":$port" | xargs kill -9 2>/dev/null || true
+        echo -e "${GREEN}✓ 端口 $port 已释放${NC}"
+    fi
+done
 
 # 询问是否停止 Docker 服务
 echo ""
