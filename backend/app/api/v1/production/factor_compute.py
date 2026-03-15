@@ -10,9 +10,8 @@ from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 
 from store.dolphindb_client import db_client
-from services.factor_compute_service import FactorComputeService
+from services.factor_compute_service import FactorComputeService, DEFAULT_PREPROCESS as _DEFAULT_PREPROCESS
 from engine.production.registry import FactorDefinition, StorageConfig
-from engine.production.engine import ProductionEngine
 from app.core.logger import logger
 
 router = APIRouter()
@@ -270,7 +269,7 @@ async def test_factor_code(req: FactorTestRequest):
     preprocess_opts = func_params.get("preprocess", {})
     if req.preprocess:
         preprocess_opts = {**preprocess_opts, **req.preprocess}
-    opts = {**ProductionEngine.DEFAULT_PREPROCESS, **preprocess_opts}
+    opts = {**_DEFAULT_PREPROCESS, **preprocess_opts}
     log("data", f"预处理配置: adjust_price={opts['adjust_price']}, filter_st={opts['filter_st']}, filter_new_stock={opts['filter_new_stock']}, handle_suspension={opts['handle_suspension']}, mark_limit={opts['mark_limit']}")
 
     try:
@@ -361,68 +360,20 @@ async def test_factor_code(req: FactorTestRequest):
             "null_ratio": null_ratio,
         }
 
-        # 使用 DolphinDB stat 函数计算统计指标
+        # 使用 Polars 计算统计指标
         valid = result.filter(pl.col("factor_value").is_not_null())
         if valid.shape[0] > 0:
-            try:
-                # 创建临时表名
-                import uuid
-                temp_table = f"temp_factor_test_{uuid.uuid4().hex[:8]}"
-
-                # 使用 DolphinDB 原生方法上传数据
-                log("stats", f"上传数据到临时表 {temp_table}...")
-
-                # 将 Polars DataFrame 转换为 Pandas（DolphinDB Python API 需要）
-                import pandas as pd
-                temp_df = valid.select(["factor_value"]).to_pandas()
-
-                # 上传到 DolphinDB 内存表
-                db_client._session.upload({temp_table: temp_df})
-
-                # 使用 stat 函数计算统计指标
-                log("stats", "使用 DolphinDB stat 函数计算统计指标...")
-                stat_result = db_client._session.run(f"stat({temp_table}.factor_value)")
-
-                # 解析 stat 返回的结果
-                if stat_result is not None:
-                    # stat 返回一个 DataFrame，包含 Size, Count, Max, Min, Avg, Stdev, Median 等字段
-                    stats.update({
-                        "count": int(stat_result.get("Count", [0])[0]) if "Count" in stat_result else valid.shape[0],
-                        "mean": float(stat_result.get("Avg", [0])[0]) if "Avg" in stat_result else None,
-                        "std": float(stat_result.get("Stdev", [0])[0]) if "Stdev" in stat_result else None,
-                        "min": float(stat_result.get("Min", [0])[0]) if "Min" in stat_result else None,
-                        "max": float(stat_result.get("Max", [0])[0]) if "Max" in stat_result else None,
-                        "median": float(stat_result.get("Median", [0])[0]) if "Median" in stat_result else None,
-                    })
-                    log("stats", f"DolphinDB stat 结果: count={stats.get('count')}, mean={stats.get('mean'):.6f}, std={stats.get('std'):.6f}")
-                else:
-                    # Fallback to Polars
-                    stats.update({
-                        "count": valid.shape[0],
-                        "mean": float(valid["factor_value"].mean()),
-                        "std": float(valid["factor_value"].std()),
-                        "min": float(valid["factor_value"].min()),
-                        "max": float(valid["factor_value"].max()),
-                        "median": float(valid["factor_value"].median()),
-                    })
-
-                # 清理临时表
-                try:
-                    db_client._session.run(f"undef(`{temp_table}, SHARED)")
-                except:
-                    pass
-
-            except Exception as e:
-                log("stats", f"DolphinDB stat 计算失败，使用 Polars fallback: {e}", "warning")
-                # Fallback to Polars
+            valid_values = valid["factor_value"].drop_nulls()
+            if len(valid_values) > 0:
                 stats.update({
-                    "count": valid.shape[0],
-                    "mean": float(valid["factor_value"].mean()),
-                    "std": float(valid["factor_value"].std()),
-                    "min": float(valid["factor_value"].min()),
-                    "max": float(valid["factor_value"].max()),
-                    "median": float(valid["factor_value"].median()),
+                    "count": len(valid_values),
+                    "mean": float(valid_values.mean()),
+                    "std": float(valid_values.std()),
+                    "min": float(valid_values.min()),
+                    "max": float(valid_values.max()),
+                    "median": float(valid_values.median()),
                 })
+                log("stats", f"统计结果: count={stats['count']}, mean={stats['mean']:.6f}, std={stats['std']:.6f}")
         else:
             stats.update({"count": 0, "mean": None, "std": None, "min": None, "max": None, "median": None})
 

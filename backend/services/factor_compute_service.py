@@ -24,6 +24,16 @@ from infrastructure.processor.pipeline_factory import PipelineFactory
 # 增量计算时，需要额外加载的历史窗口天数（用于滚动计算）
 DEFAULT_LOOKBACK_DAYS = 60
 
+# 默认预处理选项（从 ProductionEngine 迁移）
+DEFAULT_PREPROCESS = {
+    "adjust_price": "forward",
+    "filter_st": True,
+    "filter_new_stock": True,
+    "new_stock_days": 60,
+    "handle_suspension": True,
+    "mark_limit": True,
+}
+
 
 @dataclass
 class ComputeResult:
@@ -379,27 +389,24 @@ class FactorComputeService:
         """完成运行记录"""
         try:
             elapsed = (datetime.now() - started_at).total_seconds()
-            # 先删除旧记录（使用DolphinDB原生语法）
-            delete_script = f"""
-                t = loadTable("dfs://quant", "factor_run_log");
-                delete from t where run_id = '{run_id}';
-            """
-            self.db._session.run(delete_script)
+            # 先删除旧记录
+            self.db.execute(
+                "DELETE FROM factor_run_log WHERE run_id = %s", (run_id,)
+            )
 
             # 插入完整记录
             now = datetime.now()
             record = pl.DataFrame({
-                "run_id": [run_id],
                 "factor_id": [run_context["factor_id"]],
-                "start_date": [run_context["calc_start"]],
-                "end_date": [run_context["calc_end"]],
                 "mode": [run_context["compute_mode"]],
                 "status": [status],
-                "rows": [rows],
-                "elapsed_seconds": [elapsed],
-                "message": [message or ""],
-                "created_at": [started_at],
-                "finished_at": [now]
+                "start_date": [run_context["calc_start"]],
+                "end_date": [run_context["calc_end"]],
+                "rows_affected": [rows],
+                "duration_seconds": [elapsed],
+                "error_message": [message or ""],
+                "run_id": [run_id],
+                "created_at": [started_at]
             })
             self.db.append("factor_run_log", record)
             logger.info(f"Finished run record: {run_id}, status={status}, rows={rows}, elapsed={elapsed:.1f}s")
@@ -409,13 +416,27 @@ class FactorComputeService:
     def _update_metadata(
         self, factor_id: str, definition: FactorDefinition, last_date: str, rows: int
     ):
-        """更新因子元数据"""
+        """更新因子元数据的 updated_at 时间戳"""
         try:
+            # 读出完整行，只改 updated_at，避免 DolphinDB 按列位置插入时错位
+            existing = self.db.query(
+                "SELECT * FROM factor_metadata WHERE factor_id = %s", (factor_id,)
+            )
+            if existing.is_empty():
+                return
+            row = existing.to_dicts()[0]
             update_df = pl.DataFrame({
-                "factor_id": [factor_id],
-                "last_computed_date": [last_date],
-                "total_rows": [rows],
-                "updated_at": [datetime.now().strftime("%Y-%m-%d %H:%M:%S")]
+                "factor_id": [row["factor_id"]],
+                "description": [row.get("description", "")],
+                "category": [row.get("category", "custom")],
+                "compute_mode": [row.get("compute_mode", "incremental")],
+                "storage_target": [row.get("storage_target", "factor_values")],
+                "depends_on": [row.get("depends_on", "[]")],
+                "params": [row.get("params", "{}")],
+                "code": [row.get("code", "")],
+                "enabled": [row.get("enabled", True)],
+                "created_at": [row.get("created_at", datetime.now())],
+                "updated_at": [datetime.now()],
             })
             self.db.upsert("factor_metadata", update_df, key_columns=["factor_id"])
         except Exception as e:
@@ -617,47 +638,29 @@ class FactorComputeService:
             now = datetime.now()
             run_id = now.strftime("%Y%m%d%H%M%S%f")
 
-            # 格式化 timestamp 为 DolphinDB TIMESTAMP 格式（含毫秒）
-            now_ts = now.strftime("%Y.%m.%dT%H:%M:%S.") + f"{now.microsecond // 1000:03d}"
             opts = opts or {}
-            opts_str = json.dumps(opts).replace('"', '\\"')  # 转义双引号
+            opts_str = json.dumps(opts)
 
-            # 提取预处理参数
-            filter_st = "true" if opts.get("filter_st", True) else "false"
-            filter_new_stock = "true" if opts.get("filter_new_stock", True) else "false"
-            new_stock_days = opts.get("new_stock_days", 60)
-            handle_suspension = "true" if opts.get("handle_suspension", True) else "false"
-            mark_limit = "true" if opts.get("mark_limit", True) else "false"
-            adjust_price = opts.get("adjust_price", "none")
-
-            # 列顺序必须与 factor_task_run 表定义一致
-            meta_db = self.db._db_path
-            with self.db._lock:
-                self.db._ensure_connected()
-                self.db._session.run(
-                    f'ts_val = [temporalParse("{now_ts}", "yyyy.MM.ddTHH:mm:ss.SSS")];'
-                    f'tmpRun = table('
-                    f'["{factor_id}"] as factor_id, '
-                    f'["{mode or ""}"] as mode, '
-                    f'["running"] as status, '
-                    f'["{start_date or ""}"] as start_date, '
-                    f'["{end_date or ""}"] as end_date, '
-                    f'[0] as rows_affected, '
-                    f'[0.0] as duration_seconds, '
-                    f'[{filter_st}] as filter_st, '
-                    f'[{filter_new_stock}] as filter_new_stock, '
-                    f'[{new_stock_days}] as new_stock_days, '
-                    f'[{handle_suspension}] as handle_suspension, '
-                    f'[{mark_limit}] as mark_limit, '
-                    f'["{adjust_price}"] as adjust_price, '
-                    f'["{opts_str}"] as preprocess, '
-                    f'["{run_id}"] as run_id, '
-                    f'[""] as error_message, '
-                    f'ts_val as created_at'
-                    f');'
-                    f'ptr = loadTable("{meta_db}", "factor_task_run");'
-                    f'ptr.append!(tmpRun);'
-                )
+            record = pl.DataFrame({
+                "factor_id": [factor_id],
+                "mode": [mode or ""],
+                "status": ["running"],
+                "start_date": [start_date or ""],
+                "end_date": [end_date or ""],
+                "rows_affected": [0],
+                "duration_seconds": [0.0],
+                "filter_st": [opts.get("filter_st", True)],
+                "filter_new_stock": [opts.get("filter_new_stock", True)],
+                "new_stock_days": [opts.get("new_stock_days", 60)],
+                "handle_suspension": [opts.get("handle_suspension", True)],
+                "mark_limit": [opts.get("mark_limit", True)],
+                "adjust_price": [opts.get("adjust_price", "none")],
+                "preprocess": [opts_str],
+                "run_id": [run_id],
+                "error_message": [""],
+                "created_at": [now],
+            })
+            self.db.append("factor_task_run", record)
             logger.info(f"Inserted run record: {run_id} for factor {factor_id}")
             return run_id
 
