@@ -6,8 +6,8 @@ import pytest
 from unittest.mock import Mock, MagicMock, patch
 import polars as pl
 
-from store.dolphindb.query_builder import QueryBuilder
-from store.dolphindb.connection import DolphinDBConnection
+from infrastructure.database.query_builder import QueryBuilder
+from infrastructure.database.connection import DolphinDBConnection
 
 
 class TestQueryBuilder:

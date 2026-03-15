@@ -7,7 +7,7 @@ import threading
 import time
 from unittest.mock import Mock, patch, MagicMock
 
-from store.dolphindb.connection import DolphinDBConnection
+from infrastructure.database.connection import DolphinDBConnection
 
 
 class TestConnectionBasics:
@@ -21,7 +21,7 @@ class TestConnectionBasics:
         yield
         DolphinDBConnection._instance = None
 
-    @patch('store.dolphindb.connection.ddb')
+    @patch('infrastructure.database.connection.ddb')
     def test_connection_initialization(self, mock_ddb):
         """测试连接初始化"""
         mock_session = MagicMock()
@@ -32,7 +32,7 @@ class TestConnectionBasics:
         assert conn.session is not None
         mock_ddb.session.assert_called_once()
 
-    @patch('store.dolphindb.connection.ddb')
+    @patch('infrastructure.database.connection.ddb')
     def test_connection_with_custom_config(self, mock_ddb):
         """测试自定义配置连接"""
         mock_session = MagicMock()
@@ -44,7 +44,7 @@ class TestConnectionBasics:
         call_args = mock_ddb.session.call_args
         assert call_args is not None
 
-    @patch('store.dolphindb.connection.ddb')
+    @patch('infrastructure.database.connection.ddb')
     def test_close_connection(self, mock_ddb):
         """测试关闭连接"""
         mock_session = MagicMock()
@@ -55,7 +55,7 @@ class TestConnectionBasics:
 
         mock_session.close.assert_called_once()
 
-    @patch('store.dolphindb.connection.ddb')
+    @patch('infrastructure.database.connection.ddb')
     def test_close_already_closed_connection(self, mock_ddb):
         """测试关闭已关闭的连接"""
         mock_session = MagicMock()
@@ -80,7 +80,7 @@ class TestSingletonPattern:
         yield
         DolphinDBConnection._instance = None
 
-    @patch('store.dolphindb.connection.ddb')
+    @patch('infrastructure.database.connection.ddb')
     def test_singleton_same_instance(self, mock_ddb):
         """测试单例返回相同实例"""
         mock_session = MagicMock()
@@ -93,7 +93,7 @@ class TestSingletonPattern:
         # 应该只创建一次连接
         assert mock_ddb.session.call_count == 1
 
-    @patch('store.dolphindb.connection.ddb')
+    @patch('infrastructure.database.connection.ddb')
     def test_singleton_after_close(self, mock_ddb):
         """测试关闭后重新创建单例"""
         mock_session = MagicMock()
@@ -122,7 +122,7 @@ class TestThreadSafety:
         yield
         DolphinDBConnection._instance = None
 
-    @patch('store.dolphindb.connection.ddb')
+    @patch('infrastructure.database.connection.ddb')
     def test_concurrent_initialization(self, mock_ddb):
         """测试并发初始化"""
         mock_session = MagicMock()
@@ -156,7 +156,7 @@ class TestThreadSafety:
         # 只应该创建一次连接
         assert mock_ddb.session.call_count == 1
 
-    @patch('store.dolphindb.connection.ddb')
+    @patch('infrastructure.database.connection.ddb')
     def test_concurrent_queries(self, mock_ddb):
         """测试并发查询"""
         mock_session = MagicMock()
@@ -201,7 +201,7 @@ class TestConnectionRecovery:
         yield
         DolphinDBConnection._instance = None
 
-    @patch('store.dolphindb.connection.ddb')
+    @patch('infrastructure.database.connection.ddb')
     def test_reconnect_after_failure(self, mock_ddb):
         """测试连接失败后重连"""
         mock_session = MagicMock()
@@ -221,7 +221,7 @@ class TestConnectionRecovery:
         conn = DolphinDBConnection()
         assert conn.session is not None
 
-    @patch('store.dolphindb.connection.ddb')
+    @patch('infrastructure.database.connection.ddb')
     def test_session_property_access(self, mock_ddb):
         """测试 session 属性访问"""
         mock_session = MagicMock()
@@ -247,7 +247,7 @@ class TestErrorHandling:
         yield
         DolphinDBConnection._instance = None
 
-    @patch('store.dolphindb.connection.ddb')
+    @patch('infrastructure.database.connection.ddb')
     def test_connection_timeout(self, mock_ddb):
         """测试连接超时"""
         mock_ddb.session.side_effect = TimeoutError("Connection timeout")
@@ -255,7 +255,7 @@ class TestErrorHandling:
         with pytest.raises(TimeoutError, match="Connection timeout"):
             DolphinDBConnection()
 
-    @patch('store.dolphindb.connection.ddb')
+    @patch('infrastructure.database.connection.ddb')
     def test_invalid_credentials(self, mock_ddb):
         """测试无效凭证"""
         mock_ddb.session.side_effect = Exception("Authentication failed")
@@ -263,7 +263,7 @@ class TestErrorHandling:
         with pytest.raises(Exception, match="Authentication failed"):
             DolphinDBConnection()
 
-    @patch('store.dolphindb.connection.ddb')
+    @patch('infrastructure.database.connection.ddb')
     def test_network_error(self, mock_ddb):
         """测试网络错误"""
         mock_ddb.session.side_effect = ConnectionError("Network unreachable")
@@ -271,7 +271,7 @@ class TestErrorHandling:
         with pytest.raises(ConnectionError, match="Network unreachable"):
             DolphinDBConnection()
 
-    @patch('store.dolphindb.connection.ddb')
+    @patch('infrastructure.database.connection.ddb')
     def test_close_with_error(self, mock_ddb):
         """测试关闭时出错"""
         mock_session = MagicMock()
@@ -298,7 +298,7 @@ class TestConnectionPooling:
         yield
         DolphinDBConnection._instance = None
 
-    @patch('store.dolphindb.connection.ddb')
+    @patch('infrastructure.database.connection.ddb')
     def test_single_connection_reuse(self, mock_ddb):
         """测试单连接复用"""
         mock_session = MagicMock()
@@ -314,7 +314,7 @@ class TestConnectionPooling:
         # 只应该创建一次连接
         assert mock_ddb.session.call_count == 1
 
-    @patch('store.dolphindb.connection.ddb')
+    @patch('infrastructure.database.connection.ddb')
     def test_connection_state_persistence(self, mock_ddb):
         """测试连接状态持久化"""
         mock_session = MagicMock()
@@ -344,7 +344,7 @@ class TestConnectionMetadata:
         yield
         DolphinDBConnection._instance = None
 
-    @patch('store.dolphindb.connection.ddb')
+    @patch('infrastructure.database.connection.ddb')
     def test_connection_info(self, mock_ddb):
         """测试连接信息"""
         mock_session = MagicMock()
@@ -356,7 +356,7 @@ class TestConnectionMetadata:
         assert hasattr(conn, 'session')
         assert hasattr(conn, 'close')
 
-    @patch('store.dolphindb.connection.ddb')
+    @patch('infrastructure.database.connection.ddb')
     def test_connection_string_representation(self, mock_ddb):
         """测试连接的字符串表示"""
         mock_session = MagicMock()
