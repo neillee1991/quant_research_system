@@ -7,7 +7,6 @@ export interface PreprocessOptions {
   filter_st: boolean;           // 过滤 ST/*ST
   filter_new_stock: boolean;    // 过滤新股
   new_stock_days: number;       // 新股排除天数
-  handle_suspension: boolean;   // 停牌复牌处理
   mark_limit: boolean;          // 标记涨跌停
 }
 
@@ -16,7 +15,6 @@ export const DEFAULT_PREPROCESS: PreprocessOptions = {
   filter_st: true,
   filter_new_stock: true,
   new_stock_days: 60,
-  handle_suspension: true,
   mark_limit: true,
 };
 
@@ -127,9 +125,9 @@ export const mlApi = {
 export const productionApi = {
   // 因子 CRUD
   listFactors: () => api.get('/production/factors'),
-  createFactor: (data: { factor_id: string; description?: string; category?: string; compute_mode?: string; depends_on?: string[]; storage_target?: string; params?: Record<string, any>; code?: string }) =>
+  createFactor: (data: { factor_id: string; description?: string; category?: string; compute_mode?: string; depends_on?: string[]; storage_target?: string; params?: Record<string, any>; code?: string; align_calendar?: boolean }) =>
     api.post('/production/factors', data),
-  updateFactor: (factorId: string, data: { description?: string; category?: string; compute_mode?: string; depends_on?: string[]; storage_target?: string; params?: Record<string, any> }) =>
+  updateFactor: (factorId: string, data: { description?: string; category?: string; compute_mode?: string; depends_on?: string[]; storage_target?: string; params?: Record<string, any>; align_calendar?: boolean }) =>
     api.put(`/production/factors/${factorId}`, data),
   deleteFactor: (factorId: string, deleteData = false) =>
     api.delete(`/production/factors/${factorId}`, { params: { delete_data: deleteData } }),
@@ -139,8 +137,8 @@ export const productionApi = {
     longRunningApi.post('/production/run', { factor_id: factorId, mode, target_date: targetDate, start_date: startDate, end_date: endDate, preprocess }),
   batchRunFactors: (factorIds: string[], mode = 'incremental', startDate?: string, endDate?: string, preprocess?: PreprocessOptions) =>
     longRunningApi.post('/production/batch-run', { factor_ids: factorIds, mode, start_date: startDate, end_date: endDate, preprocess }),
-  getProductionHistory: (factorId?: string, limit = 20) =>
-    api.get('/production/history', { params: { factor_id: factorId, limit } }),
+  getProductionHistory: (factorId?: string, limit = 20, startDate?: string, endDate?: string) =>
+    api.get('/production/history', { params: { factor_id: factorId, limit, start_date: startDate, end_date: endDate } }),
 
   // 因子代码查看/编辑
   getFactorCode: (factorId: string) => api.get(`/production/factors/${factorId}/code`),
@@ -159,6 +157,7 @@ export const productionApi = {
   getFactorData: (factorId: string, params?: { start_date?: string; end_date?: string; ts_code?: string; limit?: number }) =>
     api.get(`/production/factors/${factorId}/data`, { params }),
   getFactorStats: (factorId: string) => api.get(`/production/factors/${factorId}/stats`),
+  getFactorMissingDates: (factorId: string) => api.get(`/production/factors/${factorId}/missing-dates`),
 
   // 因子分析
   runAnalysis: (factorId: string, startDate?: string, endDate?: string, periods = [1, 5, 10], quantiles = 5) =>

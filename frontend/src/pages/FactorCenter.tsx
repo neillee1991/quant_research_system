@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Tabs, TabPane, Table, Button, Card, Tag, Select, InputNumber, Spin, Empty,
-  Modal, Input, Popconfirm, Checkbox, Tooltip, SideSheet, DatePicker, Banner,
+  Modal, Input, Popconfirm, Checkbox, Tooltip, SideSheet, Banner,
   Toast, Collapse,
 } from '@douyinfe/semi-ui';
 import { TextArea } from '@douyinfe/semi-ui';
@@ -13,6 +13,7 @@ import {
 import dayjs from 'dayjs';
 import ReactECharts from 'echarts-for-react';
 import Editor from '@monaco-editor/react';
+import QuantDatePicker from '../components/QuantDatePicker';
 import { productionApi, dataApi, DEFAULT_PREPROCESS } from '../api';
 import { useThemeStore } from '../store';
 import { formatCode } from '../utils/codeFormatter';
@@ -75,6 +76,7 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
   const [editComputeMode, setEditComputeMode] = useState<string>('');
   const [editDependsOn, setEditDependsOn] = useState<string[]>([]);
   const [editLookbackDays, setEditLookbackDays] = useState<number>(60);
+  const [editAlignCalendar, setEditAlignCalendar] = useState<boolean>(false);
   const [editSaving, setEditSaving] = useState<boolean>(false);
   // DataFrame schema 预览
   const [dfSchema, setDfSchema] = useState<any>(null);
@@ -92,6 +94,8 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
   const [factorData, setFactorData] = useState<FactorValue[]>([]);
   const [dataLoading, setDataLoading] = useState<boolean>(false);
   const [dataFilter, setDataFilter] = useState<{ ts_code?: string; start_date?: string; end_date?: string }>({});
+  const [dataStats, setDataStats] = useState<any>(null);
+  const [missingDates, setMissingDates] = useState<string[]>([]);
   // 计算日志
   const [history, setHistory] = useState<FactorRunRecord[]>([]);
   const [historyLoading, setHistoryLoading] = useState<boolean>(false);
@@ -178,6 +182,7 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
     setEditDependsOn(Array.isArray(rawDeps) ? rawDeps : (rawDeps ? (() => { try { return JSON.parse(rawDeps); } catch { return []; } })() : []));
     const params = factor.params as any;
     setEditLookbackDays(params?.lookback_days ?? 60);
+    setEditAlignCalendar(factor.align_calendar ?? false);
     // 预处理
     const pp = params?.preprocess || {};
     console.log('[FactorDrawer] 加载因子配置:', { factor_id: factor.factor_id, params: factor.params, preprocess: pp });
@@ -210,9 +215,27 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
     if (!factorId) return;
     setDataLoading(true);
     try {
+      // 加载因子数据
       const res = await productionApi.getFactorData(factorId, { ...dataFilter, limit: 200 });
+      console.log('[FactorDrawer] Factor data loaded:', res.data);
       setFactorData(res.data?.data || []);
-    } catch { setFactorData([]); }
+
+      // 加载统计信息
+      const statsRes = await productionApi.getFactorStats(factorId);
+      console.log('[FactorDrawer] Stats loaded:', statsRes.data);
+      setDataStats(statsRes.data?.data || null);
+
+      // 加载缺失日期检查
+      const missingRes = await productionApi.getFactorMissingDates(factorId);
+      console.log('[FactorDrawer] Missing dates loaded:', missingRes.data);
+      const missingData = missingRes.data?.data;
+      setMissingDates(missingData?.missing_dates || []);
+    } catch (e) {
+      console.error('[FactorDrawer] Failed to load data:', e);
+      setFactorData([]);
+      setDataStats(null);
+      setMissingDates([]);
+    }
     setDataLoading(false);
   }, [factorId, dataFilter]);
 
@@ -245,7 +268,7 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
         preprocess: ppEdit,
         lookback_days: editLookbackDays,
       };
-      const values = { description: editDesc, category: editCategory, compute_mode: editComputeMode, depends_on: editDependsOn, params: newParams };
+      const values = { description: editDesc, category: editCategory, compute_mode: editComputeMode, depends_on: editDependsOn, params: newParams, align_calendar: editAlignCalendar };
       await productionApi.updateFactor(factorId, values);
 
       // 2. 如果代码有修改，保存代码
@@ -273,14 +296,19 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
     { title: '交易日期', dataIndex: 'trade_date', key: 'trade_date', width: 120,
       render: (v: string) => {
         if (!v) return '-';
-        // 格式化为 YYYY-MM-DD
+        // 格式化为 YYYY-MM-DD（只显示日期，不显示时间）
         if (/^\d{8}$/.test(v)) {
           return `${v.slice(0, 4)}-${v.slice(4, 6)}-${v.slice(6, 8)}`;
         }
+        // 如果是 YYYY-MM-DD HH:mm:ss 格式，只取日期部分
         if (v.includes(' ')) {
           return v.split(' ')[0];
         }
-        return v;
+        // 如果是 YYYY-MM-DD 格式，直接返回
+        if (v.length === 10 && v.includes('-')) {
+          return v;
+        }
+        return v.slice(0, 10);
       }
     },
     { title: '因子值', dataIndex: 'factor_value', key: 'factor_value', render: (v: number) => v?.toFixed(6) },
@@ -296,10 +324,10 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
         return <Tooltip content={text}><span style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>{text}</span></Tooltip>;
       }
     },
-    { title: '行数', dataIndex: 'rows', key: 'rows', width: 100,
+    { title: '行数', dataIndex: 'rows_affected', key: 'rows', width: 100,
       render: (v: number) => v?.toLocaleString() || '-'
     },
-    { title: '耗时', dataIndex: 'elapsed_seconds', key: 'dur', width: 80,
+    { title: '耗时', dataIndex: 'duration_seconds', key: 'dur', width: 80,
       render: (v: number) => v ? `${v.toFixed(1)}s` : '-'
     },
     { title: '时间', dataIndex: 'created_at', key: 'time',
@@ -452,6 +480,14 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
                     value={editLookbackDays}
                     onChange={v => setEditLookbackDays((v as number) || 60)} />
                 </div>
+                <div style={{ marginTop: 8 }}>
+                  <Checkbox checked={editAlignCalendar} onChange={e => setEditAlignCalendar(!!e.target.checked)}>
+                    对齐交易日历
+                  </Checkbox>
+                  <span style={{ color: 'var(--text-muted)', fontSize: 11, marginLeft: 4 }}>
+                    （开启后，窗口内有停牌缺口时该日因子值置 null）
+                  </span>
+                </div>
                 {/* 统计概览 */}
                 <Spin spinning={statsLoading}>
                   {stats ? (
@@ -522,14 +558,6 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
                     {dataConfigLabels.list_date && <span style={{ fontSize: 10, color: 'var(--text-muted)' }}> ({dataConfigLabels.list_date.source_label})</span>}
                   </span>
                   <span>
-                    <Checkbox checked={ppEdit.handle_suspension} onChange={(e) => setPpEdit(p => ({ ...p, handle_suspension: !!e.target.checked }))}>停牌处理</Checkbox>
-                    {dataConfigLabels.is_suspend && (
-                      <Tooltip content={dataConfigLabels.is_suspend.values ? Object.entries(dataConfigLabels.is_suspend.values).map(([k, v]) => `${k}: ${v}`).join('\n') : undefined} position="bottom">
-                        <span style={{ fontSize: 10, color: 'var(--text-muted)', cursor: dataConfigLabels.is_suspend.values ? 'help' : undefined }}> ({dataConfigLabels.is_suspend.source_label})</span>
-                      </Tooltip>
-                    )}
-                  </span>
-                  <span>
                     <Checkbox checked={ppEdit.mark_limit} onChange={(e) => setPpEdit(p => ({ ...p, mark_limit: !!e.target.checked }))}>涨跌停标记</Checkbox>
                     {dataConfigLabels.is_limit && (
                       <Tooltip content={dataConfigLabels.is_limit.values ? Object.entries(dataConfigLabels.is_limit.values).map(([k, v]) => `${k}: ${v}`).join('\n') : undefined} position="bottom">
@@ -575,6 +603,54 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
         {/* ---- 数据探查 ---- */}
         <TabPane itemKey="data" tab={<span><IconServer size="small" /> 数据</span>}>
           <div>
+            {/* 统计信息 */}
+            {dataStats && (
+              <div style={{ marginBottom: 16, padding: 12, background: 'var(--semi-color-fill-0)', borderRadius: 6 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, color: 'var(--semi-color-text-0)' }}>数据统计</div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, fontSize: 12 }}>
+                  <div>
+                    <div style={{ color: 'var(--semi-color-text-2)' }}>总行数</div>
+                    <div style={{ fontWeight: 600, marginTop: 4 }}>{dataStats.total_rows?.toLocaleString() || '-'}</div>
+                  </div>
+                  <div>
+                    <div style={{ color: 'var(--semi-color-text-2)' }}>股票数</div>
+                    <div style={{ fontWeight: 600, marginTop: 4 }}>{dataStats.stock_count?.toLocaleString() || '-'}</div>
+                  </div>
+                  <div>
+                    <div style={{ color: 'var(--semi-color-text-2)' }}>日期范围</div>
+                    <div style={{ fontWeight: 600, marginTop: 4 }}>{dataStats.min_date || '-'} ~ {dataStats.max_date || '-'}</div>
+                  </div>
+                  <div>
+                    <div style={{ color: 'var(--semi-color-text-2)' }}>均值 ± 标准差</div>
+                    <div style={{ fontWeight: 600, marginTop: 4 }}>
+                      {dataStats.mean_val != null ? `${dataStats.mean_val.toFixed(4)} ± ${(dataStats.std_val || 0).toFixed(4)}` : '-'}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ color: 'var(--semi-color-text-2)' }}>最小值</div>
+                    <div style={{ fontWeight: 600, marginTop: 4 }}>{dataStats.min_val != null ? dataStats.min_val.toFixed(6) : '-'}</div>
+                  </div>
+                  <div>
+                    <div style={{ color: 'var(--semi-color-text-2)' }}>最大值</div>
+                    <div style={{ fontWeight: 600, marginTop: 4 }}>{dataStats.max_val != null ? dataStats.max_val.toFixed(6) : '-'}</div>
+                  </div>
+                  <div style={{ gridColumn: 'span 2' }}>
+                    <div style={{ color: 'var(--semi-color-text-2)' }}>数据完整性</div>
+                    <div style={{ fontWeight: 600, marginTop: 4 }}>
+                      {missingDates.length === 0 ? (
+                        <span style={{ color: 'var(--semi-color-success)' }}>✓ 完整</span>
+                      ) : (
+                        <Tooltip content={`缺失日期: ${missingDates.slice(0, 10).join(', ')}${missingDates.length > 10 ? '...' : ''}`}>
+                          <span style={{ color: 'var(--semi-color-warning)' }}>⚠ 缺失 {missingDates.length} 个交易日</span>
+                        </Tooltip>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* 筛选器 */}
             <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
               <Input size="small" placeholder="股票代码" style={{ width: 120 }} showClear
                 onChange={v => setDataFilter(f => ({ ...f, ts_code: v || undefined }))} />
@@ -584,6 +660,8 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
                 onChange={v => setDataFilter(f => ({ ...f, end_date: v || undefined }))} />
               <Button size="small" theme="solid" icon={<IconSearch />} onClick={loadData}>查询</Button>
             </div>
+
+            {/* 数据表格 */}
             <Table dataSource={factorData} columns={dataColumns} rowKey={(r: any) => `${r.ts_code}-${r.trade_date}`}
               loading={dataLoading} size="small" pagination={{ pageSize: 15 }}
               scroll={{ y: 400 }} />
@@ -750,18 +828,8 @@ const CodeTestPanel: React.FC<{ code: string; dependsOn?: string[]; preprocess?:
     <div style={{ marginTop: 8, borderTop: '1px solid var(--border-color)', paddingTop: 8 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
         <span style={{ color: 'var(--text-secondary)', fontSize: 12, whiteSpace: 'nowrap' }}>测试区间:</span>
-        <DatePicker type="dateRange" size="small" style={{ flex: 1 }}
-          defaultPickerValue={dayjs().subtract(1, 'month').toDate()}
-          disabledDate={(current) => current ? dayjs(current).isAfter(dayjs().endOf('day')) : false}
-          onChange={(date, dateStr) => {
-            const strs = dateStr as unknown as string[];
-            if (strs && Array.isArray(strs) && strs[0] && strs[1]) {
-              setDateRange([strs[0].replace(/-/g, ''), strs[1].replace(/-/g, '')]);
-            } else {
-              setDateRange(['', '']);
-            }
-          }}
-          placeholder={['开始日期', '结束日期']} />
+        <QuantDatePicker style={{ flex: 1 }}
+          onChange={(s, e) => setDateRange([s, e])} />
         <Button size="small" theme="solid" icon={<IconAlertTriangle />}
           loading={testing} onClick={handleTest}>编译测试</Button>
       </div>
@@ -869,12 +937,14 @@ const FactorManageTab: React.FC = () => {
   const [selectedFactor, setSelectedFactor] = useState<string | null>(null);
   const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
   const [batchLoading, setBatchLoading] = useState<boolean>(false);
+  const [filterStartDate, setFilterStartDate] = useState<string>('');
+  const [filterEndDate, setFilterEndDate] = useState<string>('');
   const [createModal, setCreateModal] = useState<boolean>(false);
   const [createCode, setCreateCode] = useState<string>(CODE_TEMPLATE);
   const [createPreprocess, setCreatePreprocess] = useState<PreprocessOptions>({ ...DEFAULT_PREPROCESS });
   const [drawerState, setDrawerState] = useState<{ open: boolean; factor: FactorDefinition | null; tab?: string }>({ open: false, factor: null });
   const [fullRunModal, setFullRunModal] = useState<{ visible: boolean; factorId: string | null; computeMode: string }>({ visible: false, factorId: null, computeMode: 'incremental' });
-  const [fullRunDates, setFullRunDates] = useState<[dayjs.Dayjs | null, dayjs.Dayjs | null]>([null, null]);
+  const [fullRunDates, setFullRunDates] = useState<[string, string]>(['', '']);
   // Create form state (replaces Form.useForm)
   const [createFactorId, setCreateFactorId] = useState<string>('');
   const [createDesc, setCreateDesc] = useState<string>('');
@@ -882,6 +952,7 @@ const FactorManageTab: React.FC = () => {
   const [createComputeMode, setCreateComputeMode] = useState<string>('incremental');
   const [createDependsOn, setCreateDependsOn] = useState<string[]>(['sync_daily_data']);
   const [createLookbackDays, setCreateLookbackDays] = useState<number>(60);
+  const [createAlignCalendar, setCreateAlignCalendar] = useState<boolean>(false);
   const createEditorRef = useRef<unknown>(null);
   // 新建因子的 DataFrame schema
   const [createDfSchema, setCreateDfSchema] = useState<any>(null);
@@ -931,7 +1002,7 @@ const FactorManageTab: React.FC = () => {
 
   // 批量计算模态框
   const [batchCalcModalVisible, setBatchCalcModalVisible] = useState<boolean>(false);
-  const [batchCalcDates, setBatchCalcDates] = useState<[dayjs.Dayjs | null, dayjs.Dayjs | null]>([null, null]);
+  const [batchCalcDates, setBatchCalcDates] = useState<[string, string]>(['', '']);
 
   const loadFactors = useCallback(async (): Promise<void> => {
     setLoading(true);
@@ -945,9 +1016,9 @@ const FactorManageTab: React.FC = () => {
     setLoading(false);
   }, []);
 
-  const loadHistory = useCallback(async (factorId?: string): Promise<void> => {
+  const loadHistory = useCallback(async (factorId?: string, startDate?: string, endDate?: string): Promise<void> => {
     try {
-      const res = await productionApi.getProductionHistory(factorId, 30);
+      const res = await productionApi.getProductionHistory(factorId, 30, startDate, endDate);
       setHistory(res.data?.data || []);
     } catch (error) {
       console.error('Failed to load history:', error);
@@ -1015,12 +1086,12 @@ const FactorManageTab: React.FC = () => {
         preprocess: createPreprocess,
         lookback_days: createLookbackDays,
       };
-      await productionApi.createFactor({ ...values, params, code: createCode || undefined });
+      await productionApi.createFactor({ ...values, params, code: createCode || undefined, align_calendar: createAlignCalendar });
       Toast.success(`因子 ${values.factor_id} 创建成功`);
       setCreateModal(false);
       setCreateFactorId(''); setCreateDesc(''); setCreateCategory('custom'); setCreateComputeMode('incremental');
       setCreateCode(CODE_TEMPLATE);
-      setCreatePreprocess({ ...DEFAULT_PREPROCESS }); setCreateDependsOn(['sync_daily_data']); setCreateLookbackDays(60);
+      setCreatePreprocess({ ...DEFAULT_PREPROCESS }); setCreateDependsOn(['sync_daily_data']); setCreateLookbackDays(60); setCreateAlignCalendar(false);
       loadFactors();
     } catch (e: any) {
       if (e.response) Toast.error(e.response?.data?.detail || '创建失败');
@@ -1070,7 +1141,7 @@ const FactorManageTab: React.FC = () => {
     { title: '模式', dataIndex: 'compute_mode', key: 'mode', width: 60,
       render: (v: string) => <Tag size="small" color={v === 'incremental' ? 'blue' : 'green'}>{v === 'incremental' ? '增量' : '全量'}</Tag>
     },
-    { title: '最新数据', dataIndex: 'latest_data_date', key: 'latest', width: 90,
+    { title: '最新数据', dataIndex: 'latest_date', key: 'latest', width: 90,
       render: (v: string) => {
         if (!v) return <span style={{ color: 'var(--text-muted)' }}>-</span>;
         // 格式化为日期格式（去掉时间部分）
@@ -1085,12 +1156,12 @@ const FactorManageTab: React.FC = () => {
     { title: '上次计算', dataIndex: 'last_computed_at', key: 'computed', width: 130,
       render: (v: string) => {
         if (!v) return '-';
-        // 格式化为日期格式（YYYY-MM-DD）
-        const dateStr = v.includes(' ') ? v.split(' ')[0] : v.slice(0, 10);
+        // 格式化为日期时间格式（YYYY-MM-DD HH:mm:ss）
+        const dateTimeStr = v.slice(0, 19);
         return (
           <Tooltip content={v}>
             <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-secondary)', fontSize: '12px' }}>
-              {dateStr}
+              {dateTimeStr}
             </div>
           </Tooltip>
         );
@@ -1103,7 +1174,7 @@ const FactorManageTab: React.FC = () => {
             loading={runLoading === record.factor_id}
             onClick={() => {
               setFullRunModal({ visible: true, factorId: record.factor_id, computeMode: record.compute_mode || 'incremental' });
-              setFullRunDates([null, null]);
+              setFullRunDates(['', '']);
             }}>计算</Button>
           <Popconfirm title="确认删除?" onConfirm={() => handleDelete(record.factor_id)}>
             <Button size="small" type="danger" icon={<IconDelete />} />
@@ -1126,7 +1197,7 @@ const FactorManageTab: React.FC = () => {
     { title: '状态', dataIndex: 'status', key: 'status', width: 80,
       render: (v: string) => <Tag size="small" color={v === 'success' ? 'green' : v === 'running' ? 'blue' : 'red'}>{v}</Tag>
     },
-    { title: '行数', dataIndex: 'rows', key: 'rows', width: 90,
+    { title: '行数', dataIndex: 'rows_affected', key: 'rows', width: 90,
       render: (v: number) => {
         const formatted = v?.toLocaleString() || '-';
         return (
@@ -1136,7 +1207,7 @@ const FactorManageTab: React.FC = () => {
         );
       }
     },
-    { title: '耗时', dataIndex: 'elapsed_seconds', key: 'dur', width: 80,
+    { title: '耗时', dataIndex: 'duration_seconds', key: 'dur', width: 80,
       render: (v: number) => {
         const formatted = v ? `${v.toFixed(1)}s` : '-';
         return (
@@ -1176,7 +1247,7 @@ const FactorManageTab: React.FC = () => {
           <div style={{ display: 'flex', gap: 8 }}>
             {selectedRowKeys.length > 0 && (
               <Button size="small" theme="solid" icon={<IconBolt />} loading={batchLoading}
-                onClick={() => { setBatchCalcDates([null, null]); setBatchCalcModalVisible(true); }}>批量计算 ({selectedRowKeys.length})</Button>
+                onClick={() => { setBatchCalcDates(['', '']); setBatchCalcModalVisible(true); }}>批量计算 ({selectedRowKeys.length})</Button>
             )}
             <Button size="small" icon={<IconPlus />} onClick={() => setCreateModal(true)}>新建因子</Button>
             <Button icon={<IconRefresh />} onClick={loadFactors} size="small">刷新</Button>
@@ -1190,9 +1261,26 @@ const FactorManageTab: React.FC = () => {
       <Card style={{ background: 'var(--bg-card)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
           <span style={{ color: 'var(--text-secondary)', fontWeight: 600, fontSize: 15 }}>计算历史</span>
-          <Select showClear placeholder="筛选因子" style={{ width: 160 }} size="small"
-            value={selectedFactor || undefined} onChange={(v) => { setSelectedFactor((v as string) || null); loadHistory((v as string) || undefined); }}
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12, alignItems: 'center' }}>
+          <Select showClear placeholder="按因子筛选" style={{ width: 150 }} size="small"
+            value={selectedFactor || undefined}
+            onChange={(v) => {
+              setSelectedFactor((v as string) || null);
+              loadHistory((v as string) || undefined, filterStartDate || undefined, filterEndDate || undefined);
+            }}
             optionList={factors.map(f => ({ label: f.factor_id, value: f.factor_id }))} />
+          <QuantDatePicker
+            value={[filterStartDate, filterEndDate]}
+            style={{ width: 280 }}
+            onChange={(s, e) => { setFilterStartDate(s); setFilterEndDate(e); }}
+          />
+          <Button theme="solid" type="primary" onClick={() => loadHistory(selectedFactor || undefined, filterStartDate || undefined, filterEndDate || undefined)} size="small">
+            筛选
+          </Button>
+          <span style={{ fontSize: 11, color: 'var(--semi-color-text-2)', whiteSpace: 'nowrap' }}>
+            按完成时间筛选
+          </span>
         </div>
         <Table dataSource={history} columns={historyColumns} rowKey={(r: any) => `${r.factor_id}-${r.created_at}`}
           size="small" pagination={{ pageSize: 10 }} />
@@ -1358,7 +1446,6 @@ const FactorManageTab: React.FC = () => {
         <div style={{ display: 'flex', gap: 16, marginBottom: 8 }}>
           <Checkbox checked={createPreprocess.filter_st} onChange={(e) => setCreatePreprocess(p => ({ ...p, filter_st: !!e.target.checked }))}>过滤 ST</Checkbox>
           <Checkbox checked={createPreprocess.filter_new_stock} onChange={(e) => setCreatePreprocess(p => ({ ...p, filter_new_stock: !!e.target.checked }))}>过滤新股</Checkbox>
-          <Checkbox checked={createPreprocess.handle_suspension} onChange={(e) => setCreatePreprocess(p => ({ ...p, handle_suspension: !!e.target.checked }))}>停牌处理</Checkbox>
           <Checkbox checked={createPreprocess.mark_limit} onChange={(e) => setCreatePreprocess(p => ({ ...p, mark_limit: !!e.target.checked }))}>涨跌停标记</Checkbox>
         </div>
         {createPreprocess.filter_new_stock && (
@@ -1376,6 +1463,14 @@ const FactorManageTab: React.FC = () => {
           <InputNumber size="small" min={1} max={1000} style={{ width: '100%' }}
             value={createLookbackDays}
             onChange={v => setCreateLookbackDays((v as number) || 60)} />
+        </div>
+        <div style={{ marginTop: 8 }}>
+          <Checkbox checked={createAlignCalendar} onChange={e => setCreateAlignCalendar(!!e.target.checked)}>
+            对齐交易日历
+          </Checkbox>
+          <span style={{ color: 'var(--text-muted)', fontSize: 11, marginLeft: 4 }}>
+            （开启后，窗口内有停牌缺口时该日因子值置 null）
+          </span>
         </div>
         <div style={{ marginTop: 8 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
@@ -1408,8 +1503,8 @@ const FactorManageTab: React.FC = () => {
             setFullRunModal({ visible: false, factorId: null, computeMode: 'incremental' });
             handleRun(fullRunModal.factorId, 'full');
           } else {
-            const sd = fullRunDates[0]?.format('YYYYMMDD');
-            const ed = fullRunDates[1]?.format('YYYYMMDD');
+            const sd = fullRunDates[0] || undefined;
+            const ed = fullRunDates[1] || undefined;
             setFullRunModal({ visible: false, factorId: null, computeMode: 'incremental' });
             handleRun(fullRunModal.factorId, sd && ed ? 'full' : 'incremental', sd, ed);
           }
@@ -1427,21 +1522,13 @@ const FactorManageTab: React.FC = () => {
               </div>
               <div>
                 <div style={{ marginBottom: 6, fontWeight: 500, fontSize: '13px' }}>计算日期范围</div>
-                <DatePicker type="dateRange" style={{ width: '100%' }} size="small"
-                  placeholder={['开始日期', '结束日期']}
-                  defaultPickerValue={dayjs().subtract(1, 'month').toDate()}
-                  value={fullRunDates[0] && fullRunDates[1] ? [fullRunDates[0].toDate(), fullRunDates[1].toDate()] : undefined}
-                  onChange={(dates) => {
-                    if (dates && Array.isArray(dates) && dates.length === 2 && dates[0] && dates[1]) {
-                      setFullRunDates([dayjs(dates[0]), dayjs(dates[1])]);
-                    } else {
-                      setFullRunDates([null, null]);
-                    }
-                  }} />
+                <QuantDatePicker style={{ width: '100%' }}
+                  value={fullRunDates}
+                  onChange={(s, e) => setFullRunDates([s, e])} />
                 {fullRunDates[0] && fullRunDates[1] && (
                   <div style={{ marginTop: 8, padding: '8px 12px', background: 'var(--color-primary-light-default)', borderRadius: '6px' }}>
                     <span style={{ color: 'var(--color-primary)', fontSize: '13px', fontWeight: 500 }}>
-                      共 {fullRunDates[1].diff(fullRunDates[0], 'day') + 1} 天
+                      共 {dayjs(fullRunDates[1], 'YYYYMMDD').diff(dayjs(fullRunDates[0], 'YYYYMMDD'), 'day') + 1} 天
                     </span>
                   </div>
                 )}
@@ -1456,8 +1543,8 @@ const FactorManageTab: React.FC = () => {
         title={`批量计算 (已选 ${selectedRowKeys.length} 个因子)`}
         visible={batchCalcModalVisible}
         onOk={() => {
-          const sd = batchCalcDates[0]?.format('YYYYMMDD');
-          const ed = batchCalcDates[1]?.format('YYYYMMDD');
+          const sd = batchCalcDates[0] || undefined;
+          const ed = batchCalcDates[1] || undefined;
           setBatchCalcModalVisible(false);
           handleBatchRun(sd && ed ? 'full' : 'incremental', sd, ed);
         }}
@@ -1495,21 +1582,13 @@ const FactorManageTab: React.FC = () => {
               选择计算日期范围。留空则执行增量计算（仅计算最新数据）。
             </div>
             <div style={{ marginBottom: 6, fontWeight: 500, fontSize: '13px' }}>计算日期范围</div>
-            <DatePicker type="dateRange" style={{ width: '100%' }} size="small"
-              placeholder={['开始日期', '结束日期']}
-              defaultPickerValue={dayjs().subtract(1, 'month').toDate()}
-              value={batchCalcDates[0] && batchCalcDates[1] ? [batchCalcDates[0].toDate(), batchCalcDates[1].toDate()] : undefined}
-              onChange={(dates) => {
-                if (dates && Array.isArray(dates) && dates.length === 2 && dates[0] && dates[1]) {
-                  setBatchCalcDates([dayjs(dates[0]), dayjs(dates[1])]);
-                } else {
-                  setBatchCalcDates([null, null]);
-                }
-              }} />
+            <QuantDatePicker style={{ width: '100%' }}
+              value={batchCalcDates}
+              onChange={(s, e) => setBatchCalcDates([s, e])} />
             {batchCalcDates[0] && batchCalcDates[1] && (
               <div style={{ marginTop: 8, padding: '8px 12px', background: 'var(--color-primary-light-default)', borderRadius: '6px' }}>
                 <span style={{ color: 'var(--color-primary)', fontSize: '13px', fontWeight: 500 }}>
-                  共 {batchCalcDates[1].diff(batchCalcDates[0], 'day') + 1} 天
+                  共 {dayjs(batchCalcDates[1], 'YYYYMMDD').diff(dayjs(batchCalcDates[0], 'YYYYMMDD'), 'day') + 1} 天
                 </span>
               </div>
             )}
@@ -1728,13 +1807,8 @@ const AnalysisTab: React.FC = () => {
           <Select placeholder="选择因子" style={{ width: 180 }} value={selectedFactor || undefined}
             onChange={(v) => { setSelectedFactor(v as string); loadAnalysis(v as string); loadHistory(v as string); }}
             optionList={factors.map(f => ({ label: `${f.factor_id}`, value: f.factor_id }))} />
-          <DatePicker type="dateRange" placeholder={['开始日期', '结束日期']} style={{ width: 240 }}
-            onChange={(v: any) => {
-              if (v && v.length === 2) {
-                setStartDate(v[0] ? dayjs(v[0]).format('YYYYMMDD') : '');
-                setEndDate(v[1] ? dayjs(v[1]).format('YYYYMMDD') : '');
-              }
-            }} />
+          <QuantDatePicker disableFuture={false} style={{ width: 240 }}
+            onChange={(s, e) => { setStartDate(s); setEndDate(e); }} />
           <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>周期:</span>
           <Select multiple style={{ width: 200 }} value={periods} onChange={v => setPeriods(v as number[])}
             optionList={[1,2,3,5,10,20].map(v => ({ label: `${v}D`, value: v }))} />

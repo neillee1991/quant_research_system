@@ -5,13 +5,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Card, Table, Button, Tag, Select, Modal, Popconfirm, Checkbox,
-  Toast, DatePicker, Banner, SideSheet, Input, InputNumber, Tooltip,
+  Toast, Banner, SideSheet, Input, InputNumber, Tooltip,
 } from '@douyinfe/semi-ui';
 import {
   IconPlus, IconDelete, IconEdit, IconBolt, IconPlay, IconRefresh, IconCode,
 } from '@douyinfe/semi-icons';
 import dayjs from 'dayjs';
 import Editor from '@monaco-editor/react';
+import QuantDatePicker from '../../components/QuantDatePicker';
 import { productionApi, DEFAULT_PREPROCESS } from '../../api';
 import { useThemeStore } from '../../store';
 import { formatCode } from '../../utils/codeFormatter';
@@ -42,7 +43,7 @@ const FactorManageTab: React.FC = () => {
   const [createPreprocess, setCreatePreprocess] = useState<PreprocessOptions>({ ...DEFAULT_PREPROCESS });
   const [drawerState, setDrawerState] = useState<{ open: boolean; factor: FactorDefinition | null; tab?: string }>({ open: false, factor: null });
   const [fullRunModal, setFullRunModal] = useState<{ visible: boolean; factorId: string | null; computeMode: string }>({ visible: false, factorId: null, computeMode: 'incremental' });
-  const [fullRunDates, setFullRunDates] = useState<[dayjs.Dayjs | null, dayjs.Dayjs | null]>([null, null]);
+  const [fullRunDates, setFullRunDates] = useState<[string, string]>(['', '']);
 
   // Create form state
   const [createFactorId, setCreateFactorId] = useState<string>('');
@@ -51,6 +52,7 @@ const FactorManageTab: React.FC = () => {
   const [createComputeMode, setCreateComputeMode] = useState<string>('incremental');
   const [createDependsOn, setCreateDependsOn] = useState<string[]>(['sync_daily_data']);
   const [createLookbackDays, setCreateLookbackDays] = useState<number>(60);
+  const [createAlignCalendar, setCreateAlignCalendar] = useState<boolean>(false);
   const createEditorRef = useRef<unknown>(null);
 
   // 可用表列表
@@ -58,7 +60,7 @@ const FactorManageTab: React.FC = () => {
 
   // 批量计算模态框
   const [batchCalcModalVisible, setBatchCalcModalVisible] = useState<boolean>(false);
-  const [batchCalcDates, setBatchCalcDates] = useState<[dayjs.Dayjs | null, dayjs.Dayjs | null]>([null, null]);
+  const [batchCalcDates, setBatchCalcDates] = useState<[string, string]>(['', '']);
 
   // 加载可用表列表
   useEffect(() => {
@@ -131,7 +133,7 @@ const FactorManageTab: React.FC = () => {
         preprocess: createPreprocess,
         lookback_days: createLookbackDays,
       };
-      await productionApi.createFactor({ ...values, params, code: createCode || undefined });
+      await productionApi.createFactor({ ...values, params, code: createCode || undefined, align_calendar: createAlignCalendar });
       Toast.success(`因子 ${values.factor_id} 创建成功`);
       setCreateModal(false);
       setCreateFactorId('');
@@ -142,6 +144,7 @@ const FactorManageTab: React.FC = () => {
       setCreatePreprocess({ ...DEFAULT_PREPROCESS });
       setCreateDependsOn(['sync_daily_data']);
       setCreateLookbackDays(60);
+      setCreateAlignCalendar(false);
       loadFactors();
     } catch (e: any) {
       const errorMessage = e.response?.data?.detail || '创建失败';
@@ -286,6 +289,15 @@ const FactorManageTab: React.FC = () => {
         );
       }
     },
+    { title: '失败原因', dataIndex: 'error_message', key: 'error', width: 200,
+      render: (v: string) => v ? (
+        <Tooltip content={v} position="topLeft">
+          <span style={{ color: 'var(--color-loss)', fontSize: '12px', cursor: 'help' }}>
+            {v.length > 40 ? v.slice(0, 40) + '…' : v}
+          </span>
+        </Tooltip>
+      ) : null
+    },
   ];
 
   return (
@@ -296,7 +308,7 @@ const FactorManageTab: React.FC = () => {
           <div style={{ display: 'flex', gap: 8 }}>
             {selectedRowKeys.length > 0 && (
               <Button size="small" theme="solid" icon={<IconBolt />} loading={batchLoading}
-                onClick={() => { setBatchCalcDates([null, null]); setBatchCalcModalVisible(true); }}>批量计算 ({selectedRowKeys.length})</Button>
+                onClick={() => { setBatchCalcDates(['', '']); setBatchCalcModalVisible(true); }}>批量计算 ({selectedRowKeys.length})</Button>
             )}
             <Button size="small" icon={<IconPlus />} onClick={() => setCreateModal(true)}>新建因子</Button>
             <Button icon={<IconRefresh />} onClick={loadFactors} size="small">刷新</Button>
@@ -398,6 +410,14 @@ const FactorManageTab: React.FC = () => {
           </div>
         </div>
         <div style={{ marginBottom: 12 }}>
+          <Checkbox checked={createAlignCalendar} onChange={e => setCreateAlignCalendar(!!e.target.checked)}>
+            对齐交易日历
+          </Checkbox>
+          <span style={{ color: 'var(--text-muted)', fontSize: 11, marginLeft: 4 }}>
+            （开启后，窗口内有停牌缺口时该日因子值置 null）
+          </span>
+        </div>
+        <div style={{ marginBottom: 12 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
             <div style={{ color: 'var(--text-secondary)', fontSize: 12 }}>因子代码 <span style={{ color: 'var(--color-loss)' }}>*</span></div>
             <Button size="small" icon={<IconCode />} onClick={handleFormatCreateCode}>格式化</Button>
@@ -414,7 +434,6 @@ const FactorManageTab: React.FC = () => {
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
             <Checkbox checked={createPreprocess.filter_st} onChange={(e) => setCreatePreprocess(p => ({ ...p, filter_st: !!e.target.checked }))}>过滤 ST</Checkbox>
             <Checkbox checked={createPreprocess.filter_new_stock} onChange={(e) => setCreatePreprocess(p => ({ ...p, filter_new_stock: !!e.target.checked }))}>过滤新股</Checkbox>
-            <Checkbox checked={createPreprocess.handle_suspension} onChange={(e) => setCreatePreprocess(p => ({ ...p, handle_suspension: !!e.target.checked }))}>停牌处理</Checkbox>
             <Checkbox checked={createPreprocess.mark_limit} onChange={(e) => setCreatePreprocess(p => ({ ...p, mark_limit: !!e.target.checked }))}>涨跌停标记</Checkbox>
           </div>
         </div>
@@ -426,8 +445,8 @@ const FactorManageTab: React.FC = () => {
         visible={batchCalcModalVisible}
         onCancel={() => setBatchCalcModalVisible(false)}
         onOk={() => {
-          const startDate = batchCalcDates[0] ? batchCalcDates[0].format('YYYYMMDD') : undefined;
-          const endDate = batchCalcDates[1] ? batchCalcDates[1].format('YYYYMMDD') : undefined;
+          const startDate = batchCalcDates[0] || undefined;
+          const endDate = batchCalcDates[1] || undefined;
           handleBatchRun('full', startDate, endDate);
           setBatchCalcModalVisible(false);
         }}
@@ -438,21 +457,15 @@ const FactorManageTab: React.FC = () => {
           <Banner type="info" description="选择计算日期范围。留空则执行增量计算（仅计算最新数据）。" style={{ marginBottom: 12 }} />
           <div>
             <div style={{ marginBottom: 6, fontWeight: 500, fontSize: '13px' }}>计算日期范围</div>
-            <DatePicker type="dateRange" style={{ width: '100%' }} size="small"
-              placeholder={['开始日期', '结束日期']}
-              defaultPickerValue={dayjs().subtract(1, 'month').toDate()}
-              value={batchCalcDates[0] && batchCalcDates[1] ? [batchCalcDates[0].toDate(), batchCalcDates[1].toDate()] : undefined}
-              onChange={(dates) => {
-                if (dates && Array.isArray(dates) && dates.length === 2 && dates[0] && dates[1]) {
-                  setBatchCalcDates([dayjs(dates[0]), dayjs(dates[1])]);
-                } else {
-                  setBatchCalcDates([null, null]);
-                }
-              }} />
+            <QuantDatePicker
+              value={batchCalcDates}
+              onChange={(s, e) => setBatchCalcDates([s, e])}
+              style={{ width: '100%' }}
+            />
             {batchCalcDates[0] && batchCalcDates[1] && (
               <div style={{ marginTop: 8, padding: '8px 12px', background: 'var(--color-primary-light-default)', borderRadius: '6px' }}>
                 <span style={{ color: 'var(--color-primary)', fontSize: '13px', fontWeight: 500 }}>
-                  共 {batchCalcDates[1].diff(batchCalcDates[0], 'day') + 1} 天
+                  共 {dayjs(batchCalcDates[1], 'YYYYMMDD').diff(dayjs(batchCalcDates[0], 'YYYYMMDD'), 'day') + 1} 天
                 </span>
               </div>
             )}

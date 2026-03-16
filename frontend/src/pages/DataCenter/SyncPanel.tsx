@@ -9,7 +9,6 @@ import {
   Tag,
   Tooltip,
   Select,
-  DatePicker,
   Toast,
 } from '@douyinfe/semi-ui';
 import {
@@ -19,9 +18,8 @@ import {
   IconHistory,
   IconClock,
 } from '@douyinfe/semi-icons';
-import dayjs from 'dayjs';
+import QuantDatePicker from '../../components/QuantDatePicker';
 import type { SyncTask, TaskStatus, SyncLog, ScheduleInfo } from '../../types';
-import type { LogFilters } from './types';
 
 interface SyncPanelProps {
   syncTasks: SyncTask[];
@@ -56,20 +54,13 @@ export const SyncPanel: React.FC<SyncPanelProps> = ({
   onOpenTaskDrawer,
   onLoadSyncLogs,
 }) => {
-  const [logFilters, setLogFilters] = useState<LogFilters>({
-    source: undefined,
-    dataType: undefined,
-    startDate: undefined,
-    endDate: undefined,
-  });
+  const [filterSource, setFilterSource] = useState<string | undefined>(undefined);
+  const [filterDataType, setFilterDataType] = useState<string | undefined>(undefined);
+  const [filterStartDate, setFilterStartDate] = useState<string>('');
+  const [filterEndDate, setFilterEndDate] = useState<string>('');
 
   const handleFilterChange = () => {
-    onLoadSyncLogs(
-      logFilters.source,
-      logFilters.dataType,
-      logFilters.startDate,
-      logFilters.endDate
-    );
+    onLoadSyncLogs(filterSource, filterDataType, filterStartDate || undefined, filterEndDate || undefined);
   };
 
   const formatDate = (dateStr: string | null | undefined): string => {
@@ -412,40 +403,19 @@ export const SyncPanel: React.FC<SyncPanelProps> = ({
             showClear
             size="small"
             optionList={syncTasks.map((task) => ({ label: task.task_id, value: task.task_id }))}
-            onChange={(value) =>
-              setLogFilters({ ...logFilters, dataType: value as string | undefined })
-            }
+            onChange={(value) => setFilterDataType(value as string | undefined)}
           />
-          <DatePicker
-            type="dateRange"
-            placeholder={['开始日期', '结束日期']}
+          <QuantDatePicker
+            value={[filterStartDate, filterEndDate]}
             style={{ width: 280 }}
-            size="small"
-            defaultPickerValue={dayjs().subtract(1, 'month').toDate()}
-            value={
-              logFilters.startDate && logFilters.endDate
-                ? [
-                    dayjs(logFilters.startDate, 'YYYYMMDD').toDate(),
-                    dayjs(logFilters.endDate, 'YYYYMMDD').toDate(),
-                  ]
-                : undefined
-            }
-            onChange={(date, dateStr) => {
-              const strs = dateStr as unknown as string[];
-              if (strs && Array.isArray(strs) && strs[0] && strs[1]) {
-                setLogFilters({
-                  ...logFilters,
-                  startDate: strs[0].replace(/-/g, ''),
-                  endDate: strs[1].replace(/-/g, ''),
-                });
-              } else {
-                setLogFilters({ ...logFilters, startDate: undefined, endDate: undefined });
-              }
-            }}
+            onChange={(s, e) => { setFilterStartDate(s); setFilterEndDate(e); }}
           />
           <Button theme="solid" type="primary" onClick={handleFilterChange} size="small">
             筛选
           </Button>
+          <span style={{ fontSize: 11, color: 'var(--semi-color-text-2)', whiteSpace: 'nowrap' }}>
+            按任务完成日期筛选
+          </span>
         </div>
         <Table
           dataSource={syncLogs}

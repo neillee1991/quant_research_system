@@ -9,7 +9,6 @@ import {
   Tag,
   Tooltip,
   Select,
-  DatePicker,
 } from '@douyinfe/semi-ui';
 import {
   IconPlay,
@@ -17,9 +16,8 @@ import {
   IconDelete,
   IconHistory,
 } from '@douyinfe/semi-icons';
-import dayjs from 'dayjs';
+import QuantDatePicker from '../../components/QuantDatePicker';
 import type { ETLTask } from '../../types';
-import type { ETLLogFilters } from './types';
 
 interface ETLPanelProps {
   etlTasks: ETLTask[];
@@ -50,14 +48,12 @@ export const ETLPanel: React.FC<ETLPanelProps> = ({
   onOpenBackfillModal,
   onLoadLogs,
 }) => {
-  const [logFilters, setLogFilters] = useState<ETLLogFilters>({
-    taskId: undefined,
-    startDate: undefined,
-    endDate: undefined,
-  });
+  const [filterTaskId, setFilterTaskId] = useState<string | undefined>(undefined);
+  const [filterStartDate, setFilterStartDate] = useState<string>('');
+  const [filterEndDate, setFilterEndDate] = useState<string>('');
 
   const handleFilterChange = () => {
-    onLoadLogs(logFilters.taskId, logFilters.startDate, logFilters.endDate);
+    onLoadLogs(filterTaskId, filterStartDate || undefined, filterEndDate || undefined);
   };
 
   const formatDate = (dateStr: string | null | undefined): string => {
@@ -388,32 +384,19 @@ export const ETLPanel: React.FC<ETLPanelProps> = ({
             showClear
             size="small"
             optionList={etlTasks.map((t) => ({ label: t.task_id, value: t.task_id }))}
-            onChange={(value) =>
-              setLogFilters({ ...logFilters, taskId: value as string | undefined })
-            }
+            onChange={(value) => setFilterTaskId(value as string | undefined)}
           />
-          <DatePicker
-            type="dateRange"
-            placeholder={['开始日期', '结束日期']}
+          <QuantDatePicker
+            value={[filterStartDate, filterEndDate]}
             style={{ width: 280 }}
-            size="small"
-            defaultPickerValue={dayjs().subtract(1, 'month').toDate()}
-            onChange={(date: any, dateStr: any) => {
-              const strs = dateStr as unknown as string[];
-              if (strs && Array.isArray(strs) && strs[0] && strs[1]) {
-                setLogFilters({
-                  ...logFilters,
-                  startDate: strs[0].replace(/-/g, ''),
-                  endDate: strs[1].replace(/-/g, ''),
-                });
-              } else {
-                setLogFilters({ ...logFilters, startDate: undefined, endDate: undefined });
-              }
-            }}
+            onChange={(s, e) => { setFilterStartDate(s); setFilterEndDate(e); }}
           />
           <Button theme="solid" type="primary" onClick={handleFilterChange} size="small">
             筛选
           </Button>
+          <span style={{ fontSize: 11, color: 'var(--semi-color-text-2)', whiteSpace: 'nowrap' }}>
+            按任务完成日期筛选
+          </span>
         </div>
         <Table
           dataSource={etlLogs}
