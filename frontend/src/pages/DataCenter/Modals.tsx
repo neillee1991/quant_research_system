@@ -2,8 +2,9 @@
  * 同步任务配置模态框组件
  */
 import React from 'react';
-import { Modal, DatePicker, Tag } from '@douyinfe/semi-ui';
+import { Modal, Tag } from '@douyinfe/semi-ui';
 import dayjs from 'dayjs';
+import QuantDatePicker from '../../components/QuantDatePicker';
 import type { SyncTask } from '../../types';
 
 interface SyncModalProps {
@@ -68,30 +69,10 @@ export const SyncModal: React.FC<SyncModalProps> = ({
               <div style={{ marginBottom: 6, fontWeight: 500, fontSize: '13px' }}>
                 日期范围（可选）
               </div>
-              <DatePicker
-                type="dateRange"
-                placeholder={['开始日期', '结束日期']}
-                defaultPickerValue={dayjs().subtract(1, 'month').toDate()}
-                value={
-                  startDate && endDate
-                    ? [
-                        dayjs(startDate, 'YYYYMMDD').toDate(),
-                        dayjs(endDate, 'YYYYMMDD').toDate(),
-                      ]
-                    : undefined
-                }
-                onChange={(date, dateStr) => {
-                  const strs = dateStr as unknown as string[];
-                  if (strs && Array.isArray(strs) && strs[0] && strs[1]) {
-                    onStartDateChange(strs[0].replace(/-/g, ''));
-                    onEndDateChange(strs[1].replace(/-/g, ''));
-                  } else {
-                    onStartDateChange('');
-                    onEndDateChange('');
-                  }
-                }}
+              <QuantDatePicker
+                value={[startDate, endDate]}
+                onChange={(s, e) => { onStartDateChange(s); onEndDateChange(e); }}
                 style={{ width: '100%' }}
-                size="small"
               />
               {startDate && endDate && (
                 <div
@@ -220,28 +201,11 @@ export const BatchSyncModal: React.FC<BatchSyncModalProps> = ({
             <div style={{ marginBottom: 6, fontWeight: 500, fontSize: '13px' }}>
               增量任务日期范围
             </div>
-            <DatePicker
-              type="dateRange"
-              placeholder={['开始日期', '结束日期']}
-              defaultPickerValue={dayjs().subtract(1, 'month').toDate()}
-              value={
-                startDate && endDate
-                  ? [dayjs(startDate, 'YYYYMMDD').toDate(), dayjs(endDate, 'YYYYMMDD').toDate()]
-                  : undefined
-              }
-              onChange={(date, dateStr) => {
-                const strs = dateStr as unknown as string[];
-                if (strs && Array.isArray(strs) && strs[0] && strs[1]) {
-                  onStartDateChange(strs[0].replace(/-/g, ''));
-                  onEndDateChange(strs[1].replace(/-/g, ''));
-                } else {
-                  onStartDateChange('');
-                  onEndDateChange('');
-                }
-              }}
-              style={{ width: '100%' }}
-              size="small"
-            />
+            <QuantDatePicker
+                value={[startDate, endDate]}
+                onChange={(s, e) => { onStartDateChange(s); onEndDateChange(e); }}
+                style={{ width: '100%' }}
+              />
             {startDate && endDate && (
               <div
                 style={{
@@ -387,28 +351,11 @@ export const ETLBackfillModal: React.FC<ETLBackfillModalProps> = ({
             <div style={{ marginBottom: 6, fontWeight: 500, fontSize: '13px' }}>
               {isBatchMode ? '增量任务回溯日期范围' : '回溯日期范围'}
             </div>
-            <DatePicker
-              type="dateRange"
-              placeholder={['开始日期', '结束日期']}
-              defaultPickerValue={dayjs().subtract(1, 'month').toDate()}
-              value={
-                startDate && endDate
-                  ? [dayjs(startDate, 'YYYYMMDD').toDate(), dayjs(endDate, 'YYYYMMDD').toDate()]
-                  : undefined
-              }
-              onChange={(date, dateStr) => {
-                const strs = dateStr as unknown as string[];
-                if (strs && Array.isArray(strs) && strs[0] && strs[1]) {
-                  onStartDateChange(strs[0].replace(/-/g, ''));
-                  onEndDateChange(strs[1].replace(/-/g, ''));
-                } else {
-                  onStartDateChange('');
-                  onEndDateChange('');
-                }
-              }}
-              style={{ width: '100%' }}
-              size="small"
-            />
+            <QuantDatePicker
+                value={[startDate, endDate]}
+                onChange={(s, e) => { onStartDateChange(s); onEndDateChange(e); }}
+                style={{ width: '100%' }}
+              />
             {startDate && endDate && (
               <div
                 style={{

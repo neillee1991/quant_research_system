@@ -4,10 +4,11 @@
 
 import React from 'react';
 import {
-  Card, Button, Select, InputNumber, DatePicker, Checkbox, Spin, Empty, Table, Tag, Toast,
+  Card, Button, Select, InputNumber, Checkbox, Spin, Empty, Table, Tag, Toast,
 } from '@douyinfe/semi-ui';
 import { IconBarChartHStroked } from '@douyinfe/semi-icons';
 import ReactECharts from 'echarts-for-react';
+import QuantDatePicker from '../../components/QuantDatePicker';
 import { useFactorAnalysis } from './hooks/useFactorAnalysis';
 import { productionApi } from '../../api';
 
@@ -304,22 +305,13 @@ const AnalysisPanel: React.FC = () => {
             <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>分层数</div>
             <InputNumber size="small" style={{ width: '100%' }} value={quantiles} onChange={(v) => setQuantiles(v as number)} min={3} max={10} />
           </div>
-          <div style={{ width: 140 }}>
-            <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>开始日期</div>
-            <DatePicker
-              size="small"
-              type="date"
+          <div style={{ width: 240 }}>
+            <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>分析区间</div>
+            <QuantDatePicker
+              value={[startDate, endDate]}
+              onChange={(s, e) => { setStartDate(s); setEndDate(e); }}
+              disableFuture={false}
               style={{ width: '100%' }}
-              onChange={(date, dateStr) => setStartDate(typeof dateStr === 'string' ? dateStr.replace(/-/g, '') : '')}
-            />
-          </div>
-          <div style={{ width: 140 }}>
-            <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>结束日期</div>
-            <DatePicker
-              size="small"
-              type="date"
-              style={{ width: '100%' }}
-              onChange={(date, dateStr) => setEndDate(typeof dateStr === 'string' ? dateStr.replace(/-/g, '') : '')}
             />
           </div>
           {useAlphalens && (

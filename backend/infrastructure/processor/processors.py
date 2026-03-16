@@ -265,7 +265,6 @@ class StatusFilterProcessor(IProcessor):
         config = self.data_config.load()
         field_configs = {
             "is_st": config.get("is_st"),
-            "is_suspend": config.get("is_suspend"),
             "is_limit": config.get("is_limit"),
         }
 
@@ -413,40 +412,6 @@ class FactorComputeProcessor(IProcessor):
         return result
 
 
-class SuspensionHandlerProcessor(IProcessor):
-    """停牌处理器 - 停牌期间因子值置空"""
-
-    def __init__(self, db_client, data_config):
-        self.db = db_client
-        self.data_config = data_config
-
-    @property
-    def name(self) -> str:
-        return "SuspensionHandler"
-
-    def should_run(self, context: ProcessContext) -> bool:
-        """只有配置了停牌处理才执行"""
-        return context.get_option("handle_suspension", False)
-
-    def process(self, df: pl.DataFrame, context: ProcessContext) -> pl.DataFrame:
-        """停牌期间因子值置空"""
-        if "factor_value" not in df.columns:
-            logger.warning("factor_value column not found, skipping suspension handling")
-            return df
-
-        # 如果已经有 is_suspend 列（来自 StatusFilter）
-        if "is_suspend" in df.columns:
-            before = df.filter(pl.col("factor_value").is_not_null()).height
-            df = df.with_columns(
-                pl.when(pl.col("is_suspend") == 1)
-                .then(None)
-                .otherwise(pl.col("factor_value"))
-                .alias("factor_value")
-            )
-            after = df.filter(pl.col("factor_value").is_not_null()).height
-            logger.info(f"Suspension handling: {before} -> {after} non-null values")
-
-        return df
 
 
 class DateRangeFilterProcessor(IProcessor):
@@ -485,6 +450,117 @@ class DateRangeFilterProcessor(IProcessor):
             )
 
         logger.info(f"Date range filter [{calc_start}, {calc_end}]: {before} -> {len(df)}")
+
+        return df
+
+
+class CalendarAlignProcessor(IProcessor):
+    """交易日历对齐处理器 - 窗口内有停牌缺口时将 factor_value 置 null"""
+
+    def __init__(self, db_client, trading_cal):
+        self.db = db_client
+        self.trading_cal = trading_cal
+
+    @property
+    def name(self) -> str:
+        return "CalendarAlign"
+
+    def should_run(self, context: ProcessContext) -> bool:
+        return context.factor_definition.align_calendar
+
+    def process(self, df: pl.DataFrame, context: ProcessContext) -> pl.DataFrame:
+        if "factor_value" not in df.columns or "trade_date" not in df.columns:
+            return df
+
+        definition = context.factor_definition
+        lookback_days = definition.params.get("lookback_days", 60) if definition.params else 60
+        # 优先从 params 中取 window，其次用 lookback_days
+        window = definition.params.get("window", lookback_days) if definition.params else lookback_days
+
+        # 加载交易日历（只取计算区间内的交易日）
+        cal_df = self.db.query(
+            "SELECT cal_date FROM sync_trade_cal WHERE is_open = 1 ORDER BY cal_date"
+        )
+        if cal_df.is_empty():
+            logger.warning("CalendarAlign: trading calendar empty, skipping")
+            return df
+
+        # 将交易日历转为 YYYYMMDD 字符串 set，方便查找
+        trading_days = set(
+            cal_df["cal_date"].cast(pl.Utf8).str.replace_all("-", "").to_list()
+        )
+
+        # 对每只股票，统计每个计算日前 window 个交易日内实际有数据的天数
+        # 方法：用 rolling_count 统计行数，再与交易日历中应有的天数比较
+        # 交易日历中应有天数 = window（严格模式：窗口内每个交易日都必须有数据）
+
+        # 先确保 trade_date 是字符串格式 YYYYMMDD
+        if df["trade_date"].dtype != pl.Utf8:
+            df = df.with_columns(
+                pl.col("trade_date").cast(pl.Utf8).str.replace_all("-", "").alias("trade_date")
+            )
+
+        # 按股票分组，计算每个交易日前 window 行内的实际数据行数
+        df = df.sort(["ts_code", "trade_date"])
+        df = df.with_columns(
+            pl.col("trade_date")
+              .rolling_count(window_size=window)
+              .over("ts_code")
+              .alias("_actual_rows")
+        )
+
+        # 对每个计算日，查询交易日历中该窗口应有的天数
+        # 简化实现：用 _actual_rows < window 作为判断条件
+        # 这在无停牌时永远满足（行数=window），有停牌时行数<window
+        # 但由于停牌日不在 DataFrame 里，_actual_rows 始终 = min(window, 已有行数)
+        # 真正的缺口检测：需要比较窗口起始日期到当前日期之间的交易日历天数
+
+        # 构建每只股票每个交易日的"窗口起始交易日"
+        df = df.with_columns(
+            pl.col("trade_date")
+              .shift(window - 1)
+              .over("ts_code")
+              .alias("_window_start_date")
+        )
+
+        # 计算交易日历中 [_window_start_date, trade_date] 应有的天数
+        # 用 Python UDF 实现（Polars 原生不支持外部查找）
+        sorted_cal = sorted(trading_days)
+
+        def count_trading_days(start: str, end: str) -> int:
+            if start is None or end is None:
+                return 0
+            import bisect
+            lo = bisect.bisect_left(sorted_cal, start)
+            hi = bisect.bisect_right(sorted_cal, end)
+            return hi - lo
+
+        # 将计算结果作为新列
+        records = df.select(["_window_start_date", "trade_date"]).to_dicts()
+        expected_counts = [
+            count_trading_days(r["_window_start_date"], r["trade_date"])
+            for r in records
+        ]
+        df = df.with_columns(
+            pl.Series("_expected_days", expected_counts)
+        )
+
+        # 严格模式：实际行数 < 应有交易日数 → 置 null
+        before = df.filter(pl.col("factor_value").is_not_null()).height
+        df = df.with_columns(
+            pl.when(
+                pl.col("_actual_rows").is_null() |
+                (pl.col("_expected_days") > pl.col("_actual_rows"))
+            )
+            .then(None)
+            .otherwise(pl.col("factor_value"))
+            .alias("factor_value")
+        )
+        after = df.filter(pl.col("factor_value").is_not_null()).height
+        logger.info(f"CalendarAlign (window={window}): {before} -> {after} non-null values")
+
+        # 清理临时列
+        df = df.drop(["_actual_rows", "_window_start_date", "_expected_days"])
 
         return df
 

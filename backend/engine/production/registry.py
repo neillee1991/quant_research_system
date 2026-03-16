@@ -33,6 +33,7 @@ class FactorDefinition:
     params: Dict[str, Any]
     compute_mode: str  # "incremental" 或 "full"
     storage: StorageConfig
+    align_calendar: bool = False  # 是否对齐交易日历（窗口内每个交易日都必须有数据）
 
 
 # 全局因子注册表
@@ -227,7 +228,8 @@ def load_factors_from_db(db_client):
                     category=row.get("category") or "custom",
                     params=params,
                     compute_mode=row.get("compute_mode") or "incremental",
-                    storage=storage_config
+                    storage=storage_config,
+                    align_calendar=bool(row.get("align_calendar", False)),
                 )
                 loaded_count += 1
 

@@ -289,15 +289,13 @@ class TableManager:
                 "TIMESTAMP": "TIMESTAMP", "DATETIME": "TIMESTAMP",
             }
 
-            db_path = self.repository._resolve_db_path(table_name)
             for col_name, col_def in schema.items():
                 if col_name not in existing_cols:
                     pg_type = col_def.get("type", "VARCHAR").upper()
                     ddb_type = type_map.get(pg_type, "STRING")
                     try:
                         self.repository.execute(
-                            f'addColumn(loadTable("{db_path}", "{table_name}"), '
-                            f'"{col_name}", {ddb_type})'
+                            f'addColumn({table_name}, "{col_name}", {ddb_type})'
                         )
                         logger.info(f"Added column {col_name} ({ddb_type}) to {table_name}")
                     except Exception as e:
@@ -316,11 +314,10 @@ class TableManager:
         调用方 ensure_table_exists() 已确认表不存在。
         """
         try:
-            db_path = self.repository._resolve_db_path(table_name)
             # 创建一个基础维度表（TSDB 引擎要求 primaryKey 最后一列为时间/整数类型）
             self.repository.execute(f"""
                 t = table(1:0, `ts_code`trade_date`created_at, [SYMBOL, STRING, TIMESTAMP]);
-                db = database("{db_path}");
+                db = database("dfs://quant");
                 createTable(dbHandle=db, table=t, tableName=`{table_name}, primaryKey=`ts_code`created_at)
             """)
             logger.info(f"Created basic dimension table {table_name}")

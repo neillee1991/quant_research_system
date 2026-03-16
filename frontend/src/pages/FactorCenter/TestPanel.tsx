@@ -4,10 +4,10 @@
 
 import React, { useState } from 'react';
 import {
-  Button, DatePicker, Toast, Banner, Select, Table, Tag,
+  Button, Toast, Banner, Select, Table, Tag,
 } from '@douyinfe/semi-ui';
 import { IconAlertTriangle } from '@douyinfe/semi-icons';
-import dayjs from 'dayjs';
+import QuantDatePicker from '../../components/QuantDatePicker';
 import { productionApi } from '../../api';
 import type { PreprocessOptions } from '../../types';
 import type { TestResult, TestResultData, TestLog } from './types';
@@ -115,21 +115,9 @@ const TestPanel: React.FC<TestPanelProps> = ({ code, dependsOn, preprocess, look
     <div style={{ marginTop: 8, borderTop: '1px solid var(--border-color)', paddingTop: 8 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
         <span style={{ color: 'var(--text-secondary)', fontSize: 12, whiteSpace: 'nowrap' }}>因子计算区间:</span>
-        <DatePicker
-          type="dateRange"
-          size="small"
+        <QuantDatePicker
           style={{ flex: 1 }}
-          defaultPickerValue={dayjs().subtract(1, 'month').toDate()}
-          disabledDate={(current) => current ? dayjs(current).isAfter(dayjs().endOf('day')) : false}
-          onChange={(date, dateStr) => {
-            const strs = dateStr as unknown as string[];
-            if (strs && Array.isArray(strs) && strs[0] && strs[1]) {
-              setDateRange([strs[0].replace(/-/g, ''), strs[1].replace(/-/g, '')]);
-            } else {
-              setDateRange(['', '']);
-            }
-          }}
-          placeholder={['开始日期', '结束日期']}
+          onChange={(s, e) => setDateRange([s, e])}
         />
         <Button
           size="small"

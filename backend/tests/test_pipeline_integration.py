@@ -255,7 +255,6 @@ class TestPipelineFactory:
             "adjust_price": "forward",
             "filter_st": True,
             "filter_new_stock": True,
-            "handle_suspension": True,
         }
 
         pipeline = factory.create_factor_pipeline(

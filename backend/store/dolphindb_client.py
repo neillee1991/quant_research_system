@@ -506,13 +506,6 @@ class DolphinDBClient(_NewDolphinDBClient):
                 "extra_config": '{"mode":"exists_in_table","values":{"0":"正常","1":"ST/*ST/退市风险警示"}}',
             },
             {
-                "field_key": "is_suspend",
-                "description": "是否停牌（0=正常交易, 1=全天停牌, 2=盘中临时停牌）。来源: sync_suspend_d 表",
-                "table_name": "sync_suspend_d",
-                "column_name": "suspend_type",
-                "extra_config": '{"mode":"exists_in_table","filter":{"suspend_type":"S"},"values":{"0":"正常交易","1":"全天停牌(suspend_timing为空)","2":"盘中临时停牌(suspend_timing非空)"}}',
-            },
-            {
                 "field_key": "is_limit",
                 "description": "涨跌停状态（0=未涨跌停, 1=涨停, -1=跌停）。来源: sync_stk_limit + sync_daily_data，收盘价触及涨跌停价",
                 "table_name": "sync_stk_limit",

@@ -3,7 +3,7 @@
 架构说明：
 1. depends_on 配置的表会自动加载所有字段，无需在 factor_data_config 中配置
 2. factor_data_config 只用于配置需要特殊处理的字段：
-   - 需要计算的字段（如 is_st、is_suspend 从交易日缺失推断）
+   - 需要计算的字段（如 is_st、is_limit 从特定表加载）
    - 需要跨表关联的字段（如 industry 从行业分类表）
    - 需要特殊处理的字段（如 market_cap 的单位转换）
 """
@@ -22,7 +22,6 @@ _DEFAULTS: Dict[str, Dict[str, Any]] = {
     # 股票状态字段：需要特殊计算或跨表关联
     "list_date": {"table_name": "sync_stock_basic", "column_name": "list_date", "extra_config": {}},
     "is_st": {"table_name": "", "column_name": "is_st", "extra_config": {}},
-    "is_suspend": {"table_name": "", "column_name": "is_suspend", "extra_config": {}},
     "is_limit": {"table_name": "", "column_name": "is_limit", "extra_config": {}},
     "industry_l1": {"table_name": "", "column_name": "", "extra_config": {}},
     "industry_l2": {"table_name": "", "column_name": "", "extra_config": {}},

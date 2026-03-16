@@ -14,14 +14,13 @@ import {
   Radio,
   Table,
   Select,
-  DatePicker,
   Tag,
   Tooltip,
   Modal,
 } from '@douyinfe/semi-ui';
 import { IconCode } from '@douyinfe/semi-icons';
 import Editor from '@monaco-editor/react';
-import dayjs from 'dayjs';
+import QuantDatePicker from '../../components/QuantDatePicker';
 import { dataApi } from '../../api';
 import { useThemeStore } from '../../store';
 import type { ETLTask } from '../../types';
@@ -542,11 +541,12 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
                 </div>
                 <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center' }}>
                   {config.sync_type === 'incremental' && (
-                    <DatePicker
-                      size="small"
+                    <QuantDatePicker
+                      mode="single"
                       placeholder="测试日期（可选）"
                       style={{ width: 160 }}
-                      onChange={(date: any) => setTestDate(date ? dayjs(date).format('YYYYMMDD') : '')}
+                      disableFuture={false}
+                      onChange={(d) => setTestDate(d)}
                     />
                   )}
                   <Button size="small" theme="light" onClick={handleTestScript} loading={testLoading}>

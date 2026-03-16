@@ -10,7 +10,7 @@ from infrastructure.processor.processors import (
     AdjustmentProcessor,
     StatusFilterProcessor,
     FactorComputeProcessor,
-    SuspensionHandlerProcessor,
+    CalendarAlignProcessor,
     DateRangeFilterProcessor,
     QualityCheckerProcessor,
     ResultWriterProcessor,
@@ -69,23 +69,22 @@ class PipelineFactory:
             FactorComputeProcessor()
         )
 
-        # 5. 停牌处理（可选）
-        if preprocess_options.get("handle_suspension"):
-            pipeline.add_stage(
-                SuspensionHandlerProcessor(self.db, self.data_config)
-            )
+        # 5. 交易日历对齐（align_calendar=True 时生效，由处理器 should_run 判断）
+        pipeline.add_stage(
+            CalendarAlignProcessor(self.db, self.trading_cal)
+        )
 
         # 6. 日期范围过滤
         pipeline.add_stage(
             DateRangeFilterProcessor()
         )
 
-        # 7. 质量检查
+        # 6. 质量检查
         pipeline.add_stage(
             QualityCheckerProcessor()
         )
 
-        # 8. 结果写入（可选）
+        # 7. 结果写入（可选）
         if save_results:
             pipeline.add_stage(
                 ResultWriterProcessor(self.db)

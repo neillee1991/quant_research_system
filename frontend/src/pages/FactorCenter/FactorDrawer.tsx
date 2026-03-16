@@ -19,6 +19,7 @@ import type { FactorDrawerProps, FactorCodeInfo, DataConfigLabel } from './types
 import { formatRunParams } from './types';
 import TestPanel from './TestPanel';
 import { DataInspection } from '../../components/DataInspection';
+import QuantDatePicker from '../../components/QuantDatePicker';
 
 const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, onClose, onSaved }) => {
   const { mode } = useThemeStore();
@@ -31,6 +32,7 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
   const [editComputeMode, setEditComputeMode] = useState<string>('');
   const [editDependsOn, setEditDependsOn] = useState<string[]>([]);
   const [editLookbackDays, setEditLookbackDays] = useState<number>(60);
+  const [editAlignCalendar, setEditAlignCalendar] = useState<boolean>(false);
   const [editSaving, setEditSaving] = useState<boolean>(false);
 
   // 预处理
@@ -53,6 +55,8 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
   // 计算日志
   const [history, setHistory] = useState<any[]>([]);
   const [historyLoading, setHistoryLoading] = useState<boolean>(false);
+  const [filterStartDate, setFilterStartDate] = useState<string>('');
+  const [filterEndDate, setFilterEndDate] = useState<string>('');
 
   // 数据源注解
   const [dataConfigLabels, setDataConfigLabels] = useState<Record<string, DataConfigLabel>>({});
@@ -95,6 +99,7 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
     setEditDependsOn(Array.isArray(rawDeps) ? rawDeps : (rawDeps ? (() => { try { return JSON.parse(rawDeps); } catch { return []; } })() : []));
     const params = factor.params as any;
     setEditLookbackDays(params?.lookback_days ?? 60);
+    setEditAlignCalendar(factor.align_calendar ?? false);
 
     // 预处理
     const pp = params?.preprocess || {};
@@ -157,14 +162,19 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
     if (!factorId) return;
     setHistoryLoading(true);
     try {
-      const res = await productionApi.getProductionHistory(factorId, 50);
+      const res = await productionApi.getProductionHistory(
+        factorId,
+        50,
+        filterStartDate || undefined,
+        filterEndDate || undefined
+      );
       setHistory(res.data?.data || []);
     } catch (error) {
       console.error('Failed to load history:', error);
       setHistory([]);
     }
     setHistoryLoading(false);
-  }, [factorId]);
+  }, [factorId, filterStartDate, filterEndDate]);
 
   useEffect(() => { if (activeTab === 'data' && factorId) loadData(); }, [activeTab, factorId, loadData]);
   useEffect(() => { if (activeTab === 'logs' && factorId) loadHistory(); }, [activeTab, factorId, loadHistory]);
@@ -183,7 +193,7 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
         preprocess: ppEdit,
         lookback_days: editLookbackDays,
       };
-      const values = { description: editDesc, category: editCategory, compute_mode: editComputeMode, depends_on: editDependsOn, params: newParams };
+      const values = { description: editDesc, category: editCategory, compute_mode: editComputeMode, depends_on: editDependsOn, params: newParams, align_calendar: editAlignCalendar };
       console.log('[FactorDrawer] 保存预处理配置:', ppEdit);
       await productionApi.updateFactor(factorId, values);
       Toast.success('保存成功');
@@ -247,6 +257,15 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
     { title: '时间', dataIndex: 'created_at', key: 'time',
       render: (v: string) => v ? <Tooltip content={v}><span style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>{v.slice(0, 19)}</span></Tooltip> : '-'
     },
+    { title: '失败原因', dataIndex: 'error_message', key: 'error', width: 200,
+      render: (v: string) => v ? (
+        <Tooltip content={v} position="topLeft">
+          <span style={{ color: 'var(--color-loss)', fontSize: '12px', cursor: 'help' }}>
+            {v.length > 40 ? v.slice(0, 40) + '…' : v}
+          </span>
+        </Tooltip>
+      ) : null
+    },
   ];
 
   return (
@@ -293,10 +312,17 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
                     placeholder="选择数据表"
                   />
                 </div>
-                <div style={{ marginTop: 8 }}>
-                  <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>回溯天数</div>
-                  <InputNumber size="small" min={1} max={500} value={editLookbackDays} style={{ width: '100%' }}
-                    onChange={(v) => setEditLookbackDays((v as number) || 60)} />
+                <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>回溯天数</div>
+                    <InputNumber size="small" min={1} max={500} value={editLookbackDays} style={{ width: '100%' }}
+                      onChange={(v) => setEditLookbackDays((v as number) || 60)} />
+                  </div>
+                  <div style={{ paddingTop: 18 }}>
+                    <Checkbox checked={editAlignCalendar} onChange={e => setEditAlignCalendar(!!e.target.checked)}>
+                      对齐交易日历
+                    </Checkbox>
+                  </div>
                 </div>
               </Collapse.Panel>
 
@@ -337,16 +363,6 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
                     <Checkbox checked={ppEdit.filter_new_stock} onChange={(e) => setPpEdit(p => ({ ...p, filter_new_stock: !!e.target.checked }))}>过滤新股</Checkbox>
                     {dataConfigLabels.list_date ? (
                       <span style={{ fontSize: 10, color: 'var(--text-muted)' }}> ({dataConfigLabels.list_date.source_label})</span>
-                    ) : (
-                      <span style={{ fontSize: 10, color: 'var(--text-muted)' }}> (需配置数据源)</span>
-                    )}
-                  </span>
-                  <span>
-                    <Checkbox checked={ppEdit.handle_suspension} onChange={(e) => setPpEdit(p => ({ ...p, handle_suspension: !!e.target.checked }))}>停牌处理</Checkbox>
-                    {dataConfigLabels.is_suspend ? (
-                      <Tooltip content={dataConfigLabels.is_suspend.values ? Object.entries(dataConfigLabels.is_suspend.values).map(([k, v]) => `${k}: ${v}`).join('\n') : undefined} position="bottom">
-                        <span style={{ fontSize: 10, color: 'var(--text-muted)', cursor: dataConfigLabels.is_suspend.values ? 'help' : undefined }}> ({dataConfigLabels.is_suspend.source_label})</span>
-                      </Tooltip>
                     ) : (
                       <span style={{ fontSize: 10, color: 'var(--text-muted)' }}> (需配置数据源)</span>
                     )}
@@ -424,9 +440,19 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
 
         <TabPane itemKey="logs" tab={<span><IconHistogram size="small" /> 日志</span>}>
           <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 8 }}>
               <span style={{ color: 'var(--text-secondary)', fontSize: 13 }}>最近 50 条计算记录</span>
-              <Button size="small" icon={<IconSearch />} onClick={loadHistory}>刷新</Button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <QuantDatePicker
+                  value={[filterStartDate, filterEndDate]}
+                  style={{ width: 280 }}
+                  onChange={(s, e) => { setFilterStartDate(s); setFilterEndDate(e); }}
+                />
+                <Button size="small" icon={<IconSearch />} onClick={loadHistory}>筛选</Button>
+                <span style={{ fontSize: 11, color: 'var(--semi-color-text-2)', whiteSpace: 'nowrap' }}>
+                  按任务完成日期筛选
+                </span>
+              </div>
             </div>
             <Table dataSource={history} columns={logColumns}
               rowKey={(r: any) => `${r.factor_id}-${r.created_at}`}

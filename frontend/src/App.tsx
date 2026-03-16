@@ -10,7 +10,7 @@ import IndexPoolCenter from './pages/IndexPoolCenter';
 import './styles/global.css';
 
 const App: React.FC = () => (
-  <BrowserRouter>
+  <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
     <AppLayout>
       <Routes>
         <Route path="/market" element={<MarketCenter />} />

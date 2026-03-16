@@ -30,7 +30,6 @@ DEFAULT_PREPROCESS = {
     "filter_st": True,
     "filter_new_stock": True,
     "new_stock_days": 60,
-    "handle_suspension": True,
     "mark_limit": True,
 }
 
@@ -254,7 +253,6 @@ class FactorComputeService:
             "filter_st": True,
             "filter_new_stock": True,
             "new_stock_days": 60,
-            "handle_suspension": True,
             "mark_limit": True,
         }
 
@@ -652,7 +650,6 @@ class FactorComputeService:
                 "filter_st": [opts.get("filter_st", True)],
                 "filter_new_stock": [opts.get("filter_new_stock", True)],
                 "new_stock_days": [opts.get("new_stock_days", 60)],
-                "handle_suspension": [opts.get("handle_suspension", True)],
                 "mark_limit": [opts.get("mark_limit", True)],
                 "adjust_price": [opts.get("adjust_price", "none")],
                 "preprocess": [opts_str],

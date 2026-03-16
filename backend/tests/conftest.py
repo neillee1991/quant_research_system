@@ -102,7 +102,6 @@ def sample_status_data():
         "ts_code": ["000001.SZ", "000002.SZ"],
         "trade_date": ["20240101", "20240101"],
         "is_st": [False, False],
-        "is_suspend": [False, False],
         "is_limit_up": [False, False],
         "is_limit_down": [False, False],
         "is_new_stock": [False, False],
@@ -179,7 +178,6 @@ def mock_preprocess_loader():
         "filter_st": True,
         "filter_new_stock": True,
         "new_stock_days": 60,
-        "handle_suspension": True,
         "mark_limit": True,
     })
     loader.get_default_profile = Mock(return_value={
@@ -187,7 +185,6 @@ def mock_preprocess_loader():
         "filter_st": True,
         "filter_new_stock": True,
         "new_stock_days": 60,
-        "handle_suspension": True,
         "mark_limit": True,
     })
     return loader

@@ -132,7 +132,6 @@ export const formatRunParams = (record: FactorRunRecord): string => {
       if (pp.adjust_price) parts.push(adjMap[pp.adjust_price] || pp.adjust_price);
       if (pp.filter_st === false) parts.push('含ST');
       if (pp.filter_new_stock === false) parts.push('含次新');
-      if (pp.handle_suspension === false) parts.push('含停牌');
       if (pp.mark_limit === false) parts.push('不标涨跌停');
     } catch {
       // Ignore parse errors

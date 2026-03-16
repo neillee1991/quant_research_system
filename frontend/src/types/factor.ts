@@ -7,7 +7,6 @@ export interface PreprocessOptions {
   filter_st: boolean;
   filter_new_stock: boolean;
   new_stock_days: number;
-  handle_suspension: boolean;
   mark_limit: boolean;
 }
 
@@ -30,6 +29,7 @@ export interface FactorDefinition {
   params?: Record<string, unknown>;
   depends_on?: string[];
   lookback_days?: number;
+  align_calendar?: boolean;
   created_at?: string;
   updated_at?: string;
   enabled?: boolean;

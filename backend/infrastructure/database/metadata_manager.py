@@ -49,6 +49,7 @@ class MetadataManager:
             "array(STRING,0) as params,"
             "array(STRING,0) as code,"
             "array(BOOL,0) as enabled,"
+            "array(BOOL,0) as align_calendar,"
             "array(TIMESTAMP,0) as created_at,"
             "array(TIMESTAMP,0) as updated_at)",
             ["factor_id"],
@@ -81,7 +82,6 @@ class MetadataManager:
             "array(BOOL,0) as filter_st,"
             "array(BOOL,0) as filter_new_stock,"
             "array(INT,0) as new_stock_days,"
-            "array(BOOL,0) as handle_suspension,"
             "array(BOOL,0) as mark_limit,"
             "array(STRING,0) as adjust_price,"
             "array(STRING,0) as preprocess,"

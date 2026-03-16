@@ -5,7 +5,7 @@ import time
 import types
 import traceback
 from datetime import datetime
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 
@@ -26,7 +26,6 @@ class PreprocessOptions(BaseModel):
     filter_st: bool = True              # 过滤 ST/*ST 股票
     filter_new_stock: bool = True       # 过滤新股（上市不足 N 天）
     new_stock_days: int = 60            # 新股排除天数
-    handle_suspension: bool = True      # 停牌复牌处理（复牌后 window 天因子置空）
     mark_limit: bool = True             # 标记一字涨跌停
 
 
@@ -102,7 +101,12 @@ async def batch_run_production(req: BatchRunRequest):
 
 
 @router.get("/production/history")
-async def get_production_history(factor_id: Optional[str] = None, limit: int = 20):
+async def get_production_history(
+    factor_id: Optional[str] = None,
+    limit: int = 20,
+    start_date: Optional[str] = Query(None, description="开始日期 YYYYMMDD"),
+    end_date: Optional[str] = Query(None, description="结束日期 YYYYMMDD")
+):
     """获取生产运行历史"""
     try:
         conditions = []
@@ -110,6 +114,14 @@ async def get_production_history(factor_id: Optional[str] = None, limit: int = 2
         if factor_id:
             conditions.append("factor_id = %s")
             params.append(factor_id)
+        if start_date:
+            if not start_date.isdigit() or len(start_date) != 8:
+                raise HTTPException(status_code=400, detail="start_date must be YYYYMMDD")
+            conditions.append(f"date(created_at) >= {start_date[:4]}.{start_date[4:6]}.{start_date[6:8]}")
+        if end_date:
+            if not end_date.isdigit() or len(end_date) != 8:
+                raise HTTPException(status_code=400, detail="end_date must be YYYYMMDD")
+            conditions.append(f"date(created_at) <= {end_date[:4]}.{end_date[4:6]}.{end_date[6:8]}")
         where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
         params.append(limit)
 
@@ -122,7 +134,6 @@ async def get_production_history(factor_id: Optional[str] = None, limit: int = 2
         if not df.is_empty():
             for row in df.to_dicts():
                 row["created_at"] = str(row["created_at"]) if row.get("created_at") else None
-                row["finished_at"] = str(row["finished_at"]) if row.get("finished_at") else None
                 # 格式化日期字段：YYYYMMDD -> YYYY-MM-DD
                 if row.get("start_date"):
                     date_str = str(row["start_date"])
@@ -270,7 +281,7 @@ async def test_factor_code(req: FactorTestRequest):
     if req.preprocess:
         preprocess_opts = {**preprocess_opts, **req.preprocess}
     opts = {**_DEFAULT_PREPROCESS, **preprocess_opts}
-    log("data", f"预处理配置: adjust_price={opts['adjust_price']}, filter_st={opts['filter_st']}, filter_new_stock={opts['filter_new_stock']}, handle_suspension={opts['handle_suspension']}, mark_limit={opts['mark_limit']}")
+    log("data", f"预处理配置: adjust_price={opts['adjust_price']}, filter_st={opts['filter_st']}, filter_new_stock={opts['filter_new_stock']}, mark_limit={opts['mark_limit']}")
 
     try:
         # 直接从数据库加载数据（使用计算后的数据起始日期）

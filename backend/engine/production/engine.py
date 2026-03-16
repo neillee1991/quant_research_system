@@ -86,7 +86,6 @@ class ProductionEngine:
         "filter_st": True,
         "filter_new_stock": True,
         "new_stock_days": 60,
-        "handle_suspension": True,
         "mark_limit": True,
     }
 
