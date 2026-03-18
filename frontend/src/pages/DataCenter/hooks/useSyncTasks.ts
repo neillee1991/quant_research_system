@@ -2,7 +2,7 @@
  * 同步任务管理 Hook
  */
 import { useState, useCallback } from 'react';
-import { Toast } from '@douyinfe/semi-ui';
+import { message } from 'antd';
 import { dataApi } from '../../../api';
 import type { SyncTask, TaskStatus, SyncLog, ScheduleInfo } from '../../../types';
 
@@ -20,7 +20,7 @@ export const useSyncTasks = () => {
       setSyncTasks(res.data.tasks || []);
     } catch (error) {
       console.error('Failed to load sync tasks:', error);
-      Toast.error('加载同步任务失败');
+      message.error('加载同步任务失败');
     }
   }, []);
 
@@ -65,13 +65,13 @@ export const useSyncTasks = () => {
     setSyncingTasks((prev) => new Set(prev).add(taskId));
     try {
       await dataApi.syncTask(taskId, targetDate, startDate, endDate);
-      Toast.success(`任务 ${taskId} 同步已启动`);
+      message.success(`任务 ${taskId} 同步已启动`);
       setTimeout(() => {
         loadTaskStatus(taskId);
         loadSyncLogs();
       }, 2000);
     } catch (error: any) {
-      Toast.error(`任务 ${taskId} 同步失败: ${error.response?.data?.detail || error.message}`);
+      message.error(`任务 ${taskId} 同步失败: ${error.response?.data?.detail || error.message}`);
       throw error;
     } finally {
       setSyncingTasks((prev) => {
@@ -94,7 +94,7 @@ export const useSyncTasks = () => {
     const incrementalIds = taskIds.filter(id => !fullIds.includes(id));
 
     if (incrementalIds.length > 0 && (!startDate || !endDate)) {
-      Toast.warning('存在增量任务，请选择日期范围');
+      message.warning('存在增量任务，请选择日期范围');
       return false;
     }
 
@@ -102,7 +102,7 @@ export const useSyncTasks = () => {
       setSyncingTasks((prev) => new Set(prev).add(taskId));
     });
 
-    Toast.info(`开始同步 ${taskIds.length} 个任务`);
+    message.info(`开始同步 ${taskIds.length} 个任务`);
 
     for (const taskId of taskIds) {
       const isFull = fullIds.includes(taskId);
@@ -113,7 +113,7 @@ export const useSyncTasks = () => {
           await dataApi.syncTask(taskId, undefined, startDate, endDate);
         }
       } catch (error: any) {
-        Toast.error(`任务 ${taskId} 同步失败: ${error.response?.data?.detail || error.message}`);
+        message.error(`任务 ${taskId} 同步失败: ${error.response?.data?.detail || error.message}`);
       }
     }
 
@@ -136,10 +136,10 @@ export const useSyncTasks = () => {
   const deleteTask = useCallback(async (taskId: string, dropTable = true) => {
     try {
       await dataApi.deleteTask(taskId, dropTable);
-      Toast.success(`同步任务 ${taskId} 已删除`);
+      message.success(`同步任务 ${taskId} 已删除`);
       await loadSyncTasks();
     } catch (error: any) {
-      Toast.error(`删除任务失败: ${error.response?.data?.detail || error.message}`);
+      message.error(`删除任务失败: ${error.response?.data?.detail || error.message}`);
       throw error;
     }
   }, [loadSyncTasks]);
@@ -147,10 +147,10 @@ export const useSyncTasks = () => {
   const createTask = useCallback(async (config: any) => {
     try {
       await dataApi.createSyncTask(config);
-      Toast.success(`同步任务 ${config.task_id} 创建成功`);
+      message.success(`同步任务 ${config.task_id} 创建成功`);
       await loadSyncTasks();
     } catch (error: any) {
-      Toast.error(`创建任务失败: ${error.response?.data?.detail || error.message}`);
+      message.error(`创建任务失败: ${error.response?.data?.detail || error.message}`);
       throw error;
     }
   }, [loadSyncTasks]);
@@ -158,10 +158,10 @@ export const useSyncTasks = () => {
   const updateTask = useCallback(async (config: any) => {
     try {
       await dataApi.updateSyncTask(config.task_id, config);
-      Toast.success(`同步任务 ${config.task_id} 更新成功`);
+      message.success(`同步任务 ${config.task_id} 更新成功`);
       await loadSyncTasks();
     } catch (error: any) {
-      Toast.error(`更新任务失败: ${error.response?.data?.detail || error.message}`);
+      message.error(`更新任务失败: ${error.response?.data?.detail || error.message}`);
       throw error;
     }
   }, [loadSyncTasks]);
@@ -175,19 +175,19 @@ export const useSyncTasks = () => {
     try {
       if (enabled) {
         if (!schedule) {
-          Toast.warning('请先配置调度规则');
+          message.warning('请先配置调度规则');
           return false;
         }
         await dataApi.enableTaskSchedule(taskId, schedule, cronExpression);
-        Toast.success(`任务 ${taskId} 调度已启用`);
+        message.success(`任务 ${taskId} 调度已启用`);
       } else {
         await dataApi.disableTaskSchedule(taskId);
-        Toast.success(`任务 ${taskId} 调度已禁用`);
+        message.success(`任务 ${taskId} 调度已禁用`);
       }
       await loadTaskScheduleInfo(taskId);
       return true;
     } catch (error: any) {
-      Toast.error(`调度设置失败: ${error.response?.data?.detail || error.message}`);
+      message.error(`调度设置失败: ${error.response?.data?.detail || error.message}`);
       return false;
     }
   }, [loadTaskScheduleInfo]);

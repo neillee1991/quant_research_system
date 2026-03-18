@@ -2,7 +2,7 @@
  * ETL 任务管理 Hook
  */
 import { useState, useCallback } from 'react';
-import { Toast } from '@douyinfe/semi-ui';
+import { message } from 'antd';
 import { dataApi } from '../../../api';
 import type { ETLTask, ETLTestResult, ETLFieldDefinition } from '../../../types';
 import type { ETLTaskStatus } from '../types';
@@ -19,7 +19,7 @@ export const useETLTasks = () => {
       setEtlTasks(res.data.tasks || []);
     } catch (error) {
       console.error('Failed to load ETL tasks:', error);
-      Toast.error('加载 ETL 任务失败');
+      message.error('加载 ETL 任务失败');
     }
   }, []);
 
@@ -48,11 +48,11 @@ export const useETLTasks = () => {
         data: res.data.data || [],
         row_count: res.data.count || 0,
       };
-      Toast.success(`测试成功，返回 ${result.row_count} 行数据`);
+      message.success(`测试成功，返回 ${result.row_count} 行数据`);
       return result;
     } catch (error: any) {
       const errorMsg = error.response?.data?.detail || '脚本测试失败';
-      Toast.error(errorMsg);
+      message.error(errorMsg);
       return {
         success: false,
         columns: [],
@@ -66,11 +66,11 @@ export const useETLTasks = () => {
   const createEtlTask = useCallback(async (config: any) => {
     try {
       await dataApi.createEtlTask(config);
-      Toast.success(`ETL 任务 ${config.task_id} 创建成功`);
+      message.success(`ETL 任务 ${config.task_id} 创建成功`);
       await loadEtlTasks();
       return true;
     } catch (error: any) {
-      Toast.error(`创建任务失败: ${error.response?.data?.detail || error.message}`);
+      message.error(`创建任务失败: ${error.response?.data?.detail || error.message}`);
       return false;
     }
   }, [loadEtlTasks]);
@@ -78,11 +78,11 @@ export const useETLTasks = () => {
   const updateEtlTask = useCallback(async (config: any) => {
     try {
       await dataApi.updateEtlTask(config.task_id, config);
-      Toast.success(`ETL 任务 ${config.task_id} 更新成功`);
+      message.success(`ETL 任务 ${config.task_id} 更新成功`);
       await loadEtlTasks();
       return true;
     } catch (error: any) {
-      Toast.error(`更新任务失败: ${error.response?.data?.detail || error.message}`);
+      message.error(`更新任务失败: ${error.response?.data?.detail || error.message}`);
       return false;
     }
   }, [loadEtlTasks]);
@@ -90,10 +90,10 @@ export const useETLTasks = () => {
   const deleteEtlTask = useCallback(async (taskId: string, dropTable = true) => {
     try {
       await dataApi.deleteEtlTask(taskId, dropTable);
-      Toast.success(`ETL 任务 ${taskId} 已删除`);
+      message.success(`ETL 任务 ${taskId} 已删除`);
       await loadEtlTasks();
     } catch (error: any) {
-      Toast.error(`删除任务失败: ${error.response?.data?.detail || error.message}`);
+      message.error(`删除任务失败: ${error.response?.data?.detail || error.message}`);
       throw error;
     }
   }, [loadEtlTasks]);
@@ -109,7 +109,7 @@ export const useETLTasks = () => {
 
     // 增量任务需要日期范围
     if (!isFullTask && (!startDate || !endDate)) {
-      Toast.warning('请选择回溯日期范围');
+      message.warning('请选择回溯日期范围');
       return false;
     }
 
@@ -121,13 +121,13 @@ export const useETLTasks = () => {
       } else {
         await dataApi.backfillEtlTask(taskId, startDate, endDate);
       }
-      Toast.success(`任务 ${taskId} 回溯已启动`);
+      message.success(`任务 ${taskId} 回溯已启动`);
       setTimeout(() => {
         loadEtlLogs(taskId);
       }, 2000);
       return true;
     } catch (error: any) {
-      Toast.error(`回溯失败: ${error.response?.data?.detail || error.message}`);
+      message.error(`回溯失败: ${error.response?.data?.detail || error.message}`);
       return false;
     } finally {
       setRunningEtlTasks((prev) => {
@@ -152,7 +152,7 @@ export const useETLTasks = () => {
 
     // 增量任务需要日期范围
     if (incrementalIds.length > 0 && (!startDate || !endDate)) {
-      Toast.warning('存在增量任务，请选择回溯日期范围');
+      message.warning('存在增量任务，请选择回溯日期范围');
       return false;
     }
 
@@ -160,15 +160,15 @@ export const useETLTasks = () => {
       setRunningEtlTasks((prev) => new Set(prev).add(taskId));
     });
 
-    Toast.info(`开始回溯 ${taskIds.length} 个任务`);
+    message.info(`开始回溯 ${taskIds.length} 个任务`);
 
     // 先执行全量任务（只执行一次，不传日期参数）
     for (const taskId of fullIds) {
       try {
         await dataApi.backfillEtlTask(taskId, '', '');
-        Toast.success(`全量任务 ${taskId} 回溯成功`);
+        message.success(`全量任务 ${taskId} 回溯成功`);
       } catch (error: any) {
-        Toast.error(`任务 ${taskId} 回溯失败: ${error.response?.data?.detail || error.message}`);
+        message.error(`任务 ${taskId} 回溯失败: ${error.response?.data?.detail || error.message}`);
       }
     }
 
@@ -176,9 +176,9 @@ export const useETLTasks = () => {
     for (const taskId of incrementalIds) {
       try {
         await dataApi.backfillEtlTask(taskId, startDate, endDate);
-        Toast.success(`增量任务 ${taskId} 回溯成功`);
+        message.success(`增量任务 ${taskId} 回溯成功`);
       } catch (error: any) {
-        Toast.error(`任务 ${taskId} 回溯失败: ${error.response?.data?.detail || error.message}`);
+        message.error(`任务 ${taskId} 回溯失败: ${error.response?.data?.detail || error.message}`);
       }
     }
 
@@ -204,11 +204,11 @@ export const useETLTasks = () => {
   ) => {
     try {
       await dataApi.createEtlTable(taskId, tableName, fields);
-      Toast.success(`目标表 ${tableName} 已创建`);
+      message.success(`目标表 ${tableName} 已创建`);
       return true;
     } catch (error: any) {
       if (!error.response?.data?.detail?.includes('已存在')) {
-        Toast.warning(error.response?.data?.detail || '建表失败');
+        message.warning(error.response?.data?.detail || '建表失败');
       }
       return false;
     }

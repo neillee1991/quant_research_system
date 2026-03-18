@@ -5,29 +5,29 @@
 
 /* --- Dark Theme (default) --- */
 body[theme-mode="dark"] {
-  --bg-primary: #0A0E1A;
-  --bg-secondary: #0F1419;
-  --bg-tertiary: #151B26;
-  --bg-card: #0D1117;
-  --bg-surface: #0F1419;
-  --bg-elevated: #1A2332;
+  --bg-primary: #0D1117;
+  --bg-secondary: #161B22;
+  --bg-tertiary: #1C2128;
+  --bg-card: #161B22;
+  --bg-surface: #161B22;
+  --bg-elevated: #1C2128;
 
-  --color-primary: #00A3FF;
-  --color-primary-hover: #33B5FF;
-  --color-primary-glow: rgba(0, 163, 255, 0.25);
+  --color-primary: #1677FF;
+  --color-primary-hover: #4096FF;
+  --color-primary-glow: rgba(22, 119, 255, 0.25);
   --color-accent: #00E5CC;
   --color-accent-glow: rgba(0, 229, 204, 0.2);
-  --color-gain: #00D68F;
-  --color-loss: #FF4757;
-  --color-warning: #FFA502;
+  --color-gain: #3FB950;
+  --color-loss: #F85149;
+  --color-warning: #D29922;
 
-  --text-primary: #E8EDF4;
-  --text-secondary: #8B95A8;
-  --text-muted: #5A6475;
+  --text-primary: #E6EDF3;
+  --text-secondary: #8B949E;
+  --text-muted: #6E7681;
   --text-highlight: #FFFFFF;
 
-  --border-color: #1E2936;
-  --border-light: rgba(30, 41, 54, 0.5);
+  --border-color: #30363D;
+  --border-light: rgba(48, 54, 61, 0.5);
   --border-glow: rgba(0, 163, 255, 0.15);
 
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4);
@@ -36,48 +36,48 @@ body[theme-mode="dark"] {
   --shadow-glow: 0 0 20px var(--color-primary-glow);
   --shadow-accent-glow: 0 0 16px var(--color-accent-glow);
 
-  --scrollbar-track: #0A0E1A;
-  --scrollbar-thumb: #1E2936;
-  --scrollbar-thumb-hover: #2A3847;
+  --scrollbar-track: #0D1117;
+  --scrollbar-thumb: #30363D;
+  --scrollbar-thumb-hover: #484F58;
 
   /* Layout aliases */
   --bg-sidebar: #080C15;
   --bg-toolbar: #0D1117;
-  --bg-app: #0A0E1A;
-  --border-default: #1E2936;
+  --bg-app: #0D1117;
+  --border-default: #30363D;
 
   /* Gradient overlays */
-  --gradient-primary: linear-gradient(135deg, #00A3FF 0%, #0077CC 100%);
+  --gradient-primary: linear-gradient(135deg, #1677FF 0%, #0958D9 100%);
   --gradient-accent: linear-gradient(135deg, #00E5CC 0%, #00B8A3 100%);
-  --gradient-gain: linear-gradient(135deg, #00D68F 0%, #00A86B 100%);
-  --gradient-loss: linear-gradient(135deg, #FF4757 0%, #E63946 100%);
+  --gradient-gain: linear-gradient(135deg, #3FB950 0%, #2EA043 100%);
+  --gradient-loss: linear-gradient(135deg, #F85149 0%, #DA3633 100%);
   --gradient-card: linear-gradient(180deg, rgba(15, 20, 25, 0.8) 0%, rgba(13, 17, 23, 0.95) 100%);
 }
 
 /* --- Light Theme --- */
 body[theme-mode="light"] {
-  --bg-primary: #F8F9FB;
+  --bg-primary: #F6F8FA;
   --bg-secondary: #FFFFFF;
   --bg-tertiary: #F0F2F5;
   --bg-card: #FFFFFF;
   --bg-surface: #FAFBFC;
   --bg-elevated: #FFFFFF;
 
-  --color-primary: #0077FA;
-  --color-primary-hover: #3993FF;
+  --color-primary: #1677FF;
+  --color-primary-hover: #4096FF;
   --color-primary-glow: rgba(0, 119, 250, 0.15);
   --color-accent: #00C9B7;
   --color-accent-glow: rgba(0, 201, 183, 0.15);
-  --color-gain: #00B86B;
-  --color-loss: #F5222D;
+  --color-gain: #1A7F37;
+  --color-loss: #CF222E;
   --color-warning: #FA8C16;
 
-  --text-primary: #1A1D23;
-  --text-secondary: #5E6673;
-  --text-muted: #8B95A8;
+  --text-primary: #1F2328;
+  --text-secondary: #656D76;
+  --text-muted: #8C959F;
   --text-highlight: #000000;
 
-  --border-color: #E4E7EB;
+  --border-color: #D0D7DE;
   --border-light: rgba(228, 231, 235, 0.6);
   --border-glow: rgba(0, 119, 250, 0.12);
 
@@ -87,21 +87,21 @@ body[theme-mode="light"] {
   --shadow-glow: 0 0 20px var(--color-primary-glow);
   --shadow-accent-glow: 0 0 16px var(--color-accent-glow);
 
-  --scrollbar-track: #F8F9FB;
-  --scrollbar-thumb: #C8CDD4;
-  --scrollbar-thumb-hover: #9CA3AF;
+  --scrollbar-track: #F6F8FA;
+  --scrollbar-thumb: #D0D7DE;
+  --scrollbar-thumb-hover: #AFB8C1;
 
   /* Layout aliases */
   --bg-sidebar: #FFFFFF;
   --bg-toolbar: #FFFFFF;
-  --bg-app: #F8F9FB;
-  --border-default: #E4E7EB;
+  --bg-app: #F6F8FA;
+  --border-default: #D0D7DE;
 
   /* Gradient overlays */
-  --gradient-primary: linear-gradient(135deg, #0077FA 0%, #0056CC 100%);
+  --gradient-primary: linear-gradient(135deg, #1677FF 0%, #0958D9 100%);
   --gradient-accent: linear-gradient(135deg, #00C9B7 0%, #009688 100%);
-  --gradient-gain: linear-gradient(135deg, #00B86B 0%, #008F54 100%);
-  --gradient-loss: linear-gradient(135deg, #F5222D 0%, #CF1322 100%);
+  --gradient-gain: linear-gradient(135deg, #1A7F37 0%, #116329 100%);
+  --gradient-loss: linear-gradient(135deg, #CF222E 0%, #A40E26 100%);
   --gradient-card: linear-gradient(180deg, rgba(255, 255, 255, 0.9) 0%, rgba(250, 251, 252, 0.95) 100%);
 }
 
@@ -135,8 +135,8 @@ body {
   margin: 0;
   padding: 0;
   font-family: var(--font-sans);
-  font-size: 14px;
-  line-height: 1.6;
+  font-size: 12px;
+  line-height: 1.5;
   font-weight: var(--font-weight-regular);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -181,8 +181,8 @@ body * {
   position: relative;
   background: var(--bg-card);
   border: 1px solid var(--border-color);
-  border-radius: 12px;
-  padding: 24px;
+  border-radius: 6px;
+  padding: 12px 16px;
   text-align: center;
   box-shadow: var(--shadow-sm);
   transition: all 320ms cubic-bezier(0.4, 0, 0.2, 1);
@@ -212,7 +212,7 @@ body * {
 }
 
 .stat-card .stat-value {
-  font-size: 32px;
+  font-size: 22px;
   font-weight: var(--font-weight-bold);
   font-family: var(--font-mono);
   color: var(--color-primary);
@@ -228,15 +228,15 @@ body * {
 
 .stat-card .stat-label {
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: var(--font-weight-medium);
-  margin-top: 8px;
+  margin-top: 4px;
   text-transform: uppercase;
   letter-spacing: var(--letter-spacing-wide);
 }
 /* --- Utility: Page Header --- */
 .page-header {
-  padding: 16px 24px;
+  padding: 8px 16px;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border-color);
   display: flex;
@@ -247,14 +247,14 @@ body * {
 .page-header h1,
 .page-header h2 {
   margin: 0;
-  font-size: 18px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--text-primary);
 }
 
 .page-header p {
-  margin: 4px 0 0;
-  font-size: 13px;
+  margin: 2px 0 0;
+  font-size: 12px;
   color: var(--text-secondary);
 }
 
@@ -263,8 +263,8 @@ body * {
   position: relative;
   background: var(--bg-card);
   border: 1px solid var(--border-color);
-  border-radius: 12px;
-  padding: 24px;
+  border-radius: 6px;
+  padding: 12px 16px;
   box-shadow: var(--shadow-sm);
   transition: all 280ms cubic-bezier(0.4, 0, 0.2, 1);
   backdrop-filter: blur(10px);
@@ -290,7 +290,7 @@ body * {
 }
 
 .content-card + .content-card {
-  margin-top: 16px;
+  margin-top: 8px;
 }
 
 /* --- Animations --- */

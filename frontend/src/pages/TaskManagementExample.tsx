@@ -9,32 +9,32 @@ import React, { useState } from 'react';
 import {
   Card,
   Tabs,
-  TabPane,
   Button,
   Modal,
   Form,
   Input,
-  TextArea,
   Select,
-  Toast,
   Space,
   Tag,
   Descriptions,
-} from '@douyinfe/semi-ui';
-import { IconSync, IconCode } from '@douyinfe/semi-icons';
+} from 'antd';
+import { SyncOutlined, CodeOutlined } from '@ant-design/icons';
+import { useMessage } from '../hooks/useMessage';
 import { TaskList } from '../components/TaskList';
 import { syncService, etlService, factorService } from '../services/taskService';
 import type { SyncTaskConfig, ETLTaskConfig, FactorConfig } from '../types/task';
-import type { ColumnProps } from '@douyinfe/semi-ui/lib/es/table';
+import type { ColumnType } from 'antd/es/table';
 
 const TaskManagementExample: React.FC = () => {
+  const message = useMessage();
   const [activeTab, setActiveTab] = useState('sync');
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [editingTask, setEditingTask] = useState<any>(null);
   const [isNewTask, setIsNewTask] = useState(false);
+  const [form] = Form.useForm();
 
   // Sync task columns
-  const syncColumns: ColumnProps<SyncTaskConfig>[] = [
+  const syncColumns: ColumnType<SyncTaskConfig>[] = [
     {
       title: '任务ID',
       dataIndex: 'task_id',
@@ -69,7 +69,7 @@ const TaskManagementExample: React.FC = () => {
   ];
 
   // ETL task columns
-  const etlColumns: ColumnProps<ETLTaskConfig>[] = [
+  const etlColumns: ColumnType<ETLTaskConfig>[] = [
     {
       title: '任务ID',
       dataIndex: 'task_id',
@@ -99,7 +99,7 @@ const TaskManagementExample: React.FC = () => {
   ];
 
   // Factor columns
-  const factorColumns: ColumnProps<FactorConfig>[] = [
+  const factorColumns: ColumnType<FactorConfig>[] = [
     {
       title: '因子ID',
       dataIndex: 'factor_id',
@@ -134,6 +134,7 @@ const TaskManagementExample: React.FC = () => {
     setEditingTask(task);
     setIsNewTask(false);
     setEditModalVisible(true);
+    form.setFieldsValue(task);
   };
 
   // Handle create task
@@ -141,6 +142,7 @@ const TaskManagementExample: React.FC = () => {
     setEditingTask(null);
     setIsNewTask(true);
     setEditModalVisible(true);
+    form.resetFields();
   };
 
   // Handle save task
@@ -175,7 +177,7 @@ const TaskManagementExample: React.FC = () => {
         }
       }
       setEditModalVisible(false);
-      Toast.success('保存成功');
+      message.success('保存成功');
     } catch (error) {
       // Error already handled by service
     }
@@ -185,7 +187,7 @@ const TaskManagementExample: React.FC = () => {
     <div style={{ padding: 24 }}>
       <Card
         title="任务管理示例"
-        headerExtraContent={
+        extra={
           <Space>
             <Tag color="blue">使用任务抽象层</Tag>
             <Tag color="green">统一版本控制</Tag>
@@ -193,191 +195,207 @@ const TaskManagementExample: React.FC = () => {
         }
       >
         <Descriptions
-          data={[
-            { key: '说明', value: '本页面展示如何使用任务管理抽象层统一管理不同类型的任务' },
-            { key: '特性', value: '统一的CRUD接口、版本控制、类型安全、错误处理' },
-            { key: '支持任务', value: '同步任务 (Sync)、ETL任务、因子 (Factor)' },
-          ]}
           style={{ marginBottom: 24 }}
+          items={[
+            { key: '说明', label: '说明', children: '本页面展示如何使用任务管理抽象层统一管理不同类型的任务' },
+            { key: '特性', label: '特性', children: '统一的CRUD接口、版本控制、类型安全、错误处理' },
+            { key: '支持任务', label: '支持任务', children: '同步任务 (Sync)、ETL任务、因子 (Factor)' },
+          ]}
         />
 
-        <Tabs activeKey={activeTab} onChange={setActiveTab}>
-          <TabPane
-            tab={
-              <span>
-                <IconSync /> 同步任务
-              </span>
-            }
-            itemKey="sync"
-          >
-            <TaskList
-              taskType="sync"
-              service={syncService}
-              columns={syncColumns}
-              onEdit={handleEdit}
-              onCreate={handleCreate}
-              idField="task_id"
-              extraActions={(task) => (
-                <Button
-                  size="small"
-                  onClick={() => {
-                    Modal.info({
-                      title: '任务详情',
-                      content: <pre>{JSON.stringify(task, null, 2)}</pre>,
-                      width: 600,
-                    });
-                  }}
-                >
-                  详情
-                </Button>
-              )}
-            />
-          </TabPane>
-
-          <TabPane
-            tab={
-              <span>
-                <IconCode /> ETL任务
-              </span>
-            }
-            itemKey="etl"
-          >
-            <TaskList
-              taskType="etl"
-              service={etlService}
-              columns={etlColumns}
-              onEdit={handleEdit}
-              onCreate={handleCreate}
-              idField="task_id"
-            />
-          </TabPane>
-
-          <TabPane
-            tab={
-              <span>
-                <IconCode /> 因子
-              </span>
-            }
-            itemKey="factor"
-          >
-            <TaskList
-              taskType="factor"
-              service={factorService}
-              columns={factorColumns}
-              onEdit={handleEdit}
-              onCreate={handleCreate}
-              idField="factor_id"
-            />
-          </TabPane>
-        </Tabs>
+        <Tabs activeKey={activeTab} onChange={setActiveTab} items={[
+          {
+            key: 'sync',
+            label: <span><SyncOutlined /> 同步任务</span>,
+            children: (
+              <TaskList
+                taskType="sync"
+                service={syncService}
+                columns={syncColumns}
+                onEdit={handleEdit}
+                onCreate={handleCreate}
+                idField="task_id"
+                extraActions={(task) => (
+                  <Button
+                    size="small"
+                    onClick={() => {
+                      Modal.info({
+                        title: '任务详情',
+                        content: <pre>{JSON.stringify(task, null, 2)}</pre>,
+                        width: 600,
+                      });
+                    }}
+                  >
+                    详情
+                  </Button>
+                )}
+              />
+            ),
+          },
+          {
+            key: 'etl',
+            label: <span><CodeOutlined /> ETL任务</span>,
+            children: (
+              <TaskList
+                taskType="etl"
+                service={etlService}
+                columns={etlColumns}
+                onEdit={handleEdit}
+                onCreate={handleCreate}
+                idField="task_id"
+              />
+            ),
+          },
+          {
+            key: 'factor',
+            label: <span><CodeOutlined /> 因子</span>,
+            children: (
+              <TaskList
+                taskType="factor"
+                service={factorService}
+                columns={factorColumns}
+                onEdit={handleEdit}
+                onCreate={handleCreate}
+                idField="factor_id"
+              />
+            ),
+          },
+        ]} />
       </Card>
 
       {/* Edit/Create Modal */}
       <Modal
         title={isNewTask ? '创建任务' : '编辑任务'}
-        visible={editModalVisible}
+        open={editModalVisible}
         onCancel={() => setEditModalVisible(false)}
         footer={null}
         width={800}
       >
         <Form
-          initValues={editingTask || {}}
-          onSubmit={handleSave}
-          labelPosition="left"
-          labelWidth={120}
+          form={form}
+          onFinish={handleSave}
+          labelCol={{ span: 5 }}
+          wrapperCol={{ span: 19 }}
         >
           {activeTab === 'sync' && (
             <>
-              <Form.Input
-                field="task_id"
+              <Form.Item
+                name="task_id"
                 label="任务ID"
                 rules={[{ required: true, message: '请输入任务ID' }]}
-                disabled={!isNewTask}
-              />
-              <Form.Input
-                field="description"
+              >
+                <Input disabled={!isNewTask} />
+              </Form.Item>
+              <Form.Item
+                name="description"
                 label="描述"
                 rules={[{ required: true, message: '请输入描述' }]}
-              />
-              <Form.Input
-                field="api_name"
+              >
+                <Input />
+              </Form.Item>
+              <Form.Item
+                name="api_name"
                 label="API名称"
                 rules={[{ required: true, message: '请输入API名称' }]}
-              />
-              <Form.Input field="table_name" label="表名" />
-              <Form.Select
-                field="sync_type"
-                label="同步类型"
-                optionList={[
+              >
+                <Input />
+              </Form.Item>
+              <Form.Item name="table_name" label="表名">
+                <Input />
+              </Form.Item>
+              <Form.Item name="sync_type" label="同步类型">
+                <Select options={[
                   { label: '增量', value: 'incremental' },
                   { label: '全量', value: 'full' },
-                ]}
-              />
-              <Form.Switch field="enabled" label="启用" />
+                ]} />
+              </Form.Item>
+              <Form.Item name="enabled" label="启用" valuePropName="checked">
+                <input type="checkbox" />
+              </Form.Item>
             </>
           )}
 
           {activeTab === 'etl' && (
             <>
-              <Form.Input
-                field="task_id"
+              <Form.Item
+                name="task_id"
                 label="任务ID"
                 rules={[{ required: true, message: '请输入任务ID' }]}
-                disabled={!isNewTask}
-              />
-              <Form.Input
-                field="description"
+              >
+                <Input disabled={!isNewTask} />
+              </Form.Item>
+              <Form.Item
+                name="description"
                 label="描述"
                 rules={[{ required: true, message: '请输入描述' }]}
-              />
-              <Form.Input
-                field="source_table"
+              >
+                <Input />
+              </Form.Item>
+              <Form.Item
+                name="source_table"
                 label="源表"
                 rules={[{ required: true, message: '请输入源表' }]}
-              />
-              <Form.Input
-                field="target_table"
+              >
+                <Input />
+              </Form.Item>
+              <Form.Item
+                name="target_table"
                 label="目标表"
                 rules={[{ required: true, message: '请输入目标表' }]}
-              />
-              <Form.TextArea
-                field="script"
+              >
+                <Input />
+              </Form.Item>
+              <Form.Item
+                name="script"
                 label="SQL脚本"
-                rows={6}
                 rules={[{ required: true, message: '请输入SQL脚本' }]}
-              />
-              <Form.Input field="schedule" label="调度表达式" />
-              <Form.Switch field="enabled" label="启用" />
+              >
+                <Input.TextArea rows={6} />
+              </Form.Item>
+              <Form.Item name="schedule" label="调度表达式">
+                <Input />
+              </Form.Item>
+              <Form.Item name="enabled" label="启用" valuePropName="checked">
+                <input type="checkbox" />
+              </Form.Item>
             </>
           )}
 
           {activeTab === 'factor' && (
             <>
-              <Form.Input
-                field="factor_id"
+              <Form.Item
+                name="factor_id"
                 label="因子ID"
                 rules={[{ required: true, message: '请输入因子ID' }]}
-                disabled={!isNewTask}
-              />
-              <Form.Input
-                field="description"
+              >
+                <Input disabled={!isNewTask} />
+              </Form.Item>
+              <Form.Item
+                name="description"
                 label="描述"
                 rules={[{ required: true, message: '请输入描述' }]}
-              />
-              <Form.Input field="category" label="分类" />
-              <Form.TextArea
-                field="code"
+              >
+                <Input />
+              </Form.Item>
+              <Form.Item name="category" label="分类">
+                <Input />
+              </Form.Item>
+              <Form.Item
+                name="code"
                 label="因子代码"
-                rows={8}
                 rules={[{ required: true, message: '请输入因子代码' }]}
-              />
-              <Form.Input field="depends_on" label="依赖字段" />
-              <Form.InputNumber
-                field="lookback_days"
-                label="回溯天数"
-                initValue={250}
-              />
-              <Form.Switch field="enabled" label="启用" />
+              >
+                <Input.TextArea rows={8} />
+              </Form.Item>
+              <Form.Item name="depends_on" label="依赖字段">
+                <Input />
+              </Form.Item>
+              <Form.Item name="lookback_days" label="回溯天数">
+                <Input type="number" defaultValue={250} />
+              </Form.Item>
+              <Form.Item name="enabled" label="启用" valuePropName="checked">
+                <input type="checkbox" />
+              </Form.Item>
             </>
           )}
 

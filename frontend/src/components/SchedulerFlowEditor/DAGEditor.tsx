@@ -105,7 +105,7 @@ const DAGEditor: React.FC<DAGEditorProps> = ({ tasks, onChange }) => {
             source: dep,
             target: task.id,
             markerEnd: { type: MarkerType.ArrowClosed },
-            style: { stroke: 'var(--semi-color-text-2)' },
+            style: { stroke: 'var(--text-secondary)' },
           });
         });
       }
@@ -128,7 +128,7 @@ const DAGEditor: React.FC<DAGEditorProps> = ({ tasks, onChange }) => {
       setEdges(eds => addEdge({
         ...params,
         markerEnd: { type: MarkerType.ArrowClosed },
-        style: { stroke: 'var(--semi-color-text-2)' },
+        style: { stroke: 'var(--text-secondary)' },
       }, eds));
 
       // 更新 tasks 的依赖关系
@@ -172,8 +172,8 @@ const DAGEditor: React.FC<DAGEditorProps> = ({ tasks, onChange }) => {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        color: 'var(--semi-color-text-2)',
-        border: '1px dashed var(--semi-color-border)',
+        color: 'var(--text-secondary)',
+        border: '1px dashed var(--border-color)',
         borderRadius: 8,
       }}>
         请先选择任务
@@ -182,7 +182,7 @@ const DAGEditor: React.FC<DAGEditorProps> = ({ tasks, onChange }) => {
   }
 
   return (
-    <div style={{ height: 300, border: '1px solid var(--semi-color-border)', borderRadius: 8 }}>
+    <div style={{ height: 300, border: '1px solid var(--border-color)', borderRadius: 8 }}>
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -191,9 +191,9 @@ const DAGEditor: React.FC<DAGEditorProps> = ({ tasks, onChange }) => {
         onConnect={onConnect}
         onEdgesDelete={onEdgesDelete}
         fitView
-        style={{ background: 'var(--semi-color-bg-0)' }}
+        style={{ background: 'var(--bg-surface)' }}
       >
-        <Background color="var(--semi-color-border)" gap={16} size={1} />
+        <Background color="var(--border-color)" gap={16} size={1} />
         <Controls />
       </ReactFlow>
     </div>

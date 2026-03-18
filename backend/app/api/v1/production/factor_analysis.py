@@ -1,8 +1,12 @@
 """因子分析 API 端点"""
-from datetime import datetime
-from fastapi import APIRouter, HTTPException
+import json
+import time
+from datetime import datetime as dt
+from typing import Optional, List
+
+import polars as pl
+from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel
-from typing import Optional, List, Dict, Any
 
 from store.dolphindb_client import db_client
 from engine.analysis.analyzer import FactorAnalyzer
@@ -15,17 +19,8 @@ analyzer = FactorAnalyzer(db_client)
 
 # ==================== Pydantic Models ====================
 
-class AnalyzeRequest(BaseModel):
+class AnalysisRequest(BaseModel):
     """因子分析请求"""
-    factor_id: str
-    start_date: Optional[str] = None
-    end_date: Optional[str] = None
-    periods: List[int] = [1, 5, 10]
-    quantiles: int = 5
-
-
-class AlphalensAnalysisRequest(BaseModel):
-    """Alphalens 分析请求"""
     factor_id: str
     start_date: str
     end_date: str
@@ -33,195 +28,108 @@ class AlphalensAnalysisRequest(BaseModel):
     quantiles: int = 5
     index_pool: Optional[str] = None
     groupby_field: Optional[str] = None
+    # 买入时点控制
+    next_day_entry: bool = True
+    entry_price: str = "open"   # "open" | "close" | "high" | "low"
+    # 因子中性化
+    neutralize: bool = False
+    neutralize_controls: Optional[List[str]] = None  # ["market", "industry", "size"]
+    industry_level: str = "industry_l1"  # "industry_l1" | "industry_l2"
 
 
-# ==================== Helper Functions ====================
+# ==================== 后台任务辅助函数 ====================
 
-def _format_analysis_summary(summary: dict) -> dict:
-    """将 analyzer.analyze() 返回的 summary 转换为前端期望的格式"""
-    ic_summary = []
-    layer_returns = []
-
-    for period_str, pdata in summary.get("periods", {}).items():
-        period = int(period_str)
-        ic_summary.append({
-            "period": period,
-            "ic_mean": pdata.get("ic_mean", 0),
-            "ic_std": pdata.get("ic_std", 0),
-            "icir": pdata.get("ic_ir", 0),
-            "ic_positive_ratio": pdata.get("ic_positive_ratio", 0),
-            "long_short_return": pdata.get("long_short_return", 0),
-        })
-        for qr in pdata.get("quantile_returns", []):
-            layer_returns.append({
-                "period": period,
-                "quantile": qr.get("quantile", ""),
-                "mean_return": qr.get("avg_return", 0),
-            })
-
-    ic_summary.sort(key=lambda x: x["period"])
-    return {
-        "factor_id": summary.get("factor_id"),
-        "ic_summary": ic_summary,
-        "layer_returns": layer_returns,
-        "turnover": summary.get("turnover"),
-        "ic_mean": summary.get("ic_mean", 0),
-        "ic_std": summary.get("ic_std", 0),
-        "ic_ir": summary.get("ic_ir", 0),
+def _create_pending_task(task_id: int, req: AnalysisRequest):
+    """在 DB 写入 pending 占位记录"""
+    record = {
+        "id": task_id,
+        "factor_id": req.factor_id,
+        "analysis_date": dt.now(),
+        "start_date": dt.strptime(req.start_date, "%Y%m%d").date(),
+        "end_date": dt.strptime(req.end_date, "%Y%m%d").date(),
+        "config": json.dumps({
+            "periods": req.periods,
+            "quantiles": req.quantiles,
+            "index_pool": req.index_pool,
+            "groupby_field": req.groupby_field,
+        }),
+        "task_status": "pending",
+        "task_id": str(task_id),
+        "error_message": None,
+        "ic_summary": None, "ic_by_period": None, "ic_ts": None,
+        "quantile_returns": None, "cumulative_returns": None,
+        "ic_by_group": None, "returns_by_group": None,
+        "turnover": None, "decay_analysis": None, "charts_data": None,
     }
+    df = pl.DataFrame([record])
+    db_client.upsert("factor_analysis_extended", df, key_columns=["id"])
 
 
-def _format_db_analysis(row: dict) -> dict:
-    """将 DB 行记录转换为前端期望的格式"""
-    ic_summary = []
-    layer_returns = []
-
-    periods = safe_json_parse(row.get("periods"), default=[])
-    quantile_returns = safe_json_parse(row.get("quantile_returns"))
-
-    for p in periods:
-        ic_summary.append({
-            "period": p,
-            "ic_mean": row.get("ic_mean", 0),
-            "ic_std": row.get("ic_std", 0),
-            "icir": row.get("ic_ir", 0),
-            "ic_positive_ratio": 0,
-        })
-
-    if quantile_returns:
-        for qr in quantile_returns:
-            layer_returns.append({
-                "period": periods[0] if periods else 1,
-                "quantile": qr.get("quantile", ""),
-                "mean_return": qr.get("avg_return", 0),
-            })
-
-    return {
-        "factor_id": row.get("factor_id"),
-        "ic_summary": ic_summary,
-        "layer_returns": layer_returns,
-        "turnover_mean": row.get("turnover_mean", 0),
-        "ic_mean": row.get("ic_mean", 0),
-        "ic_std": row.get("ic_std", 0),
-        "ic_ir": row.get("ic_ir", 0),
-        "start_date": row.get("start_date"),
-        "end_date": row.get("end_date"),
-        "analysis_date": str(row.get("analysis_date", "")),
-    }
-
-
-def _clean_alphalens_results(results: dict) -> dict:
-    """清理 Alphalens 结果中的 NaN/Inf 值以确保 JSON 序列化"""
-    import math
-    import numpy as np
-
-    def clean_value(v):
-        if isinstance(v, (float, np.floating)):
-            if math.isnan(v) or math.isinf(v):
-                return None
-        elif isinstance(v, (np.integer, np.int64, np.int32)):
-            return int(v)
-        return v
-
-    def clean_dict(d):
-        if isinstance(d, dict):
-            return {k: clean_dict(v) for k, v in d.items()}
-        elif isinstance(d, (list, tuple)):
-            return [clean_dict(item) for item in d]
-        else:
-            return clean_value(d)
-
-    return clean_dict(results)
-
-
-# ==================== API Endpoints ====================
-
-@router.post("/analysis/run")
-async def run_analysis(req: AnalyzeRequest):
-    """运行因子分析"""
+def _update_task_status(task_id: int, status: str, error: Optional[str] = None):
+    """更新任务状态（upsert 方式）"""
     try:
-        result = analyzer.analyze(
-            factor_id=req.factor_id,
-            start_date=req.start_date,
-            end_date=req.end_date,
-            periods=req.periods,
-            quantiles=req.quantiles,
-        )
-        if result is None:
-            raise HTTPException(status_code=404, detail=f"因子 {req.factor_id} 无数据或分析失败")
-        return {"status": "success", "data": _format_analysis_summary(result)}
-    except HTTPException:
-        raise
+        df = db_client.query("""
+            SELECT * FROM factor_analysis_extended WHERE id = %s
+        """, (task_id,))
+        if df.is_empty():
+            return
+        row = df.to_dicts()[0]
+        row["task_status"] = status
+        row["error_message"] = error
+        updated_df = pl.DataFrame([row])
+        db_client.upsert("factor_analysis_extended", updated_df, key_columns=["id"])
     except Exception as e:
-        logger.error(f"Analysis failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Failed to update task status {task_id}: {e}")
 
 
-@router.get("/analysis/{factor_id}")
-async def get_analysis(factor_id: str):
-    """获取最新分析结果"""
-    result = analyzer.get_latest_analysis(factor_id)
-    if not result:
-        raise HTTPException(status_code=404, detail=f"因子 {factor_id} 无分析记录")
-    return {"status": "success", "data": _format_db_analysis(result)}
-
-
-@router.get("/analysis/{factor_id}/history")
-async def get_analysis_history(factor_id: str, limit: int = 10):
-    """获取分析历史"""
-    records = analyzer.get_analysis_history(factor_id, limit)
-    return {"status": "success", "data": [_format_db_analysis(r) for r in records]}
-
-
-@router.post("/analysis/alphalens")
-async def run_alphalens_analysis(req: AlphalensAnalysisRequest):
-    """运行 Alphalens 因子分析
-
-    Args:
-        factor_id: 因子ID
-        start_date: 开始日期 (YYYYMMDD)
-        end_date: 结束日期 (YYYYMMDD)
-        periods: 持有周期列表，默认 [1, 5, 10]
-        quantiles: 分位数，默认 5
-        index_pool: 指数股票池代码（可选），如 '000300.SH'
-        groupby_field: 分组字段（可选），如 'industry', 'market_cap'
-
-    Returns:
-        完整的 Alphalens 分析结果
-    """
+def _run_analysis_background(task_id: int, req: AnalysisRequest):
+    """后台执行分析，更新 task_status"""
     try:
-        logger.info(f"Starting Alphalens analysis: factor_id={req.factor_id}, "
-                   f"date_range={req.start_date}~{req.end_date}, "
-                   f"index_pool={req.index_pool}, groupby={req.groupby_field}")
-
+        _update_task_status(task_id, "running")
         results = analyzer.analyze(
             factor_id=req.factor_id,
             start_date=req.start_date,
             end_date=req.end_date,
             periods=req.periods,
             quantiles=req.quantiles,
-            use_alphalens=True,
             index_pool=req.index_pool,
-            groupby_field=req.groupby_field
+            groupby_field=req.groupby_field,
+            next_day_entry=req.next_day_entry,
+            entry_price=req.entry_price,
+            neutralize=req.neutralize,
+            neutralize_controls=req.neutralize_controls,
+            industry_level=req.industry_level,
         )
-
-        if not results:
-            raise HTTPException(status_code=500, detail="分析失败，未返回结果")
-
-        results = _clean_alphalens_results(results)
-        logger.info(f"Alphalens analysis completed for {req.factor_id}")
-
-        return {
-            "status": "success",
-            "message": f"成功完成 Alphalens 分析",
-            "data": results
-        }
-
+        if results is None:
+            _update_task_status(task_id, "failed", error="分析返回空结果")
+        else:
+            _update_task_status(task_id, "completed")
     except Exception as e:
-        logger.error(f"Alphalens analysis failed: {e}")
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Background analysis failed for task {task_id}: {e}")
+        _update_task_status(task_id, "failed", error=str(e))
+
+
+# ==================== API Endpoints ====================
+
+@router.post("/analysis/alphalens", response_model=dict)
+async def submit_analysis(req: AnalysisRequest, background_tasks: BackgroundTasks):
+    """提交因子分析任务（异步）。立即返回 task_id，后台执行分析。"""
+    task_id = int(time.time() * 1000)
+    _create_pending_task(task_id, req)
+    background_tasks.add_task(_run_analysis_background, task_id=task_id, req=req)
+    return {
+        "status": "success",
+        "data": {"task_id": task_id, "factor_id": req.factor_id, "status": "pending"}
+    }
+
+
+@router.get("/analysis/alphalens/status/{task_id}")
+async def get_analysis_status(task_id: int):
+    """查询分析任务状态"""
+    status = analyzer.get_task_status(task_id)
+    if not status:
+        raise HTTPException(status_code=404, detail=f"任务 {task_id} 不存在")
+    return {"status": "success", "data": status}
 
 
 @router.get("/analysis/alphalens/{factor_id}/latest")
@@ -254,7 +162,7 @@ async def get_latest_alphalens_analysis(factor_id: str):
         json_fields = [
             'ic_summary', 'ic_by_period', 'ic_ts', 'quantile_returns',
             'cumulative_returns', 'ic_by_group', 'returns_by_group',
-            'turnover', 'decay_analysis', 'chart_data'
+            'turnover', 'decay_analysis', 'charts_data'
         ]
 
         for field in json_fields:
@@ -264,6 +172,14 @@ async def get_latest_alphalens_analysis(factor_id: str):
                 except Exception as e:
                     logger.warning(f"Failed to parse {field} for {factor_id}: {e}")
                     record[field] = None
+
+        # 从 charts_data 中提取行业分析字段，提升为顶层字段
+        charts_data = record.get('charts_data') or {}
+        if isinstance(charts_data, dict):
+            if 'ic_by_industry' in charts_data:
+                record['ic_by_industry'] = charts_data['ic_by_industry']
+            if 'returns_by_industry' in charts_data:
+                record['returns_by_industry'] = charts_data['returns_by_industry']
 
         return {
             "status": "success",

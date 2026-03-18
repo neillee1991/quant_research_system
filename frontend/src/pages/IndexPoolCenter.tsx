@@ -5,18 +5,16 @@ import {
   Modal,
   Form,
   Input,
-  TextArea,
-  Upload,
-  Toast,
   Space,
   Card,
   Typography,
   Popconfirm,
   Tag,
   Spin,
-} from '@douyinfe/semi-ui';
-import { IconUpload, IconDelete, IconDownload, IconPlus } from '@douyinfe/semi-icons';
+} from 'antd';
+import { UploadOutlined, DeleteOutlined, DownloadOutlined, PlusOutlined } from '@ant-design/icons';
 import { productionApi } from '../api';
+import { useMessage } from '../hooks/useMessage';
 import './IndexPoolCenter.css';
 
 const { Title, Text } = Typography;
@@ -37,6 +35,7 @@ interface Constituent {
 }
 
 const IndexPoolCenter: React.FC = () => {
+  const message = useMessage();
   const [indexPools, setIndexPools] = useState<IndexPool[]>([]);
   const [loading, setLoading] = useState(false);
   const [uploadModalVisible, setUploadModalVisible] = useState(false);
@@ -44,7 +43,7 @@ const IndexPoolCenter: React.FC = () => {
   const [selectedIndex, setSelectedIndex] = useState<string | null>(null);
   const [constituents, setConstituents] = useState<Constituent[]>([]);
   const [uploadType, setUploadType] = useState<'json' | 'csv'>('json');
-  const [formApi, setFormApi] = useState<any>(null);
+  const [form] = Form.useForm();
 
   useEffect(() => {
     loadIndexPools();
@@ -58,7 +57,7 @@ const IndexPoolCenter: React.FC = () => {
         setIndexPools(response.data.data);
       }
     } catch (error: any) {
-      Toast.error(`加载失败: ${error.message}`);
+      message.error(`加载失败: ${error.message}`);
     } finally {
       setLoading(false);
     }
@@ -75,12 +74,12 @@ const IndexPoolCenter: React.FC = () => {
       };
 
       await productionApi.batchUploadIndexPool(payload);
-      Toast.success('上传成功');
+      message.success('上传成功');
       setUploadModalVisible(false);
-      formApi?.reset();
+      form.resetFields();
       loadIndexPools();
     } catch (error: any) {
-      Toast.error(`上传失败: ${error.message}`);
+      message.error(`上传失败: ${error.message}`);
     }
   };
 
@@ -94,12 +93,12 @@ const IndexPoolCenter: React.FC = () => {
       };
 
       await productionApi.csvUploadIndexPool(payload);
-      Toast.success('上传成功');
+      message.success('上传成功');
       setUploadModalVisible(false);
-      formApi?.reset();
+      form.resetFields();
       loadIndexPools();
     } catch (error: any) {
-      Toast.error(`上传失败: ${error.message}`);
+      message.error(`上传失败: ${error.message}`);
     }
   };
 
@@ -114,7 +113,7 @@ const IndexPoolCenter: React.FC = () => {
         setConstituents(response.data.data.constituents);
       }
     } catch (error: any) {
-      Toast.error(`加载失败: ${error.message}`);
+      message.error(`加载失败: ${error.message}`);
     } finally {
       setLoading(false);
     }
@@ -123,10 +122,10 @@ const IndexPoolCenter: React.FC = () => {
   const handleDelete = async (indexCode: string) => {
     try {
       await productionApi.deleteIndexPool(indexCode);
-      Toast.success('删除成功');
+      message.success('删除成功');
       loadIndexPools();
     } catch (error: any) {
-      Toast.error(`删除失败: ${error.message}`);
+      message.error(`删除失败: ${error.message}`);
     }
   };
 
@@ -140,9 +139,9 @@ const IndexPoolCenter: React.FC = () => {
       a.download = 'index_pool_template.csv';
       a.click();
       window.URL.revokeObjectURL(url);
-      Toast.success('模板下载成功');
+      message.success('模板下载成功');
     } catch (error: any) {
-      Toast.error(`下载失败: ${error.message}`);
+      message.error(`下载失败: ${error.message}`);
     }
   };
 
@@ -194,10 +193,10 @@ const IndexPoolCenter: React.FC = () => {
           </Button>
           <Popconfirm
             title="确定删除该指数吗？"
-            content="删除后将无法恢复"
+            description="删除后将无法恢复"
             onConfirm={() => handleDelete(record.index_code)}
           >
-            <Button size="small" type="danger" icon={<IconDelete />}>
+            <Button size="small" danger icon={<DeleteOutlined />}>
               删除
             </Button>
           </Popconfirm>
@@ -228,18 +227,18 @@ const IndexPoolCenter: React.FC = () => {
   return (
     <div className="index-pool-center">
       <Card
-        title={<Title heading={3}>指数股票池管理</Title>}
-        headerExtraContent={
+        title={<Title level={3}>指数股票池管理</Title>}
+        extra={
           <Space>
             <Button
-              icon={<IconDownload />}
+              icon={<DownloadOutlined />}
               onClick={handleDownloadTemplate}
             >
               下载模板
             </Button>
             <Button
               type="primary"
-              icon={<IconPlus />}
+              icon={<PlusOutlined />}
               onClick={() => setUploadModalVisible(true)}
             >
               上传指数
@@ -260,90 +259,93 @@ const IndexPoolCenter: React.FC = () => {
       {/* 上传模态框 */}
       <Modal
         title="上传指数成分股"
-        visible={uploadModalVisible}
+        open={uploadModalVisible}
         onCancel={() => {
           setUploadModalVisible(false);
-          formApi?.reset();
+          form.resetFields();
         }}
         footer={null}
         width={600}
       >
-        <Space vertical style={{ width: '100%' }} spacing="loose">
+        <div style={{ marginBottom: 16 }}>
           <Space>
             <Button
-              type={uploadType === 'json' ? 'primary' : 'tertiary'}
+              type={uploadType === 'json' ? 'primary' : 'default'}
               onClick={() => setUploadType('json')}
             >
               JSON 格式
             </Button>
             <Button
-              type={uploadType === 'csv' ? 'primary' : 'tertiary'}
+              type={uploadType === 'csv' ? 'primary' : 'default'}
               onClick={() => setUploadType('csv')}
             >
               CSV 格式
             </Button>
           </Space>
+        </div>
 
-          <Form
-            getFormApi={(api) => setFormApi(api)}
-            onSubmit={uploadType === 'json' ? handleUploadJSON : handleUploadCSV}
-            labelPosition="left"
-            labelWidth={100}
+        <Form
+          form={form}
+          onFinish={uploadType === 'json' ? handleUploadJSON : handleUploadCSV}
+          labelCol={{ span: 5 }}
+          wrapperCol={{ span: 19 }}
+        >
+          <Form.Item
+            name="index_code"
+            label="指数代码"
+            rules={[{ required: true, message: '请输入指数代码' }]}
           >
-            <Form.Input
-              field="index_code"
-              label="指数代码"
-              placeholder="例如: 000300.SH"
-              rules={[{ required: true, message: '请输入指数代码' }]}
-            />
-            <Form.Input
-              field="index_name"
-              label="指数名称"
-              placeholder="例如: 沪深300"
-            />
-            <Form.Input
-              field="description"
-              label="描述"
-              placeholder="指数描述信息"
-            />
+            <Input placeholder="例如: 000300.SH" />
+          </Form.Item>
+          <Form.Item name="index_name" label="指数名称">
+            <Input placeholder="例如: 沪深300" />
+          </Form.Item>
+          <Form.Item name="description" label="描述">
+            <Input placeholder="指数描述信息" />
+          </Form.Item>
 
-            {uploadType === 'json' ? (
-              <Form.TextArea
-                field="jsonData"
-                label="JSON 数据"
+          {uploadType === 'json' ? (
+            <Form.Item
+              name="jsonData"
+              label="JSON 数据"
+              rules={[{ required: true, message: '请输入 JSON 数据' }]}
+            >
+              <Input.TextArea
                 placeholder='[{"trade_date": "20240101", "ts_code": "000001.SZ", "weight": 0.05}]'
                 rows={10}
-                rules={[{ required: true, message: '请输入 JSON 数据' }]}
               />
-            ) : (
-              <Form.TextArea
-                field="csvContent"
-                label="CSV 内容"
+            </Form.Item>
+          ) : (
+            <Form.Item
+              name="csvContent"
+              label="CSV 内容"
+              rules={[{ required: true, message: '请输入 CSV 内容' }]}
+            >
+              <Input.TextArea
                 placeholder="trade_date,ts_code,weight&#10;20240101,000001.SZ,0.05"
                 rows={10}
-                rules={[{ required: true, message: '请输入 CSV 内容' }]}
               />
-            )}
+            </Form.Item>
+          )}
 
-            <Space style={{ marginTop: 16 }}>
-              <Button type="primary" htmlType="submit" icon={<IconUpload />}>
-                上传
-              </Button>
-              <Button onClick={() => {
-                setUploadModalVisible(false);
-                formApi?.reset();
-              }}>
-                取消
-              </Button>
-            </Space>
-          </Form>
-        </Space>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
+            <Button type="primary" htmlType="submit" icon={<UploadOutlined />}>
+              上传
+            </Button>
+            <Button onClick={() => {
+              setUploadModalVisible(false);
+              form.resetFields();
+            }}>
+              取消
+            </Button>
+          </div>
+        </Form>
       </Modal>
 
       {/* 成分股详情模态框 */}
       <Modal
         title={`成分股详情 - ${selectedIndex}`}
-        visible={detailModalVisible}
+        open={detailModalVisible}
         onCancel={() => setDetailModalVisible(false)}
         footer={null}
         width={800}

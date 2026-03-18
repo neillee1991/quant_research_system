@@ -159,13 +159,6 @@ export const productionApi = {
   getFactorStats: (factorId: string) => api.get(`/production/factors/${factorId}/stats`),
   getFactorMissingDates: (factorId: string) => api.get(`/production/factors/${factorId}/missing-dates`),
 
-  // 因子分析
-  runAnalysis: (factorId: string, startDate?: string, endDate?: string, periods = [1, 5, 10], quantiles = 5) =>
-    longRunningApi.post('/analysis/run', { factor_id: factorId, start_date: startDate, end_date: endDate, periods, quantiles }),
-  getAnalysis: (factorId: string) => api.get(`/analysis/${factorId}`),
-  getAnalysisHistory: (factorId: string, limit = 10) =>
-    api.get(`/analysis/${factorId}/history`, { params: { limit } }),
-
   // 数据配置
   getDataConfig: () => api.get('/production/data-config'),
   updateDataConfig: (mappings: DataFieldMapping[]) => api.put('/production/data-config', { mappings }),
@@ -191,11 +184,18 @@ export const productionApi = {
     periods?: number[];
     quantiles?: number;
     index_pool?: string;
-    groupby_field?: string
+    groupby_field?: string;
+    next_day_entry?: boolean;
+    entry_price?: string;
+    neutralize?: boolean;
+    neutralize_controls?: string[];
+    industry_level?: string;
   }) => longRunningApi.post('/analysis/alphalens', data),
   getLatestAlphalensAnalysis: (factorId: string) => api.get(`/analysis/alphalens/${factorId}/latest`),
   getAlphalensAnalysisHistory: (factorId: string, limit = 20, offset = 0) =>
     api.get(`/analysis/alphalens/${factorId}/history`, { params: { limit, offset } }),
+  getAnalysisTaskStatus: (taskId: number) =>
+    api.get(`/analysis/alphalens/status/${taskId}`),
 };
 
 // Flow 配置管理

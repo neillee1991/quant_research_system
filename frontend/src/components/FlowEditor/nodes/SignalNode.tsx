@@ -1,14 +1,16 @@
 import React, { useRef } from 'react';
 import { Handle, Position, NodeProps, useReactFlow } from 'reactflow';
-import { Card, Form, Toast } from '@douyinfe/semi-ui';
+import { Card, Input } from 'antd';
 import Editor from '@monaco-editor/react';
 import { useThemeStore } from '../../../store';
 import { formatCode } from '../../../utils/codeFormatter';
+import { useMessage } from '../../../hooks/useMessage';
 
 const SignalNode: React.FC<NodeProps> = ({ id, data }) => {
   const { mode } = useThemeStore();
   const editorRef = useRef<any>(null);
   const { setNodes } = useReactFlow();
+  const message = useMessage();
 
   const handleFormat = async () => {
     if (!editorRef.current) return;
@@ -16,9 +18,9 @@ const SignalNode: React.FC<NodeProps> = ({ id, data }) => {
       const currentValue = editorRef.current.getValue();
       const formatted = await formatCode(currentValue, 'python');
       editorRef.current.setValue(formatted);
-      Toast.success('代码格式化成功');
+      message.success('代码格式化成功');
     } catch (error: any) {
-      Toast.error(error.message || '格式化失败');
+      message.error(error.message || '格式化失败');
     }
   };
 
@@ -31,9 +33,9 @@ const SignalNode: React.FC<NodeProps> = ({ id, data }) => {
   return (
     <Card
       title="Signal"
+      size="small"
       style={{ minWidth: 240, background: 'var(--bg-node-signal)', border: '1px solid var(--color-loss)' }}
-      headerStyle={{ padding: '8px 12px' }}
-      bodyStyle={{ padding: '8px 12px' }}
+      styles={{ header: { padding: '8px 12px' }, body: { padding: '8px 12px' } }}
     >
       <Handle type="target" position={Position.Left} />
       <div style={{ marginBottom: 8 }}>
@@ -75,14 +77,14 @@ const SignalNode: React.FC<NodeProps> = ({ id, data }) => {
           />
         </div>
       </div>
-      <Form layout="vertical" labelPosition="top" onValueChange={handleValueChange}>
-        <Form.Input
-          field="signal_col"
-          label="Signal Column"
-          initValue={data.signal_col || 'signal'}
+      <div style={{ marginTop: 8 }}>
+        <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>Signal Column</div>
+        <Input
           size="small"
+          defaultValue={data.signal_col || 'signal'}
+          onChange={(e) => handleValueChange({ signal_col: e.target.value })}
         />
-      </Form>
+      </div>
       <Handle type="source" position={Position.Right} />
     </Card>
   );

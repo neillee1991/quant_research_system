@@ -1,5 +1,5 @@
 import React from 'react';
-import { Layout } from '@douyinfe/semi-ui';
+import { Layout } from 'antd';
 import Sidebar from './Sidebar';
 import TopBar from './TopBar';
 
@@ -17,7 +17,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
         <TopBar />
         <Content
           style={{
-            padding: 20,
+            padding: 12,
             overflow: 'auto',
             height: 'calc(100vh - 48px)',
             background: 'var(--bg-app)',

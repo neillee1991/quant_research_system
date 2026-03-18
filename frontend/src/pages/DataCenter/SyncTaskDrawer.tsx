@@ -4,11 +4,9 @@
  */
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  SideSheet,
+  Drawer,
   Button,
-  Toast,
   Tabs,
-  TabPane,
   Input,
   Select,
   Table,
@@ -20,9 +18,10 @@ import {
   Descriptions,
   Progress,
   Spin,
-  Banner,
-} from '@douyinfe/semi-ui';
-import { IconCode, IconPlus, IconDelete, IconSearch } from '@douyinfe/semi-icons';
+  Alert,
+} from 'antd';
+import { CodeOutlined, PlusOutlined, DeleteOutlined, SearchOutlined } from '@ant-design/icons';
+import { useMessage } from '../../hooks/useMessage';
 import Editor from '@monaco-editor/react';
 import { dataApi } from '../../api';
 import { useThemeStore } from '../../store';
@@ -44,6 +43,7 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
   onSave,
 }) => {
   const { mode } = useThemeStore();
+  const message = useMessage();
   const [activeTab, setActiveTab] = useState('visual');
   const [config, setConfig] = useState<any>(null);
   const [jsonText, setJsonText] = useState('');
@@ -163,7 +163,7 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
       setShowInspection(true);
     } catch (error) {
       console.error('Data inspection failed:', error);
-      Toast.error('数据探查失败');
+      message.error('数据探查失败');
     } finally {
       setInspectionLoading(false);
     }
@@ -206,7 +206,7 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
         jsonEditorRef.current.setValue(formatted);
       }
     } catch (error) {
-      Toast.error('JSON 格式无效');
+      message.error('JSON 格式无效');
     }
   };
 
@@ -219,7 +219,7 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
 
       if (isNew) {
         await dataApi.createSyncTask(configToSave);
-        Toast.success(`任务 ${configToSave.task_id} 创建成功`);
+        message.success(`任务 ${configToSave.task_id} 创建成功`);
         onSave();
         onClose();
       } else {
@@ -255,15 +255,15 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
 
                 {changes.schema_changed && (
                   <div style={{ marginBottom: 16 }}>
-                    <strong style={{ color: 'var(--semi-color-warning)' }}>表结构变更：</strong>
+                    <strong style={{ color: 'var(--color-warning)' }}>表结构变更：</strong>
 
                     {addedFields.length > 0 && (
                       <div style={{ marginTop: 8, marginLeft: 12 }}>
-                        <div style={{ fontSize: 12, color: 'var(--semi-color-success)', marginBottom: 4 }}>
+                        <div style={{ fontSize: 12, color: 'var(--color-gain)', marginBottom: 4 }}>
                           ✓ 新增字段 ({addedFields.length}):
                         </div>
                         {addedFields.map(field => (
-                          <div key={field} style={{ fontSize: 11, marginLeft: 12, color: 'var(--semi-color-text-1)' }}>
+                          <div key={field} style={{ fontSize: 11, marginLeft: 12, color: 'var(--text-primary)' }}>
                             • {field}: {newSchema[field]?.type} {newSchema[field]?.nullable ? '(可空)' : '(非空)'}
                             {newSchema[field]?.comment && ` - ${newSchema[field].comment}`}
                           </div>
@@ -273,11 +273,11 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
 
                     {removedFields.length > 0 && (
                       <div style={{ marginTop: 8, marginLeft: 12 }}>
-                        <div style={{ fontSize: 12, color: 'var(--semi-color-danger)', marginBottom: 4 }}>
+                        <div style={{ fontSize: 12, color: 'var(--color-loss)', marginBottom: 4 }}>
                           ✗ 删除字段 ({removedFields.length}):
                         </div>
                         {removedFields.map(field => (
-                          <div key={field} style={{ fontSize: 11, marginLeft: 12, color: 'var(--semi-color-text-1)' }}>
+                          <div key={field} style={{ fontSize: 11, marginLeft: 12, color: 'var(--text-primary)' }}>
                             • {field}: {oldSchema[field]?.type} {oldSchema[field]?.nullable ? '(可空)' : '(非空)'}
                           </div>
                         ))}
@@ -286,11 +286,11 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
 
                     {modifiedFields.length > 0 && (
                       <div style={{ marginTop: 8, marginLeft: 12 }}>
-                        <div style={{ fontSize: 12, color: 'var(--semi-color-warning)', marginBottom: 4 }}>
+                        <div style={{ fontSize: 12, color: 'var(--color-warning)', marginBottom: 4 }}>
                           ⚠ 修改字段 ({modifiedFields.length}):
                         </div>
                         {modifiedFields.map(field => (
-                          <div key={field} style={{ fontSize: 11, marginLeft: 12, color: 'var(--semi-color-text-1)' }}>
+                          <div key={field} style={{ fontSize: 11, marginLeft: 12, color: 'var(--text-primary)' }}>
                             • {field}:
                             <div style={{ marginLeft: 12 }}>
                               旧: {oldSchema[field]?.type} {oldSchema[field]?.nullable ? '(可空)' : '(非空)'}
@@ -307,12 +307,12 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
 
                 {changes.primary_keys_changed && (
                   <div style={{ marginBottom: 16 }}>
-                    <strong style={{ color: 'var(--semi-color-warning)' }}>主键变更：</strong>
+                    <strong style={{ color: 'var(--color-warning)' }}>主键变更：</strong>
                     <div style={{ marginTop: 8, marginLeft: 12, fontSize: 12 }}>
-                      <div style={{ color: 'var(--semi-color-text-2)' }}>
+                      <div style={{ color: 'var(--text-secondary)' }}>
                         旧主键: <code>{(changes.old_primary_keys || []).join(', ')}</code>
                       </div>
-                      <div style={{ color: 'var(--semi-color-text-1)', marginTop: 4 }}>
+                      <div style={{ color: 'var(--text-primary)', marginTop: 4 }}>
                         新主键: <code>{(changes.new_primary_keys || []).join(', ')}</code>
                       </div>
                     </div>
@@ -320,10 +320,10 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
                 )}
 
                 <p style={{
-                  color: 'var(--semi-color-danger)',
+                  color: 'var(--color-loss)',
                   marginTop: 16,
                   padding: 12,
-                  background: 'var(--semi-color-danger-light-default)',
+                  background: 'rgba(248, 81, 73, 0.1)',
                   borderRadius: 4,
                   fontSize: 12
                 }}>
@@ -333,21 +333,21 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
             ),
             okText: '确认清空并保存',
             cancelText: '取消',
-            okButtonProps: { type: 'danger' },
+            okButtonProps: { danger: true },
             onOk: () => handleSave(true),
           });
           return;
         }
 
-        Toast.success(`任务 ${configToSave.task_id} 更新成功`);
+        message.success(`任务 ${configToSave.task_id} 更新成功`);
         onSave();
         onClose();
       }
     } catch (error: any) {
       if (error instanceof SyntaxError) {
-        Toast.error('JSON 格式无效');
+        message.error('JSON 格式无效');
       } else {
-        Toast.error(error.response?.data?.detail || '保存配置失败');
+        message.error(error.response?.data?.detail || '保存配置失败');
       }
     }
   };
@@ -373,19 +373,20 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
   if (!config) return null;
 
   return (
-    <SideSheet
-      title={
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <span style={{ color: 'var(--semi-color-primary)' }}>
-            {isNew ? '新建任务' : task?.task_id}
-          </span>
-        </div>
-      }
-      visible={visible}
-      onCancel={onClose}
-      width={720}
-      bodyStyle={{ padding: 0 }}
-    >
+    <>
+      <Drawer
+        title={
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span style={{ color: 'var(--color-primary)' }}>
+              {isNew ? '新建任务' : task?.task_id}
+            </span>
+          </div>
+        }
+        open={visible}
+        onClose={onClose}
+        width={720}
+        styles={{ body: { padding: 0 } }}
+      >
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
         {/* 状态信息栏 - 仅编辑模式显示 */}
         {!isNew && taskStatus && (
@@ -395,23 +396,23 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
               flexWrap: 'wrap',
               gap: 16,
               padding: '12px 24px',
-              background: 'var(--semi-color-fill-0)',
-              borderBottom: '1px solid var(--semi-color-border)',
+              background: 'var(--bg-tertiary)',
+              borderBottom: '1px solid var(--border-color)',
             }}
           >
             <div>
-              <div style={{ color: 'var(--semi-color-text-2)', fontSize: '12px', marginBottom: 4 }}>
+              <div style={{ color: 'var(--text-secondary)', fontSize: '12px', marginBottom: 4 }}>
                 最新数据
               </div>
-              <span style={{ color: 'var(--semi-color-success)', fontSize: '13px', fontWeight: 500 }}>
+              <span style={{ color: 'var(--color-gain)', fontSize: '13px', fontWeight: 500 }}>
                 {taskStatus.table_latest_date || '-'}
               </span>
             </div>
             <div>
-              <div style={{ color: 'var(--semi-color-text-2)', fontSize: '12px', marginBottom: 4 }}>
+              <div style={{ color: 'var(--text-secondary)', fontSize: '12px', marginBottom: 4 }}>
                 上次同步
               </div>
-              <span style={{ color: 'var(--semi-color-text-2)', fontSize: '13px' }}>
+              <span style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>
                 {taskStatus.last_sync_time || '-'}
               </span>
             </div>
@@ -420,58 +421,60 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
 
         {/* 标签页内容 */}
         <div style={{ flex: 1, overflow: 'auto', padding: '16px 24px' }}>
-          <Tabs activeKey={activeTab} onChange={setActiveTab} size="small">
-            {/* 可视化编辑 */}
-            <TabPane tab="可视化编辑" itemKey="visual">
+          <Tabs activeKey={activeTab} onChange={setActiveTab} size="small" items={[
+            {
+              key: 'visual',
+              label: '可视化编辑',
+              children: (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingTop: 8 }}>
                 {/* 基本信息 */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                   <div>
-                    <div style={{ marginBottom: 4, fontSize: '12px', color: 'var(--semi-color-text-2)' }}>
+                    <div style={{ marginBottom: 4, fontSize: '12px', color: 'var(--text-secondary)' }}>
                       任务ID
                     </div>
                     <Input
                       size="small"
                       prefix="sync_"
                       value={(config.task_id || '').replace(/^sync_/, '')}
-                      onChange={(v) => updateConfig('task_id', `sync_${v}`)}
+                      onChange={(e) => updateConfig('task_id', `sync_${e.target.value}`)}
                       disabled={!isNew}
-                      style={!isNew ? { background: 'var(--semi-color-fill-0)' } : undefined}
+                      style={!isNew ? { background: 'var(--bg-tertiary)' } : undefined}
                     />
                   </div>
                   <div>
-                    <div style={{ marginBottom: 4, fontSize: '12px', color: 'var(--semi-color-text-2)' }}>
+                    <div style={{ marginBottom: 4, fontSize: '12px', color: 'var(--text-secondary)' }}>
                       API名称
                     </div>
                     <Input
                       size="small"
                       value={config.api_name || ''}
-                      onChange={(v) => updateConfig('api_name', v)}
+                      onChange={(e) => updateConfig('api_name', e.target.value)}
                     />
                   </div>
                   <div>
-                    <div style={{ marginBottom: 4, fontSize: '12px', color: 'var(--semi-color-text-2)' }}>
+                    <div style={{ marginBottom: 4, fontSize: '12px', color: 'var(--text-secondary)' }}>
                       描述
                     </div>
                     <Input
                       size="small"
                       value={config.description || ''}
-                      onChange={(v) => updateConfig('description', v)}
+                      onChange={(e) => updateConfig('description', e.target.value)}
                     />
                   </div>
                   <div>
-                    <div style={{ marginBottom: 4, fontSize: '12px', color: 'var(--semi-color-text-2)' }}>
+                    <div style={{ marginBottom: 4, fontSize: '12px', color: 'var(--text-secondary)' }}>
                       数据表
                     </div>
                     <Input
                       size="small"
                       prefix="sync_"
                       value={(config.table_name || '').replace(/^sync_/, '')}
-                      onChange={(v) => updateConfig('table_name', `sync_${v}`)}
+                      onChange={(e) => updateConfig('table_name', `sync_${e.target.value}`)}
                     />
                   </div>
                   <div>
-                    <div style={{ marginBottom: 4, fontSize: '12px', color: 'var(--semi-color-text-2)' }}>
+                    <div style={{ marginBottom: 4, fontSize: '12px', color: 'var(--text-secondary)' }}>
                       同步类型
                     </div>
                     <Select
@@ -479,53 +482,54 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
                       value={config.sync_type}
                       onChange={(v) => updateConfig('sync_type', v)}
                       style={{ width: '100%' }}
-                    >
-                      <Select.Option value="incremental">增量</Select.Option>
-                      <Select.Option value="full">全量</Select.Option>
-                    </Select>
+                      options={[
+                        { value: 'incremental', label: '增量' },
+                        { value: 'full', label: '全量' },
+                      ]}
+                    />
                   </div>
                   <div>
-                    <div style={{ marginBottom: 4, fontSize: '12px', color: 'var(--semi-color-text-2)' }}>
+                    <div style={{ marginBottom: 4, fontSize: '12px', color: 'var(--text-secondary)' }}>
                       来源
                     </div>
                     <Input
                       size="small"
                       value={config.source || 'tushare'}
-                      onChange={(v) => updateConfig('source', v)}
+                      onChange={(e) => updateConfig('source', e.target.value)}
                     />
                   </div>
                   <div>
-                    <div style={{ marginBottom: 4, fontSize: '12px', color: 'var(--semi-color-text-2)' }}>
+                    <div style={{ marginBottom: 4, fontSize: '12px', color: 'var(--text-secondary)' }}>
                       日期字段
                     </div>
                     <Input
                       size="small"
                       value={config.date_field || ''}
-                      onChange={(v) => updateConfig('date_field', v)}
+                      onChange={(e) => updateConfig('date_field', e.target.value)}
                     />
                   </div>
                   <div>
-                    <div style={{ marginBottom: 4, fontSize: '12px', color: 'var(--semi-color-text-2)' }}>
+                    <div style={{ marginBottom: 4, fontSize: '12px', color: 'var(--text-secondary)' }}>
                       API限制
                     </div>
                     <Input
                       size="small"
                       type="number"
                       value={config.api_limit || ''}
-                      onChange={(v) => updateConfig('api_limit', parseInt(v) || 0)}
+                      onChange={(e) => updateConfig('api_limit', parseInt(e.target.value) || 0)}
                     />
                   </div>
                   <div style={{ gridColumn: 'span 2' }}>
-                    <div style={{ marginBottom: 4, fontSize: '12px', color: 'var(--semi-color-text-2)' }}>
+                    <div style={{ marginBottom: 4, fontSize: '12px', color: 'var(--text-secondary)' }}>
                       主键（逗号分隔）
                     </div>
                     <Input
                       size="small"
                       value={config.primary_keys?.join(', ') || ''}
-                      onChange={(v) =>
+                      onChange={(e) =>
                         updateConfig(
                           'primary_keys',
-                          (v || '').split(',').map((s: string) => s.trim()).filter(Boolean)
+                          (e.target.value || '').split(',').map((s: string) => s.trim()).filter(Boolean)
                         )
                       }
                     />
@@ -533,12 +537,10 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
                 </div>
 
                 {/* API 参数 */}
-                <Collapse defaultActiveKey={['params']}>
-                  <Collapse.Panel
-                    header={<span style={{ fontSize: '13px', fontWeight: 500 }}>API 参数</span>}
-                    itemKey="params"
-                  >
-                    {config.params && Object.keys(config.params).length > 0 ? (
+                <Collapse defaultActiveKey={['params']} items={[{
+                  key: 'params',
+                  label: <span style={{ fontSize: '13px', fontWeight: 500 }}>API 参数</span>,
+                  children: config.params && Object.keys(config.params).length > 0 ? (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                         {Object.entries(config.params).map(([key, value]) => (
                           <div key={key}>
@@ -546,7 +548,7 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
                               style={{
                                 marginBottom: 4,
                                 fontSize: '12px',
-                                color: 'var(--semi-color-text-2)',
+                                color: 'var(--text-secondary)',
                               }}
                             >
                               {key}
@@ -554,26 +556,24 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
                             <Input
                               size="small"
                               value={String(value)}
-                              onChange={(v) => updateParamsField(key, v)}
+                              onChange={(e) => updateParamsField(key, e.target.value)}
                             />
                           </div>
                         ))}
                       </div>
                     ) : (
-                      <div style={{ padding: 12, color: 'var(--semi-color-text-2)', fontSize: '12px' }}>
+                      <div style={{ padding: 12, color: 'var(--text-secondary)', fontSize: '12px' }}>
                         暂无 API 参数配置
                       </div>
-                    )}
-                  </Collapse.Panel>
-                </Collapse>
+                    ),
+                }]} />
 
                 {/* Schema 字段表格 */}
                 {config.schema && (
-                  <Collapse defaultActiveKey={['schema']}>
-                    <Collapse.Panel
-                      header={<span style={{ fontSize: '13px', fontWeight: 500 }}>字段定义 (Schema)</span>}
-                      itemKey="schema"
-                    >
+                  <Collapse defaultActiveKey={['schema']} items={[{
+                    key: 'schema',
+                    label: <span style={{ fontSize: '13px', fontWeight: 500 }}>字段定义 (Schema)</span>,
+                    children: (<>
                       <Table
                         dataSource={Object.entries(config.schema || {}).map(([name, props]: [string, any]) => ({
                           name,
@@ -594,7 +594,8 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
                               <Input
                                 size="small"
                                 value={v}
-                                onChange={(val) => {
+                                onChange={(e) => {
+                                  const val = e.target.value;
                                   const newSchema = { ...(config.schema || {}) };
                                   const entries = Object.entries(newSchema);
                                   const rebuilt: Record<string, any> = {};
@@ -618,28 +619,8 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
                                 value={v}
                                 onChange={(val) => updateSchemaField(r.name, 'type', val)}
                                 style={{ width: 120 }}
-                              >
-                                <Select.Option value="BOOL">BOOL</Select.Option>
-                                <Select.Option value="CHAR">CHAR</Select.Option>
-                                <Select.Option value="SHORT">SHORT</Select.Option>
-                                <Select.Option value="INT">INT</Select.Option>
-                                <Select.Option value="LONG">LONG</Select.Option>
-                                <Select.Option value="FLOAT">FLOAT</Select.Option>
-                                <Select.Option value="DOUBLE">DOUBLE</Select.Option>
-                                <Select.Option value="DATE">DATE</Select.Option>
-                                <Select.Option value="MONTH">MONTH</Select.Option>
-                                <Select.Option value="TIME">TIME</Select.Option>
-                                <Select.Option value="MINUTE">MINUTE</Select.Option>
-                                <Select.Option value="SECOND">SECOND</Select.Option>
-                                <Select.Option value="DATETIME">DATETIME</Select.Option>
-                                <Select.Option value="TIMESTAMP">TIMESTAMP</Select.Option>
-                                <Select.Option value="NANOTIME">NANOTIME</Select.Option>
-                                <Select.Option value="NANOTIMESTAMP">NANOTIMESTAMP</Select.Option>
-                                <Select.Option value="SYMBOL">SYMBOL</Select.Option>
-                                <Select.Option value="STRING">STRING</Select.Option>
-                                <Select.Option value="UUID">UUID</Select.Option>
-                                <Select.Option value="BLOB">BLOB</Select.Option>
-                              </Select>
+                                options={['BOOL','CHAR','SHORT','INT','LONG','FLOAT','DOUBLE','DATE','MONTH','TIME','MINUTE','SECOND','DATETIME','TIMESTAMP','NANOTIME','NANOTIMESTAMP','SYMBOL','STRING','UUID','BLOB'].map(t => ({ value: t, label: t }))}
+                              />
                             ),
                           },
                           {
@@ -664,7 +645,7 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
                               <Input
                                 size="small"
                                 value={v}
-                                onChange={(val) => updateSchemaField(r.name, 'comment', val)}
+                                onChange={(e) => updateSchemaField(r.name, 'comment', e.target.value)}
                                 style={{ fontSize: '12px' }}
                               />
                             ),
@@ -675,9 +656,9 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
                             width: 60,
                             render: (_: any, r: any) => (
                               <Button
-                                type="danger"
-                                theme="borderless"
-                                icon={<IconDelete />}
+                                danger
+                                type="text"
+                                icon={<DeleteOutlined />}
                                 size="small"
                                 onClick={() => handleDeleteSchemaField(r.name)}
                               />
@@ -686,30 +667,32 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
                         ]}
                       />
                       <Button
-                        icon={<IconPlus />}
+                        icon={<PlusOutlined />}
                         size="small"
                         onClick={handleAddSchemaField}
                         style={{ marginTop: 8 }}
                       >
                         新增字段
                       </Button>
-                    </Collapse.Panel>
-                  </Collapse>
+                    </>),
+                  }]} />
                 )}
               </div>
-            </TabPane>
-
-            {/* JSON 编辑 */}
-            <TabPane tab="JSON 编辑" itemKey="json">
+            ),
+            },
+            {
+              key: 'json',
+              label: 'JSON 编辑',
+              children: (
               <div style={{ paddingTop: 8 }}>
                 <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
-                  <Button size="small" icon={<IconCode />} onClick={handleFormatJson}>
+                  <Button size="small" icon={<CodeOutlined />} onClick={handleFormatJson}>
                     格式化
                   </Button>
                 </div>
                 <div
                   style={{
-                    border: '1px solid var(--semi-color-border)',
+                    border: '1px solid var(--border-color)',
                     borderRadius: 4,
                     overflow: 'hidden',
                   }}
@@ -733,24 +716,24 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
                     }}
                   />
                 </div>
-                <div style={{ marginTop: 6, color: 'var(--semi-color-text-2)', fontSize: 11 }}>
+                <div style={{ marginTop: 6, color: 'var(--text-secondary)', fontSize: 11 }}>
                   直接编辑 JSON 配置，修改会同步到可视化编辑界面
                 </div>
               </div>
-            </TabPane>
-
-            {/* 历史调度 */}
-            {!isNew && (
-              <TabPane tab="历史调度" itemKey="history">
+            ),
+            },
+            ...(!isNew ? [{
+              key: 'history',
+              label: '历史调度',
+              children: (
                 <div style={{ paddingTop: 8 }}>
                   {/* 数据探查按钮 - 仅增量任务显示 */}
                   {task?.sync_type === 'incremental' && (
                     <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <Button
-                        icon={<IconSearch />}
+                        icon={<SearchOutlined />}
                         onClick={handleInspectData}
                         loading={inspectionLoading}
-                        theme="solid"
                         type="primary"
                       >
                         数据探查
@@ -762,66 +745,64 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
                   {showInspection && inspectionData && (
                     <div style={{ marginBottom: 16 }}>
                       {!inspectionData.exists ? (
-                        <Banner
+                        <Alert
                           type="warning"
-                          description={inspectionData.message}
-                          closeIcon={null}
+                          message={inspectionData.message}
+                          closable={false}
                         />
                       ) : !inspectionData.has_data ? (
-                        <Banner
+                        <Alert
                           type="info"
-                          description={inspectionData.message}
-                          closeIcon={null}
+                          message={inspectionData.message}
+                          closable={false}
                         />
                       ) : (
-                        <Collapse defaultActiveKey={['1']}>
-                          <Collapse.Panel header="数据完整性报告" itemKey="1">
-                            <Descriptions row size="small">
-                              <Descriptions.Item itemKey="table">表名: {inspectionData.table_name}</Descriptions.Item>
-                              <Descriptions.Item itemKey="field">日期字段: {inspectionData.date_field}</Descriptions.Item>
-                              <Descriptions.Item itemKey="min">最早日期: {inspectionData.min_date}</Descriptions.Item>
-                              <Descriptions.Item itemKey="max">最晚日期: {inspectionData.max_date}</Descriptions.Item>
-                              <Descriptions.Item itemKey="actual">实际天数: {inspectionData.actual_dates}</Descriptions.Item>
-                              <Descriptions.Item itemKey="expected">预期天数: {inspectionData.expected_dates || '-'}</Descriptions.Item>
-                              <Descriptions.Item itemKey="missing">
-                                缺失天数: <Tag color="red">{inspectionData.missing_count || 0}</Tag>
-                              </Descriptions.Item>
-                              <Descriptions.Item itemKey="coverage">
-                                覆盖率:
+                        <Collapse defaultActiveKey={['1']} items={[{
+                          key: '1',
+                          label: '数据完整性报告',
+                          children: (<>
+                            <Descriptions size="small" items={[
+                              { key: 'table', label: '表名', children: inspectionData.table_name },
+                              { key: 'field', label: '日期字段', children: inspectionData.date_field },
+                              { key: 'min', label: '最早日期', children: inspectionData.min_date },
+                              { key: 'max', label: '最晚日期', children: inspectionData.max_date },
+                              { key: 'actual', label: '实际天数', children: inspectionData.actual_dates },
+                              { key: 'expected', label: '预期天数', children: inspectionData.expected_dates || '-' },
+                              { key: 'missing', label: '缺失天数', children: <Tag color="red">{inspectionData.missing_count || 0}</Tag> },
+                              { key: 'coverage', label: '覆盖率', children: (
                                 <Progress
                                   percent={inspectionData.coverage_percent || 0}
-                                  stroke={inspectionData.coverage_percent >= 95 ? 'var(--semi-color-success)' : 'var(--semi-color-danger)'}
+                                  strokeColor={inspectionData.coverage_percent >= 95 ? 'var(--color-gain)' : 'var(--color-loss)'}
                                   style={{ width: 200, marginLeft: 8 }}
-                                  showInfo
                                   size="small"
                                 />
-                              </Descriptions.Item>
-                            </Descriptions>
+                              )},
+                            ]} />
 
                             {inspectionData.missing_count > 0 && inspectionData.missing_dates && (
                               <div style={{ marginTop: 16 }}>
                                 <div style={{ marginBottom: 8, fontWeight: 600 }}>缺失的交易日：</div>
                                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                                   {inspectionData.missing_dates.slice(0, 20).map((date: string) => (
-                                    <Tag key={date} color="red" size="small">{date}</Tag>
+                                    <Tag key={date} color="red">{date}</Tag>
                                   ))}
                                   {inspectionData.missing_count > 20 && (
-                                    <Tag size="small">... 还有 {inspectionData.missing_count - 20} 天</Tag>
+                                    <Tag>... 还有 {inspectionData.missing_count - 20} 天</Tag>
                                   )}
                                 </div>
                               </div>
                             )}
 
                             {!inspectionData.trading_calendar_available && (
-                              <Banner
+                              <Alert
                                 type="warning"
-                                description="交易日历数据不可用，无法检查缺失日期。请先同步 sync_trade_cal 任务。"
+                                message="交易日历数据不可用，无法检查缺失日期。请先同步 sync_trade_cal 任务。"
                                 style={{ marginTop: 16 }}
-                                closeIcon={null}
+                                closable={false}
                               />
                             )}
-                          </Collapse.Panel>
-                        </Collapse>
+                          </>),
+                        }]} />
                       )}
                     </div>
                   )}
@@ -832,11 +813,7 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
                     rowKey={(record: any) => `${record.sync_date}-${record.created_at}`}
                     size="small"
                     pagination={{ pageSize: 10 }}
-                    empty={
-                      <div style={{ padding: 20, textAlign: 'center', color: 'var(--semi-color-text-2)' }}>
-                        暂无调度记录
-                      </div>
-                    }
+                    locale={{ emptyText: <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-secondary)' }}>暂无调度记录</div> }}
                     columns={[
                       { title: '同步日期', dataIndex: 'sync_date', key: 'sync_date', width: 100 },
                       {
@@ -854,7 +831,7 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
                         render: (v: string, record: any) => {
                           const tag = <Tag color={v === 'success' ? 'green' : 'red'}>{v}</Tag>;
                           return v !== 'success' && record.error_message ? (
-                            <Tooltip content={record.error_message}>{tag}</Tooltip>
+                            <Tooltip title={record.error_message}>{tag}</Tooltip>
                           ) : (
                             tag
                           );
@@ -869,10 +846,9 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
                     ]}
                   />
                 </div>
-              </TabPane>
-            )}
-
-          </Tabs>
+              ),
+            }] : []),
+          ]} />
         </div>
 
         {/* 底部按钮 */}
@@ -881,16 +857,17 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
             display: 'flex',
             justifyContent: 'flex-end',
             gap: 8,
-            borderTop: '1px solid var(--semi-color-border)',
+            borderTop: '1px solid var(--border-color)',
             padding: '12px 24px',
           }}
         >
           <Button onClick={onClose}>取消</Button>
-          <Button theme="solid" type="primary" onClick={() => handleSave(false)}>
+          <Button type="primary" onClick={() => handleSave(false)}>
             {isNew ? '创建' : '保存'}
           </Button>
         </div>
       </div>
-    </SideSheet>
+    </Drawer>
+    </>
   );
 };

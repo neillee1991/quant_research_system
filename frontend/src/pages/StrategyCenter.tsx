@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Tabs, TabPane, Select, Button, Tag, Spin, Progress, Toast } from '@douyinfe/semi-ui';
+import { Tabs, Select, Button, Tag, Spin, Progress } from 'antd';
+import { useMessage } from '../hooks/useMessage';
 import FlowEditor from '../components/FlowEditor';
 import EquityCurveChart from '../components/Charts/EquityCurveChart';
 import { useBacktestStore } from '../store';
@@ -7,6 +8,7 @@ import { mlApi } from '../api';
 import type { MLJobStatus, MLWeights, EquityPoint, BacktestMetrics } from '../types';
 
 const StrategyCenter: React.FC = () => {
+  const message = useMessage();
   // 回测状态
   const { result, loading } = useBacktestStore();
   const metrics: BacktestMetrics | undefined = result?.metrics;
@@ -46,10 +48,10 @@ const StrategyCenter: React.FC = () => {
         if (r.data.status === 'done' || r.data.status === 'failed') {
           setPolling(false);
           if (r.data.status === 'done') {
-            Toast.success('模型训练完成');
+            message.success('模型训练完成');
             mlApi.getWeights().then((wr) => setWeights(wr.data.weights || {}));
           } else {
-            Toast.error('模型训练失败');
+            message.error('模型训练失败');
           }
         } else {
           setTimeout(pollStatus, 5000);
@@ -79,10 +81,10 @@ const StrategyCenter: React.FC = () => {
         status: 'queued',
         created_at: new Date().toISOString()
       });
-      Toast.info(`训练任务 ${r.data.job_id} 已启动`);
+      message.info(`训练任务 ${r.data.job_id} 已启动`);
     } catch (error) {
       console.error('Failed to start training:', error);
-      Toast.error('启动训练失败');
+      message.error('启动训练失败');
     }
   };
 
@@ -135,12 +137,12 @@ const StrategyCenter: React.FC = () => {
         </p>
       </div>
 
-      <Tabs defaultActiveKey="1" style={{
-        '--semi-color-primary': 'var(--color-primary)',
-        '--semi-color-primary-hover': 'var(--color-primary-hover)'
-      } as React.CSSProperties}>
-        <TabPane tab="策略回测" itemKey="1">
-          <div style={{
+      <Tabs defaultActiveKey="1" items={[
+        {
+          key: '1',
+          label: '策略回测',
+          children: (
+          <><div style={{
             background: 'var(--bg-card)',
             borderRadius: 12,
             border: '1px solid var(--border-color)',
@@ -272,10 +274,14 @@ const StrategyCenter: React.FC = () => {
               )}
             </>
           )}
-        </TabPane>
-
-        <TabPane tab="模型训练" itemKey="2">
-          <div style={{
+          </>
+          )
+        },
+        {
+          key: '2',
+          label: '模型训练',
+          children: (
+          <><div style={{
             background: 'var(--bg-card)',
             borderRadius: 12,
             border: '1px solid var(--border-color)',
@@ -322,7 +328,7 @@ const StrategyCenter: React.FC = () => {
                   onChange={(v) => setTsCode(v as string)}
                   style={{ width: 160 }}
                   size="small"
-                  optionList={[
+                  options={[
                     { label: '000001.SZ', value: '000001.SZ' },
                     { label: '600000.SH', value: '600000.SH' },
                   ]}
@@ -342,7 +348,7 @@ const StrategyCenter: React.FC = () => {
                   onChange={(v) => setTask(v as 'full' | 'incremental')}
                   style={{ width: 180 }}
                   size="small"
-                  optionList={[
+                  options={[
                     { label: '完整流水线', value: 'full' },
                     { label: 'AutoML', value: 'automl' },
                     { label: '仅优化', value: 'optimize' },
@@ -350,7 +356,6 @@ const StrategyCenter: React.FC = () => {
                 />
               </div>
               <Button
-                theme="solid"
                 type="primary"
                 onClick={handleStartTraining}
                 loading={polling}
@@ -396,13 +401,13 @@ const StrategyCenter: React.FC = () => {
                   }}>
                     {getStatusText(status.status)}
                   </span>
-                  {jobId && <Tag color={getStatusTagColor(status.status)} size="small">{jobId}</Tag>}
+                  {jobId && <Tag color={getStatusTagColor(status.status)}>{jobId}</Tag>}
                 </div>
                 {status.status === 'running' && (
                   <Progress
                     percent={50}
                     showInfo={false}
-                    stroke="var(--color-primary)"
+                    strokeColor="var(--color-primary)"
                     style={{ marginTop: 12 }}
                   />
                 )}
@@ -470,7 +475,7 @@ const StrategyCenter: React.FC = () => {
                   <Progress
                     percent={Math.abs(Number(v)) * 100}
                     showInfo={false}
-                    stroke="var(--color-primary)"
+                    strokeColor="var(--color-primary)"
                     style={{ marginTop: 12 }}
                   />
                 </div>
@@ -488,8 +493,10 @@ const StrategyCenter: React.FC = () => {
               </div>
             )}
           </div>
-        </TabPane>
-      </Tabs>
+          </>
+          )
+        },
+      ]} />
     </div>
   );
 };

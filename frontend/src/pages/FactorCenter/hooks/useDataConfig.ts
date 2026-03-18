@@ -3,7 +3,7 @@
  */
 
 import { useState, useCallback, useEffect } from 'react';
-import { Toast } from '@douyinfe/semi-ui';
+import { message } from 'antd';
 import { productionApi, dataApi } from '../../../api';
 import type { DataFieldMapping } from '../../../types';
 
@@ -23,7 +23,7 @@ export const useDataConfig = () => {
       setChanged(false);
     } catch (error) {
       console.error('Failed to load data config:', error);
-      Toast.error('加载数据配置失败');
+      message.error('加载数据配置失败');
     } finally {
       setLoading(false);
     }
@@ -66,11 +66,11 @@ export const useDataConfig = () => {
     setSaving(true);
     try {
       await productionApi.updateDataConfig(mappings as any);
-      Toast.success('配置已保存');
+      message.success('配置已保存');
       setChanged(false);
     } catch (error: any) {
       const errorMessage = error.response?.data?.detail || '保存失败';
-      Toast.error(errorMessage);
+      message.error(errorMessage);
       throw error;
     } finally {
       setSaving(false);

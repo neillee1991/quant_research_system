@@ -4,21 +4,19 @@
  */
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  SideSheet,
+  Drawer,
   Button,
-  Toast,
   Tabs,
-  TabPane,
   Input,
-  RadioGroup,
   Radio,
   Table,
   Select,
   Tag,
   Tooltip,
   Modal,
-} from '@douyinfe/semi-ui';
-import { IconCode } from '@douyinfe/semi-icons';
+} from 'antd';
+import { CodeOutlined } from '@ant-design/icons';
+import { useMessage } from '../../hooks/useMessage';
 import Editor from '@monaco-editor/react';
 import QuantDatePicker from '../../components/QuantDatePicker';
 import { dataApi } from '../../api';
@@ -61,6 +59,7 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
   onSave,
 }) => {
   const { mode } = useThemeStore();
+  const message = useMessage();
   const [activeTab, setActiveTab] = useState('config');
   const [config, setConfig] = useState<any>({
     task_id: 'etl_',
@@ -164,7 +163,7 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
 
   const handleTestScript = async () => {
     if (!config.script) {
-      Toast.warning('请先输入 ETL 脚本');
+      message.warning('请先输入 ETL 脚本');
       return;
     }
 
@@ -203,14 +202,14 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
         preview: data.preview || [],
       });
 
-      Toast.success(`测试通过: ${data.rows || 0} 行`);
+      message.success(`测试通过: ${data.rows || 0} 行`);
     } catch (error: any) {
       const errorMsg = error.response?.data?.detail || '脚本测试失败';
       setTestResult({
         status: 'error',
         error: errorMsg,
       });
-      Toast.error(errorMsg);
+      message.error(errorMsg);
     } finally {
       setTestLoading(false);
     }
@@ -253,12 +252,12 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
 
   const handleSave = async (confirmSchemaChange = false) => {
     if (!config.task_id || !config.task_id.startsWith('etl_')) {
-      Toast.error('任务ID必须以 etl_ 开头');
+      message.error('任务ID必须以 etl_ 开头');
       return;
     }
 
     if (!config.script) {
-      Toast.error('请输入 ETL 脚本');
+      message.error('请输入 ETL 脚本');
       return;
     }
 
@@ -287,7 +286,7 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
 
       if (isNew) {
         const response = await dataApi.createEtlTask(saveConfig);
-        Toast.success(`ETL 任务 ${config.task_id} 创建成功`);
+        message.success(`ETL 任务 ${config.task_id} 创建成功`);
         onSave();
         onClose();
       } else {
@@ -328,54 +327,55 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
             ),
             okText: '确认并清空数据',
             cancelText: '取消',
-            okType: 'danger',
+            okButtonProps: { danger: true },
             onOk: () => {
               // 用户确认，重新保存并带上确认标志
               handleSave(true);
             },
           });
         } else if (result.status === 'success') {
-          Toast.success(`ETL 任务 ${config.task_id} 更新成功`);
+          message.success(`ETL 任务 ${config.task_id} 更新成功`);
           onSave();
           onClose();
         }
       }
     } catch (error: any) {
-      Toast.error(error.response?.data?.detail || '保存配置失败');
+      message.error(error.response?.data?.detail || '保存配置失败');
     }
   };
 
   return (
-    <SideSheet
-      title={
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <span>
-            {isNew ? '新建 ETL 任务' : `编辑 ETL 任务: ${config.task_id}`}
-          </span>
-        </div>
-      }
-      visible={visible}
-      onCancel={() => {
-        onClose();
-        setTestResult(null);
-      }}
-      width={720}
-      footer={
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-          <Button
-            onClick={() => {
-              onClose();
-              setTestResult(null);
-            }}
-          >
-            取消
-          </Button>
-          <Button theme="solid" type="primary" onClick={() => handleSave(false)}>
-            保存
-          </Button>
-        </div>
-      }
-    >
+    <>
+      <Drawer
+        title={
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span>
+              {isNew ? '新建 ETL 任务' : `编辑 ETL 任务: ${config.task_id}`}
+            </span>
+          </div>
+        }
+        open={visible}
+        onClose={() => {
+          onClose();
+          setTestResult(null);
+        }}
+        width={720}
+        footer={
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <Button
+              onClick={() => {
+                onClose();
+                setTestResult(null);
+              }}
+            >
+              取消
+            </Button>
+            <Button type="primary" onClick={() => handleSave(false)}>
+              保存
+            </Button>
+          </div>
+        }
+      >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '8px 0' }}>
         {/* 状态信息栏 - 仅编辑模式显示 */}
         {!isNew && taskStatus && (
@@ -385,34 +385,34 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
               flexWrap: 'wrap',
               gap: 16,
               padding: '12px',
-              background: 'var(--semi-color-fill-0)',
+              background: 'var(--bg-tertiary)',
               borderRadius: '6px',
             }}
           >
             <div>
-              <div style={{ color: 'var(--semi-color-text-2)', fontSize: '12px', marginBottom: 4 }}>
+              <div style={{ color: 'var(--text-secondary)', fontSize: '12px', marginBottom: 4 }}>
                 最新数据
               </div>
-              <span style={{ color: 'var(--semi-color-success)', fontSize: '13px', fontWeight: 500 }}>
+              <span style={{ color: 'var(--color-gain)', fontSize: '13px', fontWeight: 500 }}>
                 {taskStatus.last_date || '-'}
               </span>
             </div>
             <div>
-              <div style={{ color: 'var(--semi-color-text-2)', fontSize: '12px', marginBottom: 4 }}>
+              <div style={{ color: 'var(--text-secondary)', fontSize: '12px', marginBottom: 4 }}>
                 上次同步
               </div>
-              <span style={{ color: 'var(--semi-color-text-2)', fontSize: '13px' }}>
+              <span style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>
                 {taskStatus.last_sync_time ? new Date(taskStatus.last_sync_time).toLocaleString() : '-'}
               </span>
             </div>
             {selectedPrimaryKeys.length > 0 && (
               <div>
-                <div style={{ color: 'var(--semi-color-text-2)', fontSize: '12px', marginBottom: 4 }}>
+                <div style={{ color: 'var(--text-secondary)', fontSize: '12px', marginBottom: 4 }}>
                   主键
                 </div>
                 <span style={{ fontSize: '13px' }}>
                   {selectedPrimaryKeys.map((k) => (
-                    <Tag key={k} size="small" style={{ marginRight: 4 }}>
+                    <Tag key={k} style={{ marginRight: 4 }}>
                       {k}
                     </Tag>
                   ))}
@@ -422,67 +422,73 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
           </div>
         )}
 
-        <Tabs activeKey={activeTab} onChange={setActiveTab} size="small">
-          {/* 配置标签页 */}
-          <TabPane tab="配置" itemKey="config">
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, paddingTop: 8 }}>
+        <Tabs
+          activeKey={activeTab}
+          onChange={setActiveTab}
+         
+          items={[
+            {
+              key: 'config',
+              label: '配置',
+              children: (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12, paddingTop: 8 }}>
               {/* 基本信息 */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                 <div>
-                  <div style={{ marginBottom: 4, fontSize: '12px', color: 'var(--semi-color-text-2)' }}>
+                  <div style={{ marginBottom: 4, fontSize: '12px', color: 'var(--text-secondary)' }}>
                     任务 ID
                   </div>
                   <Input
-                    size="small"
+                   
                     prefix="etl_"
                     value={(config.task_id || '').replace(/^etl_/, '')}
                     disabled={!isNew}
-                    onChange={(v) => setConfig({ ...config, task_id: `etl_${v}` })}
+                    onChange={(e) => setConfig({ ...config, task_id: `etl_${e.target.value}` })}
                   />
                 </div>
                 <div>
-                  <div style={{ marginBottom: 4, fontSize: '12px', color: 'var(--semi-color-text-2)' }}>
+                  <div style={{ marginBottom: 4, fontSize: '12px', color: 'var(--text-secondary)' }}>
                     目标表名（= 任务ID）
                   </div>
-                  <Input size="small" value={config.task_id} disabled />
+                  <Input value={config.task_id} disabled />
                 </div>
               </div>
 
               <div>
-                <div style={{ marginBottom: 4, fontSize: '12px', color: 'var(--semi-color-text-2)' }}>
+                <div style={{ marginBottom: 4, fontSize: '12px', color: 'var(--text-secondary)' }}>
                   描述
                 </div>
                 <Input
-                  size="small"
+                 
                   value={config.description}
-                  onChange={(v) => setConfig({ ...config, description: v })}
+                  onChange={(e) => setConfig({ ...config, description: e.target.value })}
                 />
               </div>
 
               {/* 同步类型 */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                 <div>
-                  <div style={{ marginBottom: 4, fontSize: '12px', color: 'var(--semi-color-text-2)' }}>
+                  <div style={{ marginBottom: 4, fontSize: '12px', color: 'var(--text-secondary)' }}>
                     同步类型
                   </div>
-                  <RadioGroup
+                  <Radio.Group
                     value={config.sync_type || 'incremental'}
                     onChange={(e: any) => setConfig({ ...config, sync_type: e.target.value })}
                   >
                     <Radio value="incremental">增量</Radio>
                     <Radio value="full">全量</Radio>
-                  </RadioGroup>
+                  </Radio.Group>
                 </div>
                 {config.sync_type === 'incremental' && (
                   <div>
-                    <div style={{ marginBottom: 4, fontSize: '12px', color: 'var(--semi-color-text-2)' }}>
+                    <div style={{ marginBottom: 4, fontSize: '12px', color: 'var(--text-secondary)' }}>
                       日期字段
                     </div>
                     <Input
-                      size="small"
+                     
                       value={config.date_field}
                       placeholder="如 trade_date"
-                      onChange={(v) => setConfig({ ...config, date_field: v })}
+                      onChange={(e) => setConfig({ ...config, date_field: e.target.value })}
                     />
                   </div>
                 )}
@@ -494,7 +500,7 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
                   style={{
                     marginBottom: 4,
                     fontSize: '12px',
-                    color: 'var(--semi-color-text-2)',
+                    color: 'var(--text-secondary)',
                     display: 'flex',
                     justifyContent: 'space-between',
                     alignItems: 'center',
@@ -502,17 +508,17 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
                 >
                   <div>
                     DolphinDB ETL 脚本
-                    <span style={{ marginLeft: 8, color: 'var(--semi-color-text-3)', fontSize: '11px' }}>
+                    <span style={{ marginLeft: 8, color: 'var(--text-muted)', fontSize: '11px' }}>
                       使用 {'{date}'} 变量表示执行日期，格式为 YYYY.MM.DD
                     </span>
                   </div>
-                  <Button size="small" icon={<IconCode />} onClick={handleFormatScript}>
+                  <Button icon={<CodeOutlined />} onClick={handleFormatScript}>
                     格式化
                   </Button>
                 </div>
                 <div
                   style={{
-                    border: '1px solid var(--semi-color-border)',
+                    border: '1px solid var(--border-color)',
                     borderRadius: 4,
                     overflow: 'hidden',
                   }}
@@ -549,16 +555,16 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
                       onChange={(d) => setTestDate(d)}
                     />
                   )}
-                  <Button size="small" theme="light" onClick={handleTestScript} loading={testLoading}>
+                  <Button onClick={handleTestScript} loading={testLoading}>
                     测试脚本
                   </Button>
                   {testResult && testResult.status === 'success' && (
-                    <span style={{ fontSize: '12px', color: 'var(--semi-color-success)' }}>
+                    <span style={{ fontSize: '12px', color: 'var(--color-gain)' }}>
                       测试通过: {testResult.rows} 行
                     </span>
                   )}
                   {testResult && testResult.status === 'error' && (
-                    <span style={{ fontSize: '12px', color: 'var(--semi-color-danger)' }}>
+                    <span style={{ fontSize: '12px', color: 'var(--color-loss)' }}>
                       {testResult.error}
                     </span>
                   )}
@@ -570,16 +576,16 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
               {/* 情况2: 表存在且未测试 - 显示当前表字段 */}
               {tableExists && currentFields.length > 0 && fieldDiffs.length === 0 && (
                 <div>
-                  <div style={{ marginBottom: 4, fontSize: '12px', color: 'var(--semi-color-text-2)' }}>
+                  <div style={{ marginBottom: 4, fontSize: '12px', color: 'var(--text-secondary)' }}>
                     当前表字段定义（勾选主键，可修改类型）
-                    <span style={{ marginLeft: 8, color: 'var(--semi-color-text-3)', fontSize: '11px' }}>
+                    <span style={{ marginLeft: 8, color: 'var(--text-muted)', fontSize: '11px' }}>
                       💡 显示数据库实际表结构，修改后需删除表重建
                     </span>
                   </div>
                   <Table
                     dataSource={currentFields}
                     rowKey="name"
-                    size="small"
+                   
                     pagination={false}
                     rowSelection={{
                       selectedRowKeys: selectedPrimaryKeys,
@@ -592,7 +598,7 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
                         key: 'name',
                         width: 180,
                         render: (v: string) => (
-                          <code style={{ fontSize: '12px', color: 'var(--semi-color-primary)' }}>{v}</code>
+                          <code style={{ fontSize: '12px', color: 'var(--color-primary)' }}>{v}</code>
                         ),
                       },
                       {
@@ -601,7 +607,7 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
                         key: 'type',
                         render: (v: string, record: FieldType) => (
                           <Select
-                            size="small"
+                           
                             value={v}
                             style={{ width: 130 }}
                             onChange={(val) =>
@@ -609,7 +615,7 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
                                 prev.map((f) => (f.name === record.name ? { ...f, type: val as string } : f))
                               )
                             }
-                            optionList={[
+                            options={[
                               { label: 'STRING', value: 'STRING' },
                               { label: 'SYMBOL', value: 'SYMBOL' },
                               { label: 'INT', value: 'INT' },
@@ -628,7 +634,7 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
                     ]}
                   />
                   {selectedPrimaryKeys.length > 0 && (
-                    <div style={{ marginTop: 4, fontSize: '11px', color: 'var(--semi-color-text-3)' }}>
+                    <div style={{ marginTop: 4, fontSize: '11px', color: 'var(--text-muted)' }}>
                       主键: {selectedPrimaryKeys.join(', ')}
                     </div>
                   )}
@@ -638,16 +644,16 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
               {/* 情况3: 表不存在但已测试 - 显示测试结果字段 */}
               {!tableExists && testFields.length > 0 && (
                 <div>
-                  <div style={{ marginBottom: 4, fontSize: '12px', color: 'var(--semi-color-text-2)' }}>
+                  <div style={{ marginBottom: 4, fontSize: '12px', color: 'var(--text-secondary)' }}>
                     脚本测试字段定义（勾选主键，可修改类型）
-                    <span style={{ marginLeft: 8, color: 'var(--semi-color-text-3)', fontSize: '11px' }}>
+                    <span style={{ marginLeft: 8, color: 'var(--text-muted)', fontSize: '11px' }}>
                       💡 保存后将作为建表模板，表创建后以实际表结构为准
                     </span>
                   </div>
                   <Table
                     dataSource={testFields}
                     rowKey="name"
-                    size="small"
+                   
                     pagination={false}
                     rowSelection={{
                       selectedRowKeys: selectedPrimaryKeys,
@@ -660,7 +666,7 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
                         key: 'name',
                         width: 180,
                         render: (v: string) => (
-                          <code style={{ fontSize: '12px', color: 'var(--semi-color-primary)' }}>{v}</code>
+                          <code style={{ fontSize: '12px', color: 'var(--color-primary)' }}>{v}</code>
                         ),
                       },
                       {
@@ -669,7 +675,7 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
                         key: 'type',
                         render: (v: string, record: FieldType) => (
                           <Select
-                            size="small"
+                           
                             value={v}
                             style={{ width: 130 }}
                             onChange={(val) =>
@@ -677,7 +683,7 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
                                 prev.map((f) => (f.name === record.name ? { ...f, type: val as string } : f))
                               )
                             }
-                            optionList={[
+                            options={[
                               { label: 'STRING', value: 'STRING' },
                               { label: 'SYMBOL', value: 'SYMBOL' },
                               { label: 'INT', value: 'INT' },
@@ -696,7 +702,7 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
                     ]}
                   />
                   {selectedPrimaryKeys.length > 0 && (
-                    <div style={{ marginTop: 4, fontSize: '11px', color: 'var(--semi-color-text-3)' }}>
+                    <div style={{ marginTop: 4, fontSize: '11px', color: 'var(--text-muted)' }}>
                       主键: {selectedPrimaryKeys.join(', ')}
                     </div>
                   )}
@@ -706,13 +712,13 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
               {/* 情况4: 表存在且已测试，显示字段差异对比（合并为单表四列） */}
               {tableExists && fieldDiffs.length > 0 && (
                 <div>
-                  <div style={{ marginBottom: 4, fontSize: '12px', color: 'var(--semi-color-text-2)' }}>
+                  <div style={{ marginBottom: 4, fontSize: '12px', color: 'var(--text-secondary)' }}>
                     字段对比（勾选主键，可修改测试类型）
                   </div>
                   <Table
                     dataSource={fieldDiffs}
                     rowKey="name"
-                    size="small"
+                   
                     pagination={false}
                     rowSelection={{
                       selectedRowKeys: selectedPrimaryKeys,
@@ -728,7 +734,7 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
                         key: 'name',
                         width: 150,
                         render: (v: string) => (
-                          <code style={{ fontSize: '12px', color: 'var(--semi-color-primary)' }}>{v}</code>
+                          <code style={{ fontSize: '12px', color: 'var(--color-primary)' }}>{v}</code>
                         ),
                       },
                       {
@@ -737,7 +743,7 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
                         key: 'currentType',
                         width: 120,
                         render: (v?: string) => (
-                          <span style={{ fontSize: '12px', color: v ? 'inherit' : 'var(--semi-color-text-2)' }}>
+                          <span style={{ fontSize: '12px', color: v ? 'inherit' : 'var(--text-secondary)' }}>
                             {v || '-'}
                           </span>
                         ),
@@ -750,11 +756,11 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
                         render: (_v: string | undefined, record: FieldDiff) => {
                           const v = record.newType;
                           if (!v) {
-                            return <span style={{ fontSize: '12px', color: 'var(--semi-color-text-2)' }}>-</span>;
+                            return <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>-</span>;
                           }
                           return (
                             <Select
-                              size="small"
+                             
                               value={v}
                               style={{ width: 130 }}
                               onChange={(val) => {
@@ -778,7 +784,7 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
                                   )
                                 );
                               }}
-                              optionList={[
+                              options={[
                                 { label: 'STRING', value: 'STRING' },
                                 { label: 'SYMBOL', value: 'SYMBOL' },
                                 { label: 'INT', value: 'INT' },
@@ -814,7 +820,7 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
                     ]}
                   />
                   {selectedPrimaryKeys.length > 0 && (
-                    <div style={{ marginTop: 4, fontSize: '11px', color: 'var(--semi-color-text-3)' }}>
+                    <div style={{ marginTop: 4, fontSize: '11px', color: 'var(--text-muted)' }}>
                       主键: {selectedPrimaryKeys.join(', ')}
                     </div>
                   )}
@@ -824,14 +830,14 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
               {/* 测试结果预览 */}
               {testResult?.preview && testResult.preview.length > 0 && (
                 <div>
-                  <div style={{ marginBottom: 4, fontSize: '12px', color: 'var(--semi-color-text-2)' }}>
+                  <div style={{ marginBottom: 4, fontSize: '12px', color: 'var(--text-secondary)' }}>
                     数据预览（前 10 行）
                   </div>
                   <div
                     style={{
                       maxHeight: 300,
                       overflow: 'auto',
-                      border: '1px solid var(--semi-color-border)',
+                      border: '1px solid var(--border-color)',
                       borderRadius: 4,
                     }}
                   >
@@ -846,81 +852,85 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
                           <span style={{ fontSize: '12px' }}>{v !== null && v !== undefined ? String(v) : '-'}</span>
                         ),
                       }))}
-                      size="small"
+                     
                       pagination={false}
                     />
                   </div>
                 </div>
               )}
             </div>
-          </TabPane>
+          ),
+        },
+        ...(!isNew ? [{
+          key: 'history',
+          label: '历史记录',
+          children: (
+            <div style={{ paddingTop: 8 }}>
+              {/* 数据探查组件 - 仅增量任务显示 */}
+              {task && <DataInspection taskType="etl" taskId={task.task_id} syncType={task.sync_type} />}
 
-          {/* 历史记录标签页 */}
-          {!isNew && (
-            <TabPane tab="历史记录" itemKey="history">
-              <div style={{ paddingTop: 8 }}>
-                {/* 数据探查组件 - 仅增量任务显示 */}
-                {task && <DataInspection taskType="etl" taskId={task.task_id} syncType={task.sync_type} />}
-
-                <Table
-                  dataSource={etlLogs}
-                  rowKey={(record: any) => `${record.sync_date}-${record.created_at}`}
-                  size="small"
-                  pagination={{ pageSize: 10 }}
-                  empty={
-                    <div style={{ padding: 20, textAlign: 'center', color: 'var(--semi-color-text-3)' }}>
+              <Table
+                dataSource={etlLogs}
+                rowKey={(record: any) => `${record.sync_date}-${record.created_at}`}
+               
+                pagination={{ pageSize: 10 }}
+                locale={{
+                  emptyText: (
+                    <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)' }}>
                       暂无执行记录
                     </div>
-                  }
-                  columns={[
-                    { title: '同步日期', dataIndex: 'sync_date', key: 'sync_date', width: 100 },
-                    {
-                      title: '参数',
-                      dataIndex: 'params',
-                      key: 'params',
-                      width: 180,
-                      render: (v: string) =>
-                        v ? (
-                          <code style={{ fontSize: '11px', color: 'var(--semi-color-text-2)' }}>{v}</code>
-                        ) : (
-                          '-'
-                        ),
+                  ),
+                }}
+                columns={[
+                  { title: '同步日期', dataIndex: 'sync_date', key: 'sync_date', width: 100 },
+                  {
+                    title: '参数',
+                    dataIndex: 'params',
+                    key: 'params',
+                    width: 180,
+                    render: (v: string) =>
+                      v ? (
+                        <code style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{v}</code>
+                      ) : (
+                        '-'
+                      ),
+                  },
+                  {
+                    title: '同步行数',
+                    dataIndex: 'rows_synced',
+                    key: 'rows_synced',
+                    width: 100,
+                    render: (v: number) => v?.toLocaleString() || '-',
+                  },
+                  {
+                    title: '状态',
+                    dataIndex: 'status',
+                    key: 'status',
+                    width: 80,
+                    render: (v: string, record: any) => {
+                      const tag = <Tag color={v === 'success' ? 'green' : 'red'}>{v}</Tag>;
+                      return v !== 'success' && record.error_message ? (
+                        <Tooltip title={record.error_message}>{tag}</Tooltip>
+                      ) : (
+                        tag
+                      );
                     },
-                    {
-                      title: '同步行数',
-                      dataIndex: 'rows_synced',
-                      key: 'rows_synced',
-                      width: 100,
-                      render: (v: number) => v?.toLocaleString() || '-',
-                    },
-                    {
-                      title: '状态',
-                      dataIndex: 'status',
-                      key: 'status',
-                      width: 80,
-                      render: (v: string, record: any) => {
-                        const tag = <Tag color={v === 'success' ? 'green' : 'red'}>{v}</Tag>;
-                        return v !== 'success' && record.error_message ? (
-                          <Tooltip content={record.error_message}>{tag}</Tooltip>
-                        ) : (
-                          tag
-                        );
-                      },
-                    },
-                    {
-                      title: '执行时间',
-                      dataIndex: 'created_at',
-                      key: 'created_at',
-                      render: (v: string) => (v ? new Date(v).toLocaleString() : '-'),
-                    },
-                  ]}
-                />
-              </div>
-            </TabPane>
-          )}
-
-        </Tabs>
+                  },
+                  {
+                    title: '执行时间',
+                    dataIndex: 'created_at',
+                    key: 'created_at',
+                    render: (v: string) => (v ? new Date(v).toLocaleString() : '-'),
+                  },
+                ]}
+              />
+            </div>
+          ),
+        }] : []),
+          ]}
+        />
       </div>
-    </SideSheet>
+    </Drawer>
+    </>
   );
 };

@@ -1,6 +1,6 @@
 import React from 'react';
-import { Breadcrumb, Button, Tooltip } from '@douyinfe/semi-ui';
-import { IconSun, IconMoon } from '@douyinfe/semi-icons';
+import { Breadcrumb, Button, Tooltip } from 'antd';
+import { SunOutlined, MoonOutlined } from '@ant-design/icons';
 import { useLocation } from 'react-router-dom';
 import { useThemeStore } from '../../store';
 
@@ -10,6 +10,7 @@ const routeNameMap: Record<string, string> = {
   '/factor': '因子中心',
   '/strategy': '策略中心',
   '/scheduler': '调度中心',
+  '/index-pool': '股票池',
 };
 
 const TopBar: React.FC = () => {
@@ -37,14 +38,16 @@ const TopBar: React.FC = () => {
 
   return (
     <div style={barStyle}>
-      <Breadcrumb>
-        <Breadcrumb.Item>量化研究系统</Breadcrumb.Item>
-        <Breadcrumb.Item>{currentName()}</Breadcrumb.Item>
-      </Breadcrumb>
-      <Tooltip content={mode === 'dark' ? '切换亮色模式' : '切换暗色模式'}>
+      <Breadcrumb
+        items={[
+          { title: '量化研究系统' },
+          { title: currentName() },
+        ]}
+      />
+      <Tooltip title={mode === 'dark' ? '切换亮色模式' : '切换暗色模式'}>
         <Button
-          theme="borderless"
-          icon={mode === 'dark' ? <IconSun /> : <IconMoon />}
+          type="text"
+          icon={mode === 'dark' ? <SunOutlined /> : <MoonOutlined />}
           onClick={toggle}
           style={{ color: 'var(--text-primary)' }}
         />

@@ -1,31 +1,31 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Button,
   Tooltip,
   Tabs,
-  TabPane,
   Table,
   Tag,
   Space,
   Popconfirm,
-  Toast,
   Empty,
-} from '@douyinfe/semi-ui';
+} from 'antd';
 import {
-  IconRefresh,
-  IconExternalOpen,
-  IconCalendarClock,
-  IconPlus,
-  IconEdit,
-  IconDelete,
-  IconPlay,
-} from '@douyinfe/semi-icons';
+  ReloadOutlined,
+  ExportOutlined,
+  ScheduleOutlined,
+  PlusOutlined,
+  EditOutlined,
+  DeleteOutlined,
+  PlayCircleOutlined,
+} from '@ant-design/icons';
+import { useMessage } from '../hooks/useMessage';
 import cronstrue from 'cronstrue/i18n';
 import { flowApi, FlowListItem } from '../api';
 import FlowEditor from '../components/SchedulerFlowEditor';
 
 const SchedulerCenter: React.FC = () => {
   const prefectUrl = process.env.REACT_APP_PREFECT_URL || 'http://localhost:4200';
+  const message = useMessage();
 
   const [flows, setFlows] = useState<FlowListItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -39,7 +39,7 @@ const SchedulerCenter: React.FC = () => {
       const res = await flowApi.list();
       setFlows(res.data);
     } catch (e) {
-      Toast.error({ content: '加载 Flow 列表失败' });
+      message.error({ content: '加载 Flow 列表失败' });
     } finally {
       setLoading(false);
     }
@@ -62,10 +62,10 @@ const SchedulerCenter: React.FC = () => {
   const handleDelete = async (name: string) => {
     try {
       await flowApi.delete(name);
-      Toast.success({ content: `Flow "${name}" 已删除` });
+      message.success({ content: `Flow "${name}" 已删除` });
       fetchFlows();
     } catch (e: any) {
-      Toast.error({ content: e?.response?.data?.detail || '删除失败' });
+      message.error({ content: e?.response?.data?.detail || '删除失败' });
     }
   };
 
@@ -73,9 +73,9 @@ const SchedulerCenter: React.FC = () => {
     setRunningFlow(name);
     try {
       await flowApi.run(name);
-      Toast.success({ content: `Flow "${name}" 已开始执行` });
+      message.success({ content: `Flow "${name}" 已开始执行` });
     } catch (e: any) {
-      Toast.error({ content: e?.response?.data?.detail || '执行失败' });
+      message.error({ content: e?.response?.data?.detail || '执行失败' });
     } finally {
       setRunningFlow(null);
     }
@@ -103,8 +103,8 @@ const SchedulerCenter: React.FC = () => {
         }
         return (
           <div>
-            <code style={{ fontSize: 12, color: 'var(--semi-color-text-2)' }}>{cron}</code>
-            <div style={{ fontSize: 12, color: 'var(--semi-color-text-1)', marginTop: 2 }}>
+            <code style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{cron}</code>
+            <div style={{ fontSize: 12, color: 'var(--text-primary)', marginTop: 2 }}>
               {desc}
             </div>
           </div>
@@ -118,7 +118,7 @@ const SchedulerCenter: React.FC = () => {
       render: (tags: string[]) => (
         <Space>
           {tags.map(tag => (
-            <Tag key={tag} size="small" color="blue">{tag}</Tag>
+            <Tag key={tag} color="blue">{tag}</Tag>
           ))}
         </Space>
       ),
@@ -136,7 +136,7 @@ const SchedulerCenter: React.FC = () => {
       key: 'enabled',
       width: 80,
       render: (enabled: boolean) => (
-        <Tag color={enabled ? 'green' : 'grey'} size="small">
+        <Tag color={enabled ? 'green' : 'grey'}>
           {enabled ? '启用' : '禁用'}
         </Tag>
       ),
@@ -147,20 +147,20 @@ const SchedulerCenter: React.FC = () => {
       width: 160,
       render: (_: any, record: FlowListItem) => (
         <Space>
-          <Tooltip content="立即执行">
+          <Tooltip title="立即执行">
             <Button
-              theme="borderless"
-              icon={<IconPlay />}
-              size="small"
+              type="text"
+              icon={<PlayCircleOutlined />}
+             
               loading={runningFlow === record.name}
               onClick={() => handleRun(record.name)}
             />
           </Tooltip>
-          <Tooltip content="编辑">
+          <Tooltip title="编辑">
             <Button
-              theme="borderless"
-              icon={<IconEdit />}
-              size="small"
+              type="text"
+              icon={<EditOutlined />}
+             
               onClick={() => handleEdit(record.name)}
             />
           </Tooltip>
@@ -168,12 +168,12 @@ const SchedulerCenter: React.FC = () => {
             title="确定删除此 Flow？"
             onConfirm={() => handleDelete(record.name)}
           >
-            <Tooltip content="删除">
+            <Tooltip title="删除">
               <Button
-                theme="borderless"
-                icon={<IconDelete />}
-                size="small"
-                type="danger"
+                type="text"
+                icon={<DeleteOutlined />}
+               
+                danger
               />
             </Tooltip>
           </Popconfirm>
@@ -193,7 +193,7 @@ const SchedulerCenter: React.FC = () => {
             margin: 0,
             letterSpacing: '1px'
           }}>
-            <IconCalendarClock style={{ marginRight: '8px' }} />
+            <ScheduleOutlined style={{ marginRight: '8px' }} />
             调度
           </h1>
           <p style={{
@@ -206,62 +206,73 @@ const SchedulerCenter: React.FC = () => {
         </div>
       </div>
 
-      <Tabs type="line" style={{ flex: 1 }}>
-        <TabPane tab="调度管理" itemKey="management">
-          <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between' }}>
-            <Button
-              theme="solid"
-              icon={<IconPlus />}
-              onClick={handleCreate}
-            >
-              新建 Flow
-            </Button>
-            <Button
-              theme="borderless"
-              icon={<IconRefresh />}
-              onClick={fetchFlows}
-            >
-              刷新
-            </Button>
-          </div>
+      <Tabs type="line" style={{ flex: 1 }} items={[
+        {
+          key: 'management',
+          label: '调度管理',
+          children: (
+            <div>
+              <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between' }}>
+                <Button
+                  type="primary"
+                  icon={<PlusOutlined />}
+                  onClick={handleCreate}
+                >
+                  新建 Flow
+                </Button>
+                <Button
+                  type="text"
+                  icon={<ReloadOutlined />}
+                  onClick={fetchFlows}
+                >
+                  刷新
+                </Button>
+              </div>
 
-          <Table
-            columns={columns}
-            dataSource={flows}
-            rowKey="name"
-            loading={loading}
-            pagination={false}
-            empty={<Empty description="暂无 Flow 配置" />}
-          />
-        </TabPane>
+              <Table
+                columns={columns}
+                dataSource={flows}
+                rowKey="name"
+                loading={loading}
+                pagination={false}
+                locale={{ emptyText: <Empty description="暂无 Flow 配置" /> }}
+              />
+            </div>
+          ),
+        },
+        {
+          key: 'prefect',
+          label: 'Prefect Dashboard',
+          children: (
+            <div>
+              <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                <Tooltip title="刷新">
+                  <Button type="text" icon={<ReloadOutlined />} onClick={() => {
+                    const iframe = document.querySelector('iframe');
+                    if (iframe) iframe.src = iframe.src;
+                  }} />
+                </Tooltip>
+                <Tooltip title="在新标签页打开">
+                  <Button type="text" icon={<ExportOutlined />} onClick={() => window.open(prefectUrl, '_blank')} />
+                </Tooltip>
+              </div>
 
-        <TabPane tab="Prefect Dashboard" itemKey="prefect">
-          <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-            <Tooltip content="刷新">
-              <Button theme="borderless" icon={<IconRefresh />} onClick={() => {
-                const iframe = document.querySelector('iframe');
-                if (iframe) iframe.src = iframe.src;
-              }} />
-            </Tooltip>
-            <Tooltip content="在新标签页打开">
-              <Button theme="borderless" icon={<IconExternalOpen />} onClick={() => window.open(prefectUrl, '_blank')} />
-            </Tooltip>
-          </div>
-
-          <div style={{
-            borderRadius: 8,
-            overflow: 'hidden',
-            border: '1px solid var(--border-color)',
-            minHeight: 'calc(100vh - 240px)',
-          }}>
-            <iframe
-              src={prefectUrl}
-              style={{ width: '100%', height: 'calc(100vh - 240px)', border: 'none' }}
-              title="Prefect Dashboard"
-            />
-          </div>
-        </TabPane>
-      </Tabs>
+              <div style={{
+                borderRadius: 8,
+                overflow: 'hidden',
+                border: '1px solid var(--border-color)',
+                minHeight: 'calc(100vh - 240px)',
+              }}>
+                <iframe
+                  src={prefectUrl}
+                  style={{ width: '100%', height: 'calc(100vh - 240px)', border: 'none' }}
+                  title="Prefect Dashboard"
+                />
+              </div>
+            </div>
+          ),
+        },
+      ]} />
 
       <FlowEditor
         visible={editorVisible}

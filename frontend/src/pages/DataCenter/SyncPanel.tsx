@@ -9,15 +9,13 @@ import {
   Tag,
   Tooltip,
   Select,
-  Toast,
-} from '@douyinfe/semi-ui';
+} from 'antd';
 import {
-  IconSync,
-  IconRefresh,
-  IconDelete,
-  IconHistory,
-  IconClock,
-} from '@douyinfe/semi-icons';
+  SyncOutlined,
+  ReloadOutlined,
+  DeleteOutlined,
+  HistoryOutlined,
+} from '@ant-design/icons';
 import QuantDatePicker from '../../components/QuantDatePicker';
 import type { SyncTask, TaskStatus, SyncLog, ScheduleInfo } from '../../types';
 
@@ -79,7 +77,7 @@ export const SyncPanel: React.FC<SyncPanelProps> = ({
       width: 120,
       fixed: 'left' as const,
       render: (v: string, r: any) => (
-        <Tooltip content={v}>
+        <Tooltip title={v}>
           <span
             style={{
               cursor: 'pointer',
@@ -101,7 +99,7 @@ export const SyncPanel: React.FC<SyncPanelProps> = ({
       key: 'desc',
       width: 180,
       render: (v: string) => (
-        <Tooltip content={v}>
+        <Tooltip title={v}>
           <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {v}
           </div>
@@ -113,7 +111,7 @@ export const SyncPanel: React.FC<SyncPanelProps> = ({
       key: 'sync_type',
       width: 60,
       render: (_: any, r: any) => (
-        <Tag size="small" color={r.sync_type === 'incremental' ? 'blue' : 'green'}>
+        <Tag color={r.sync_type === 'incremental' ? 'blue' : 'green'}>
           {r.sync_type === 'incremental' ? '增量' : '全量'}
         </Tag>
       ),
@@ -124,7 +122,7 @@ export const SyncPanel: React.FC<SyncPanelProps> = ({
       key: 'table_name',
       width: 120,
       render: (v: string) => (
-        <Tooltip content={v}>
+        <Tooltip title={v}>
           <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             <code style={{ color: 'var(--color-gain)', fontSize: '12px' }}>{v}</code>
           </div>
@@ -139,7 +137,7 @@ export const SyncPanel: React.FC<SyncPanelProps> = ({
         const dateStr = r.status?.table_latest_date;
         const formatted = formatDate(dateStr);
         return (
-          <Tooltip content={formatted}>
+          <Tooltip title={formatted}>
             <div
               style={{
                 overflow: 'hidden',
@@ -162,7 +160,7 @@ export const SyncPanel: React.FC<SyncPanelProps> = ({
         const syncTime = r.status?.last_sync_time;
         if (!syncTime) return '-';
         return (
-          <Tooltip content={syncTime}>
+          <Tooltip title={syncTime}>
             <div
               style={{
                 overflow: 'hidden',
@@ -188,9 +186,9 @@ export const SyncPanel: React.FC<SyncPanelProps> = ({
         return (
           <div style={{ display: 'flex', gap: 4 }}>
             <Button
-              size="small"
+             
               icon={
-                <IconSync
+                <SyncOutlined
                   style={isSyncing ? { animation: 'spin 1s linear infinite' } : undefined}
                 />
               }
@@ -201,9 +199,9 @@ export const SyncPanel: React.FC<SyncPanelProps> = ({
               同步
             </Button>
             <Button
-              size="small"
-              type="danger"
-              icon={<IconDelete />}
+             
+              danger
+              icon={<DeleteOutlined />}
               onClick={() => onDeleteTask(r.task_id)}
             />
           </div>
@@ -219,7 +217,7 @@ export const SyncPanel: React.FC<SyncPanelProps> = ({
       key: 'data_type',
       width: 150,
       render: (v: string) => (
-        <Tooltip content={v}>
+        <Tooltip title={v}>
           <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             <code style={{ color: 'var(--color-primary)', fontSize: '12px' }}>{v}</code>
           </div>
@@ -232,7 +230,7 @@ export const SyncPanel: React.FC<SyncPanelProps> = ({
       key: 'sync_date',
       width: 100,
       render: (v: string) => (
-        <Tooltip content={v}>
+        <Tooltip title={v}>
           <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {v}
           </div>
@@ -246,7 +244,7 @@ export const SyncPanel: React.FC<SyncPanelProps> = ({
       width: 200,
       render: (v: string) =>
         v ? (
-          <Tooltip content={v}>
+          <Tooltip title={v}>
             <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               <code style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{v}</code>
             </div>
@@ -298,7 +296,7 @@ export const SyncPanel: React.FC<SyncPanelProps> = ({
       width: 200,
       render: (v: string) =>
         v ? (
-          <Tooltip content={v}>
+          <Tooltip title={v}>
             <div
               style={{
                 overflow: 'hidden',
@@ -330,23 +328,22 @@ export const SyncPanel: React.FC<SyncPanelProps> = ({
             同步任务管理
           </span>
         }
-        headerExtraContent={
+        extra={
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             {selectedTaskIds.length > 0 && (
               <Button
-                theme="solid"
                 type="primary"
-                icon={<IconSync />}
+                icon={<SyncOutlined />}
                 onClick={onBatchSync}
-                size="small"
+               
               >
                 批量同步 ({selectedTaskIds.length})
               </Button>
             )}
-            <Button icon={<IconRefresh />} onClick={onRefreshStatus} size="small">
+            <Button icon={<ReloadOutlined />} onClick={onRefreshStatus}>
               刷新
             </Button>
-            <Button onClick={onNewTask} size="small">
+            <Button onClick={onNewTask}>
               新建任务
             </Button>
           </div>
@@ -359,7 +356,7 @@ export const SyncPanel: React.FC<SyncPanelProps> = ({
             return { ...task, status, taskScheduleInfo };
           })}
           rowKey="task_id"
-          size="small"
+         
           pagination={false}
           rowSelection={{
             selectedRowKeys: selectedTaskIds,
@@ -377,12 +374,12 @@ export const SyncPanel: React.FC<SyncPanelProps> = ({
             同步日志
           </span>
         }
-        headerExtraContent={
+        extra={
           <Button
-            icon={<IconRefresh />}
+            icon={<ReloadOutlined />}
             onClick={() => handleFilterChange()}
-            size="small"
-            theme="borderless"
+           
+            type="text"
           >
             刷新
           </Button>
@@ -400,9 +397,9 @@ export const SyncPanel: React.FC<SyncPanelProps> = ({
           <Select
             placeholder="按任务筛选"
             style={{ width: 150 }}
-            showClear
-            size="small"
-            optionList={syncTasks.map((task) => ({ label: task.task_id, value: task.task_id }))}
+            allowClear
+           
+            options={syncTasks.map((task) => ({ label: task.task_id, value: task.task_id }))}
             onChange={(value) => setFilterDataType(value as string | undefined)}
           />
           <QuantDatePicker
@@ -410,10 +407,10 @@ export const SyncPanel: React.FC<SyncPanelProps> = ({
             style={{ width: 280 }}
             onChange={(s, e) => { setFilterStartDate(s); setFilterEndDate(e); }}
           />
-          <Button theme="solid" type="primary" onClick={handleFilterChange} size="small">
+          <Button type="primary" onClick={handleFilterChange}>
             筛选
           </Button>
-          <span style={{ fontSize: 11, color: 'var(--semi-color-text-2)', whiteSpace: 'nowrap' }}>
+          <span style={{ fontSize: 11, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
             按任务完成日期筛选
           </span>
         </div>
@@ -421,7 +418,7 @@ export const SyncPanel: React.FC<SyncPanelProps> = ({
           dataSource={syncLogs}
           columns={syncLogColumns}
           rowKey={(record: any) => `${record.id || ''}-${record.created_at || ''}`}
-          size="small"
+         
           pagination={{ pageSize: 10 }}
           scroll={{ x: '100%' }}
         />

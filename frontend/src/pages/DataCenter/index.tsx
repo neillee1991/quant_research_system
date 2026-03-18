@@ -3,8 +3,9 @@
  * 重构后的版本 - 组件化、模块化
  */
 import React, { useEffect, useState } from 'react';
-import { Tabs, TabPane, Toast, Modal } from '@douyinfe/semi-ui';
-import { IconSync, IconPlay, IconCode, IconServer } from '@douyinfe/semi-icons';
+import { Tabs, Modal } from 'antd';
+import { SyncOutlined, PlayCircleOutlined, CodeOutlined, DatabaseOutlined } from '@ant-design/icons';
+import { useMessage } from '../../hooks/useMessage';
 import { dataApi } from '../../api';
 import { useThemeStore } from '../../store';
 import { SyncPanel } from './SyncPanel';
@@ -26,6 +27,7 @@ import type { SyncTask, ETLTask } from '@/types';
 
 const DataCenter: React.FC = () => {
   const { mode } = useThemeStore();
+  const message = useMessage();
 
   // 使用自定义 Hooks
   const syncTasksHook = useSyncTasks();
@@ -96,7 +98,7 @@ const DataCenter: React.FC = () => {
       }
     } catch (error) {
       console.error('Failed to load initial data:', error);
-      Toast.error('加载初始数据失败');
+      message.error('加载初始数据失败');
     }
   };
 
@@ -128,7 +130,7 @@ const DataCenter: React.FC = () => {
 
   const handleBatchSync = () => {
     if (syncTasksHook.selectedTaskIds.length === 0) {
-      Toast.warning('请先选择要同步的任务');
+      message.warning('请先选择要同步的任务');
       return;
     }
     setBatchSyncStartDate('');
@@ -203,7 +205,7 @@ const DataCenter: React.FC = () => {
 
   const handleBatchEtlBackfill = () => {
     if (etlTasksHook.selectedEtlTaskIds.length === 0) {
-      Toast.warning('请先选择要回溯的任务');
+      message.warning('请先选择要回溯的任务');
       return;
     }
     setBatchEtlBackfillStartDate('');
@@ -274,7 +276,7 @@ const DataCenter: React.FC = () => {
             letterSpacing: '1px',
           }}
         >
-          <IconServer style={{ marginRight: '8px' }} />
+          <DatabaseOutlined style={{ marginRight: '8px' }} />
           数据中心
         </h1>
         <p
@@ -295,63 +297,74 @@ const DataCenter: React.FC = () => {
             etlTasksHook.loadEtlLogs();
           }
         }}
-      >
-        <TabPane tab={<span><IconSync /> 同步任务</span>} itemKey="1">
-          <SyncPanel
-            syncTasks={syncTasksHook.syncTasks}
-            taskStatuses={syncTasksHook.taskStatuses}
-            syncLogs={syncTasksHook.syncLogs}
-            syncingTasks={syncTasksHook.syncingTasks}
-            selectedTaskIds={syncTasksHook.selectedTaskIds}
-            scheduleInfo={syncTasksHook.scheduleInfo}
-            onSelectedTaskIdsChange={syncTasksHook.setSelectedTaskIds}
-            onRefreshStatus={() => {
-              syncTasksHook.syncTasks.forEach((task) =>
-                syncTasksHook.loadTaskStatus(task.task_id)
-              );
-              Toast.success('任务状态已刷新');
-            }}
-            onNewTask={handleNewTask}
-            onBatchSync={handleBatchSync}
-            onSyncTask={handleSyncTask}
-            onDeleteTask={handleDeleteTask}
-            onOpenTaskDrawer={handleOpenTaskDrawer}
-            onLoadSyncLogs={syncTasksHook.loadSyncLogs}
-          />
-        </TabPane>
-
-        <TabPane tab={<span><IconPlay /> ETL 任务</span>} itemKey="1.5">
-          <ETLPanel
-            etlTasks={etlTasksHook.etlTasks}
-            etlLogs={etlTasksHook.etlLogs}
-            runningEtlTasks={etlTasksHook.runningEtlTasks}
-            selectedEtlTaskIds={etlTasksHook.selectedEtlTaskIds}
-            onSelectedEtlTaskIdsChange={etlTasksHook.setSelectedEtlTaskIds}
-            onRefresh={etlTasksHook.loadEtlTasks}
-            onNewTask={handleNewEtlTask}
-            onBatchBackfill={handleBatchEtlBackfill}
-            onEditTask={handleEditEtlTask}
-            onDeleteTask={handleDeleteEtlTask}
-            onOpenBackfillModal={handleOpenEtlBackfillModal}
-            onLoadLogs={etlTasksHook.loadEtlLogs}
-          />
-        </TabPane>
-
-        <TabPane tab={<span><IconCode /> SQL 查询</span>} itemKey="3">
-          <DataTable
-            tables={dataQueryHook.tables}
-            sqlQuery={dataQueryHook.sqlQuery}
-            queryResult={dataQueryHook.queryResult}
-            queryColumns={dataQueryHook.queryColumns}
-            queryLoading={dataQueryHook.queryLoading}
-            onSqlQueryChange={dataQueryHook.setSqlQuery}
-            onExecuteQuery={dataQueryHook.executeQuery}
-            onTruncateTable={handleTruncateTable}
-            onRefreshTables={dataQueryHook.loadTables}
-            theme={mode}
-          />
-        </TabPane>
-      </Tabs>
+        items={[
+          {
+            key: '1',
+            label: <span><SyncOutlined /> 同步任务</span>,
+            children: (
+              <SyncPanel
+                syncTasks={syncTasksHook.syncTasks}
+                taskStatuses={syncTasksHook.taskStatuses}
+                syncLogs={syncTasksHook.syncLogs}
+                syncingTasks={syncTasksHook.syncingTasks}
+                selectedTaskIds={syncTasksHook.selectedTaskIds}
+                scheduleInfo={syncTasksHook.scheduleInfo}
+                onSelectedTaskIdsChange={syncTasksHook.setSelectedTaskIds}
+                onRefreshStatus={() => {
+                  syncTasksHook.syncTasks.forEach((task) =>
+                    syncTasksHook.loadTaskStatus(task.task_id)
+                  );
+                  message.success('任务状态已刷新');
+                }}
+                onNewTask={handleNewTask}
+                onBatchSync={handleBatchSync}
+                onSyncTask={handleSyncTask}
+                onDeleteTask={handleDeleteTask}
+                onOpenTaskDrawer={handleOpenTaskDrawer}
+                onLoadSyncLogs={syncTasksHook.loadSyncLogs}
+              />
+            ),
+          },
+          {
+            key: '1.5',
+            label: <span><PlayCircleOutlined /> ETL 任务</span>,
+            children: (
+              <ETLPanel
+                etlTasks={etlTasksHook.etlTasks}
+                etlLogs={etlTasksHook.etlLogs}
+                runningEtlTasks={etlTasksHook.runningEtlTasks}
+                selectedEtlTaskIds={etlTasksHook.selectedEtlTaskIds}
+                onSelectedEtlTaskIdsChange={etlTasksHook.setSelectedEtlTaskIds}
+                onRefresh={etlTasksHook.loadEtlTasks}
+                onNewTask={handleNewEtlTask}
+                onBatchBackfill={handleBatchEtlBackfill}
+                onEditTask={handleEditEtlTask}
+                onDeleteTask={handleDeleteEtlTask}
+                onOpenBackfillModal={handleOpenEtlBackfillModal}
+                onLoadLogs={etlTasksHook.loadEtlLogs}
+              />
+            ),
+          },
+          {
+            key: '3',
+            label: <span><CodeOutlined /> SQL 查询</span>,
+            children: (
+              <DataTable
+                tables={dataQueryHook.tables}
+                sqlQuery={dataQueryHook.sqlQuery}
+                queryResult={dataQueryHook.queryResult}
+                queryColumns={dataQueryHook.queryColumns}
+                queryLoading={dataQueryHook.queryLoading}
+                onSqlQueryChange={dataQueryHook.setSqlQuery}
+                onExecuteQuery={dataQueryHook.executeQuery}
+                onTruncateTable={handleTruncateTable}
+                onRefreshTables={dataQueryHook.loadTables}
+                theme={mode}
+              />
+            ),
+          },
+        ]}
+      />
 
       {/* 模态框 */}
       <SyncModal

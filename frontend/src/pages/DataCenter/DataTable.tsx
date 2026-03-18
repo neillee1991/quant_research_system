@@ -2,8 +2,8 @@
  * SQL 查询面板组件
  */
 import React from 'react';
-import { Card, Table, Button, Input } from '@douyinfe/semi-ui';
-import { IconPlay, IconRefresh, IconLink } from '@douyinfe/semi-icons';
+import { Card, Table, Button } from 'antd';
+import { PlayCircleOutlined, ReloadOutlined, LinkOutlined } from '@ant-design/icons';
 import Editor from '@monaco-editor/react';
 import type { TableInfo } from '../../types';
 
@@ -71,12 +71,12 @@ export const DataTable: React.FC<DataTableProps> = ({
       title: '操作',
       key: 'action',
       width: 80,
-      render: (text: any, record: TableInfo) => (
+      render: (_text: any, record: TableInfo) => (
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <Button
-            type="danger"
+            danger
             size="small"
-            theme="borderless"
+            type="text"
             onClick={() => onTruncateTable(record.table_name)}
           >
             清空
@@ -109,12 +109,12 @@ export const DataTable: React.FC<DataTableProps> = ({
             SQL 查询
           </span>
         }
-        headerExtraContent={
+        extra={
           <Button
-            icon={<IconLink />}
+            icon={<LinkOutlined />}
             onClick={() => window.open('http://localhost:8848', '_blank')}
             size="small"
-            theme="borderless"
+            type="text"
           >
             DolphinDB 后台
           </Button>
@@ -134,9 +134,8 @@ export const DataTable: React.FC<DataTableProps> = ({
                 SQL 语句
               </span>
               <Button
-                theme="solid"
                 type="primary"
-                icon={<IconPlay />}
+                icon={<PlayCircleOutlined />}
                 onClick={onExecuteQuery}
                 loading={queryLoading}
                 size="small"
@@ -201,8 +200,8 @@ export const DataTable: React.FC<DataTableProps> = ({
             数据表管理
           </span>
         }
-        headerExtraContent={
-          <Button icon={<IconRefresh />} onClick={onRefreshTables} size="small">
+        extra={
+          <Button icon={<ReloadOutlined />} onClick={onRefreshTables} size="small">
             刷新
           </Button>
         }

@@ -1,47 +1,50 @@
 import React from 'react';
 import { Handle, Position, NodeProps, useReactFlow } from 'reactflow';
-import { Card, Form } from '@douyinfe/semi-ui';
+import { Card, Input } from 'antd';
 
 const DataInputNode: React.FC<NodeProps> = ({ id, data }) => {
   const { setNodes } = useReactFlow();
 
-  const handleValueChange = (values: Record<string, any>) => {
+  const handleChange = (field: string, value: string) => {
     setNodes(nodes => nodes.map(n =>
-      n.id === id ? { ...n, data: { ...n.data, ...values } } : n
+      n.id === id ? { ...n, data: { ...n.data, [field]: value } } : n
     ));
   };
 
   return (
     <Card
       title="Data Input"
+      size="small"
       style={{ minWidth: 200, background: 'var(--bg-node-data)', border: '1px solid var(--color-gain)' }}
-      headerStyle={{ padding: '8px 12px' }}
-      bodyStyle={{ padding: '8px 12px' }}
+      styles={{ header: { padding: '8px 12px' }, body: { padding: '8px 12px' } }}
     >
-      <Form layout="vertical" labelPosition="top" onValueChange={handleValueChange}>
-        <Form.Input
-          field="ts_code"
-          label="Stock Code"
-          initValue={data.ts_code}
+      <div style={{ marginBottom: 8 }}>
+        <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>Stock Code</div>
+        <Input
+          size="small"
+          defaultValue={data.ts_code}
           placeholder="000001.SZ"
-          noLabel={false}
-          size="small"
+          onChange={(e) => handleChange('ts_code', e.target.value)}
         />
-        <Form.Input
-          field="start"
-          label="Start Date"
-          initValue={data.start}
+      </div>
+      <div style={{ marginBottom: 8 }}>
+        <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>Start Date</div>
+        <Input
+          size="small"
+          defaultValue={data.start}
           placeholder="20200101"
-          size="small"
+          onChange={(e) => handleChange('start', e.target.value)}
         />
-        <Form.Input
-          field="end"
-          label="End Date"
-          initValue={data.end}
+      </div>
+      <div>
+        <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>End Date</div>
+        <Input
+          size="small"
+          defaultValue={data.end}
           placeholder="20241231"
-          size="small"
+          onChange={(e) => handleChange('end', e.target.value)}
         />
-      </Form>
+      </div>
       <Handle type="source" position={Position.Right} />
     </Card>
   );

@@ -10,7 +10,8 @@ import ReactFlow, {
   useEdgesState,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
-import { Button, Toast } from '@douyinfe/semi-ui';
+import { Button } from 'antd';
+import { useMessage } from '../../hooks/useMessage';
 import { useFlowStore } from '../../store';
 import DataInputNode from './nodes/DataInputNode';
 import OperatorNode from './nodes/OperatorNode';
@@ -32,6 +33,7 @@ const FlowEditor: React.FC = () => {
   const [localNodes, setLocalNodes, onNodesChange] = useNodesState(nodes);
   const [localEdges, setLocalEdges, onEdgesChange] = useEdgesState(edges);
   const { setResult, setLoading } = useBacktestStore();
+  const message = useMessage();
 
   useEffect(() => {
     setNodes(localNodes);
@@ -55,9 +57,9 @@ const FlowEditor: React.FC = () => {
       };
       const res = await strategyApi.backtest(graph);
       setResult(res.data);
-      Toast.success({ content: '回测完成' });
+      message.success('回测完成');
     } catch (e: any) {
-      Toast.error({ content: e?.response?.data?.detail || '回测失败' });
+      message.error(e?.response?.data?.detail || '回测失败');
     } finally {
       setLoading(false);
     }
@@ -108,7 +110,7 @@ const FlowEditor: React.FC = () => {
         borderTop: '1px solid var(--border-color)'
       }}>
         <Button
-          theme="solid"
+          type="primary"
           onClick={handleRunBacktest}
           style={{
             background: 'var(--gradient-primary)',

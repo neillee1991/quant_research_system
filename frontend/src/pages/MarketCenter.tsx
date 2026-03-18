@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Table, Select, Card } from '@douyinfe/semi-ui';
-import { IconCandlestickChartStroked } from '@douyinfe/semi-icons';
+import { Table, Select, Card } from 'antd';
+import { FundOutlined } from '@ant-design/icons';
 import { dataApi } from '../api';
 import TradingViewChart from '../components/Charts/TradingViewChart';
 
@@ -55,7 +55,7 @@ const MarketCenter: React.FC = () => {
           margin: 0,
           letterSpacing: '1px'
         }}>
-          <IconCandlestickChartStroked style={{ marginRight: '8px' }} />
+          <FundOutlined style={{ marginRight: '8px' }} />
           行情
         </h1>
         <p style={{
@@ -74,14 +74,14 @@ const MarketCenter: React.FC = () => {
           border: '1px solid var(--border-color)',
           boxShadow: 'var(--shadow-sm)'
         }}
-        bodyStyle={{ padding: 24 }}
+        styles={{ body: { padding: 24 } }}
       >
         <div style={{ marginBottom: 20 }}>
           <Select
-            filter
+            showSearch
             style={{ width: 280 }}
             placeholder="选择股票代码"
-            optionList={stocks.map((s) => ({ label: s, value: s }))}
+            options={stocks.map((s) => ({ label: s, value: s }))}
             onChange={(v) => {
               setSelected(v as string);
               loadDaily(v as string);
@@ -121,9 +121,7 @@ const MarketCenter: React.FC = () => {
           size="small"
           pagination={{ pageSize: 20 }}
           scroll={{ x: 800 }}
-          style={{
-            '--semi-color-primary': 'var(--color-primary)'
-          } as React.CSSProperties}
+          style={{}}
         />
       </Card>
     </div>

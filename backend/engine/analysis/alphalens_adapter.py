@@ -5,9 +5,9 @@ Alphalens 框架适配器
 import polars as pl
 import pandas as pd
 import numpy as np
+from scipy import stats as scipy_stats
 from typing import List, Dict, Any, Optional
 import alphalens
-from alphalens.utils import get_clean_factor_and_forward_returns
 from alphalens.performance import (
     factor_information_coefficient,
     mean_return_by_quantile,
@@ -27,66 +27,67 @@ class AlphalensAdapter:
     def prepare_factor_data(
         self,
         factor_df: pl.DataFrame,      # (ts_code, trade_date, factor_value)
-        price_df: pl.DataFrame,        # (ts_code, trade_date, close)
+        price_df: pl.DataFrame,        # (ts_code, trade_date, open, high, low, close)
         periods: List[int] = [1, 5, 10, 20],
         quantiles: int = 5,
-        groupby_df: Optional[pl.DataFrame] = None  # (ts_code, trade_date, group_value)
+        groupby_df: Optional[pl.DataFrame] = None,  # (ts_code, trade_date, group_value)
+        next_day_entry: bool = True,
+        entry_price: str = "open",
     ) -> pd.DataFrame:
         """
         转换为 alphalens 所需的格式
 
         Args:
             factor_df: 因子数据
-            price_df: 价格数据
+            price_df: 价格数据（需含 open/high/low/close 列）
             periods: 持仓周期列表
             quantiles: 分组数量
             groupby_df: 分组数据（可选），如行业、市值等
+            next_day_entry: True=T+1日买入，False=T日收盘买入
+            entry_price: 买入价格列名（next_day_entry=True 时有效）
 
         Returns:
             pd.DataFrame with MultiIndex (date, asset) and columns:
             - factor: 因子值
             - 1D, 5D, 10D, 20D: 各周期远期收益
+            - factor_quantile: 分位数标签
             - group (optional): 分组标签
         """
+        from engine.analysis.forward_returns import ForwardReturnCalculator
+        from alphalens.utils import quantize_factor
+
         logger.info(f"Preparing factor data: {len(factor_df)} rows, {factor_df['ts_code'].n_unique()} stocks")
 
-        # 1. Polars → Pandas
-        factor_pd = factor_df.to_pandas()
-        price_pd = price_df.to_pandas()
+        # 1. 用 ForwardReturnCalculator 手动计算远期收益
+        factor_data_raw = ForwardReturnCalculator.calc(
+            factor_df=factor_df,
+            price_df=price_df,
+            periods=periods,
+            next_day_entry=next_day_entry,
+            entry_price=entry_price,
+        )
 
-        # 2. 转换日期格式并创建 MultiIndex
-        factor_pd['trade_date'] = pd.to_datetime(factor_pd['trade_date'], format='%Y%m%d')
-        factor_pd = factor_pd.set_index(['trade_date', 'ts_code'])['factor_value']
-        factor_pd.index.names = ['date', 'asset']
+        # 去重，确保 MultiIndex 唯一（同一 date+asset 保留第一条）
+        factor_data_raw = factor_data_raw[~factor_data_raw.index.duplicated(keep='first')]
 
-        price_pd['trade_date'] = pd.to_datetime(price_pd['trade_date'], format='%Y%m%d')
-        price_pd = price_pd.pivot(index='trade_date', columns='ts_code', values='close')
-        price_pd.index.name = 'date'
+        # 2. 添加分位数列（Alphalens 后续分析需要 factor_quantile 列）
+        factor_data_raw["factor_quantile"] = quantize_factor(
+            factor_data_raw,
+            quantiles=quantiles,
+            bins=None,
+            by_group=False,
+            no_raise=True,
+        )
 
         # 3. 处理分组数据（如果有）
-        groupby_series = None
         if groupby_df is not None and not groupby_df.is_empty():
             groupby_series = self._prepare_groupby(groupby_df)
-            logger.info(f"Groupby data prepared: {len(groupby_series)} entries")
-
-        # 4. 调用 alphalens 工具函数
-        logger.info(f"Calling alphalens get_clean_factor_and_forward_returns...")
-        try:
-            factor_data = get_clean_factor_and_forward_returns(
-                factor=factor_pd,
-                prices=price_pd,
-                periods=periods,
-                quantiles=quantiles,
-                groupby=groupby_series,
-                max_loss=0.5,  # 允许 50% 的数据缺失（测试环境）
-                bins=None,
-                binning_by_group=False
+            factor_data_raw = factor_data_raw.join(
+                groupby_series.rename("group"), how="left"
             )
-            logger.info(f"Factor data prepared: {len(factor_data)} rows")
-            return factor_data
-        except Exception as e:
-            logger.error(f"Failed to prepare factor data: {e}")
-            raise
+
+        logger.info(f"Factor data prepared: {len(factor_data_raw)} rows")
+        return factor_data_raw
 
     def _prepare_groupby(self, groupby_df: pl.DataFrame) -> pd.Series:
         """转换分组数据为 MultiIndex Series
@@ -146,6 +147,51 @@ class AlphalensAdapter:
             results['ic_summary'] = {}
             results['ic_by_period'] = []
             results['ic_ts'] = []
+
+        # 1b. Rank IC（手动计算 Spearman 相关系数，逐日）
+        logger.info("Computing Rank IC...")
+        try:
+            period_cols = [c for c in factor_data.columns if c.endswith("D") and c[:-1].isdigit()]
+            rank_ic_rows = []
+            for date, group in factor_data.groupby(level="date"):
+                row = {"date": date}
+                for col in period_cols:
+                    tmp = group[["factor", col]].dropna()
+                    if len(tmp) > 5:
+                        row[col] = tmp["factor"].rank().corr(tmp[col].rank())
+                    else:
+                        row[col] = float("nan")
+                rank_ic_rows.append(row)
+            rank_ic = pd.DataFrame(rank_ic_rows).set_index("date")
+            results['rank_ic_summary'] = self._serialize_ic_summary(rank_ic)
+            results['rank_ic_by_period'] = self._serialize_ic_by_period(rank_ic)
+        except Exception as e:
+            logger.warning(f"Failed to compute Rank IC: {e}")
+            results['rank_ic_summary'] = {}
+            results['rank_ic_by_period'] = []
+
+        # 1c. IC Decay：对每个 period 列单独计算 Pearson + Spearman IC
+        logger.info("Computing IC Decay...")
+        try:
+            period_cols = [c for c in factor_data.columns if c.endswith("D") and c[:-1].isdigit()]
+            ic_decay = {}
+            for col in period_cols:
+                lag = int(col[:-1])
+                tmp = factor_data[["factor", col]].dropna()
+                if len(tmp) > 10:
+                    ic_val = tmp["factor"].corr(tmp[col], method="pearson")
+                    rank_ic_val = tmp["factor"].corr(tmp[col], method="spearman")
+                    ic_decay[lag] = {
+                        "ic": round(float(ic_val), 4),
+                        "rank_ic": round(float(rank_ic_val), 4),
+                    }
+            results['ic_decay'] = [
+                {"lag": lag, "ic": v["ic"], "rank_ic": v["rank_ic"]}
+                for lag, v in sorted(ic_decay.items())
+            ]
+        except Exception as e:
+            logger.warning(f"Failed to compute IC Decay: {e}")
+            results['ic_decay'] = []
 
         # 2. 分层收益
         logger.info("Computing quantile returns...")
@@ -249,17 +295,29 @@ class AlphalensAdapter:
         }
 
     def _serialize_ic_by_period(self, ic: pd.DataFrame) -> List[Dict]:
-        """序列化各周期 IC 统计"""
-        return [
-            {
+        """序列化各周期 IC 统计（含 t 统计量和 p 值）"""
+        result = []
+        for col in ic.columns:
+            series = ic[col].dropna()
+            n = len(series)
+            ic_mean = float(series.mean())
+            ic_std = float(series.std())
+            ic_ir = ic_mean / (ic_std + 1e-10)
+            # t 统计量：t = IC_mean / (IC_std / sqrt(n))
+            t_stat = float(ic_mean / (ic_std / np.sqrt(n))) if n > 1 and ic_std > 0 else 0.0
+            # 双尾 p 值
+            p_value = float(2 * scipy_stats.t.sf(abs(t_stat), df=n - 1)) if n > 1 else 1.0
+            result.append({
                 'period': str(col),
-                'ic_mean': float(ic[col].mean()),
-                'ic_std': float(ic[col].std()),
-                'ic_ir': float(ic[col].mean() / (ic[col].std() + 1e-10)),
-                'ic_win_rate': float((ic[col] > 0).mean())
-            }
-            for col in ic.columns
-        ]
+                'ic_mean': ic_mean,
+                'ic_std': ic_std,
+                'ic_ir': ic_ir,
+                'ic_win_rate': float((series > 0).mean()),
+                't_stat': round(t_stat, 4),
+                'p_value': round(p_value, 4),
+                'n_obs': n,
+            })
+        return result
 
     def _serialize_ic_ts(self, ic: pd.DataFrame) -> List[Dict]:
         """序列化 IC 时间序列"""
@@ -284,7 +342,7 @@ class AlphalensAdapter:
                 std_val = float(std_ret.loc[quantile, period])
                 results.append({
                     'period': str(period),
-                    'quantile': int(quantile) + 1,  # 1-based
+                    'quantile': int(quantile),
                     'mean_return': mean_val,
                     'std_return': std_val,
                     'sharpe': mean_val / (std_val + 1e-10)
@@ -336,7 +394,7 @@ class AlphalensAdapter:
             result[str(group)] = [
                 {
                     'period': str(period),
-                    'quantile': int(quantile) + 1,
+                    'quantile': int(quantile),
                     'mean_return': float(group_data.loc[quantile, period])
                 }
                 for period in group_data.columns
@@ -360,6 +418,50 @@ class AlphalensAdapter:
             str(period): float(autocorr[period])
             for period in autocorr.index
         }
+
+    def compute_industry_analysis(
+        self,
+        factor_data: pd.DataFrame,
+        industry_groupby_df: pl.DataFrame,
+        periods: List[int],
+    ) -> Dict[str, Any]:
+        """计算分行业 IC 和收益率分析（始终执行，不依赖 groupby_field）"""
+        try:
+            industry_series = self._prepare_groupby(industry_groupby_df)
+
+            # 创建副本，添加 group 列（避免修改原始数据）
+            fd = factor_data.copy()
+            fd = fd.join(industry_series.rename("group"), how="left")
+            fd = fd.dropna(subset=["group"])
+
+            if fd.empty:
+                logger.warning("No data after joining industry groups")
+                return {}
+
+            logger.info(f"Industry analysis: {fd['group'].nunique()} industries, {len(fd)} rows")
+
+            result: Dict[str, Any] = {}
+
+            try:
+                ic_by_ind = factor_information_coefficient(fd, by_group=True)
+                result['ic_by_industry'] = self._serialize_ic_by_group(ic_by_ind)
+            except Exception as e:
+                logger.warning(f"IC by industry failed: {e}")
+                result['ic_by_industry'] = {}
+
+            try:
+                ret_by_ind, _ = mean_return_by_quantile(
+                    fd, by_date=False, by_group=True, demeaned=False
+                )
+                result['returns_by_industry'] = self._serialize_returns_by_group(ret_by_ind)
+            except Exception as e:
+                logger.warning(f"Returns by industry failed: {e}")
+                result['returns_by_industry'] = {}
+
+            return result
+        except Exception as e:
+            logger.warning(f"Industry analysis failed: {e}")
+            return {}
 
     def _prepare_charts_data(self, results: Dict) -> Dict:
         """预计算图表数据（ECharts 配置）"""

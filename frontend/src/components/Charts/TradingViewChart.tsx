@@ -1,21 +1,22 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createChart, ColorType, IChartApi, CandlestickSeries, HistogramSeries, LineSeries, AreaSeries } from 'lightweight-charts';
-import { Button, Tooltip, Dropdown, Modal, Form, InputNumber, Select, TagInput } from '@douyinfe/semi-ui';
+import { Button, Tooltip, Dropdown, Modal, Form, InputNumber, Select } from 'antd';
+import type { MenuProps } from 'antd';
 import {
-  IconLineChartStroked,
-  IconDeleteStroked,
-  IconUndo,
-  IconSetting,
-  IconCamera,
-  IconPlusStroked,
-  IconMinusStroked,
-  IconBarChartVStroked,
-  IconMinusCircleStroked,
-  IconGridRectangle,
-  IconArrowUp,
-  IconFont,
-  IconCandlestickChartStroked,
-} from '@douyinfe/semi-icons';
+  LineChartOutlined,
+  DeleteOutlined,
+  UndoOutlined,
+  SettingOutlined,
+  CameraOutlined,
+  PlusOutlined,
+  MinusOutlined,
+  BarChartOutlined,
+  MinusCircleOutlined,
+  BorderOutlined,
+  ArrowUpOutlined,
+  FontSizeOutlined,
+  FundOutlined,
+} from '@ant-design/icons';
 import {
   calculateSMA,
   calculateEMA,
@@ -524,45 +525,49 @@ const TradingViewChart: React.FC<TradingViewChartProps> = ({ data, buyPoints = [
     const submitBtn = (
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: 12 }}>
         <Button onClick={() => setSettingsVisible(false)}>取消</Button>
-        <Button theme="solid" htmlType="submit">
+        <Button type="primary" htmlType="submit">
           {indicators.includes(currentIndicator) ? '保存参数' : '添加到图表'}
         </Button>
       </div>
     );
     switch (currentIndicator) {
       case 'ma':
-        return (<Form initValues={params} onSubmit={handleSaveSettings} layout="vertical">
-          <Form.TagInput field="periods" label="周期" placeholder="输入周期，如 5, 10, 20, 60" allowDuplicates={false} />
+        return (<Form layout="vertical" initialValues={params} onFinish={handleSaveSettings}>
+          <Form.Item name="periods" label="周期">
+            <Select mode="tags" placeholder="输入周期，如 5, 10, 20, 60" tokenSeparators={[',']} />
+          </Form.Item>
           {submitBtn}</Form>);
       case 'ema':
-        return (<Form initValues={params} onSubmit={handleSaveSettings} layout="vertical">
-          <Form.TagInput field="periods" label="周期" placeholder="输入周期，如 12, 26" allowDuplicates={false} />
+        return (<Form layout="vertical" initialValues={params} onFinish={handleSaveSettings}>
+          <Form.Item name="periods" label="周期">
+            <Select mode="tags" placeholder="输入周期，如 12, 26" tokenSeparators={[',']} />
+          </Form.Item>
           {submitBtn}</Form>);
       case 'boll':
-        return (<Form initValues={params} onSubmit={handleSaveSettings} layout="vertical">
-          <Form.InputNumber field="period" label="周期" min={2} max={100} />
-          <Form.InputNumber field="stdDev" label="标准差倍数" min={1} max={5} step={0.1} />
+        return (<Form layout="vertical" initialValues={params} onFinish={handleSaveSettings}>
+          <Form.Item name="period" label="周期"><InputNumber min={2} max={100} style={{ width: '100%' }} /></Form.Item>
+          <Form.Item name="stdDev" label="标准差倍数"><InputNumber min={1} max={5} step={0.1} style={{ width: '100%' }} /></Form.Item>
           {submitBtn}</Form>);
       case 'macd':
-        return (<Form initValues={params} onSubmit={handleSaveSettings} layout="vertical">
-          <Form.InputNumber field="fastPeriod" label="快线周期" min={2} max={100} />
-          <Form.InputNumber field="slowPeriod" label="慢线周期" min={2} max={100} />
-          <Form.InputNumber field="signalPeriod" label="信号线周期" min={2} max={100} />
+        return (<Form layout="vertical" initialValues={params} onFinish={handleSaveSettings}>
+          <Form.Item name="fastPeriod" label="快线周期"><InputNumber min={2} max={100} style={{ width: '100%' }} /></Form.Item>
+          <Form.Item name="slowPeriod" label="慢线周期"><InputNumber min={2} max={100} style={{ width: '100%' }} /></Form.Item>
+          <Form.Item name="signalPeriod" label="信号线周期"><InputNumber min={2} max={100} style={{ width: '100%' }} /></Form.Item>
           {submitBtn}</Form>);
       case 'rsi':
-        return (<Form initValues={params} onSubmit={handleSaveSettings} layout="vertical">
-          <Form.InputNumber field="period" label="周期" min={2} max={100} />
+        return (<Form layout="vertical" initialValues={params} onFinish={handleSaveSettings}>
+          <Form.Item name="period" label="周期"><InputNumber min={2} max={100} style={{ width: '100%' }} /></Form.Item>
           {submitBtn}</Form>);
       case 'kdj':
-        return (<Form initValues={params} onSubmit={handleSaveSettings} layout="vertical">
-          <Form.InputNumber field="period" label="周期" min={2} max={100} />
-          <Form.InputNumber field="k" label="K 平滑参数" min={1} max={10} />
-          <Form.InputNumber field="d" label="D 平滑参数" min={1} max={10} />
+        return (<Form layout="vertical" initialValues={params} onFinish={handleSaveSettings}>
+          <Form.Item name="period" label="周期"><InputNumber min={2} max={100} style={{ width: '100%' }} /></Form.Item>
+          <Form.Item name="k" label="K 平滑参数"><InputNumber min={1} max={10} style={{ width: '100%' }} /></Form.Item>
+          <Form.Item name="d" label="D 平滑参数"><InputNumber min={1} max={10} style={{ width: '100%' }} /></Form.Item>
           {submitBtn}</Form>);
       default: return null;
     }
   };
-  const indicatorMenuItems = [
+  const indicatorMenuItemDefs = [
     { key: 'ma', name: '移动平均线 (MA)' },
     { key: 'ema', name: '指数移动平均 (EMA)' },
     { key: 'boll', name: '布林带 (BOLL)' },
@@ -571,21 +576,16 @@ const TradingViewChart: React.FC<TradingViewChartProps> = ({ data, buyPoints = [
     { key: 'kdj', name: 'KDJ' },
   ];
 
-  const indicatorDropdownMenu = (
-    <Dropdown.Menu>
-      {indicatorMenuItems.map(({ key, name }) => (
-        <Dropdown.Item
-          key={key}
-          onClick={() => setIndicators((prev) => prev.includes(key) ? prev.filter(i => i !== key) : [...prev, key])}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', minWidth: 200 }}>
-            <span>{indicators.includes(key) ? `✓ ${name}` : name}</span>
-            <Button size="small" icon={<IconSetting />} onClick={(e) => { e.stopPropagation(); handleOpenSettings(key); }} style={{ marginLeft: 8 }} />
-          </div>
-        </Dropdown.Item>
-      ))}
-    </Dropdown.Menu>
-  );
+  const indicatorMenuItems: MenuProps['items'] = indicatorMenuItemDefs.map(({ key, name }) => ({
+    key,
+    label: (
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', minWidth: 200 }}>
+        <span>{indicators.includes(key) ? `✓ ${name}` : name}</span>
+        <Button size="small" icon={<SettingOutlined />} onClick={(e) => { e.stopPropagation(); handleOpenSettings(key); }} style={{ marginLeft: 8 }} />
+      </div>
+    ),
+    onClick: () => setIndicators((prev) => prev.includes(key) ? prev.filter(i => i !== key) : [...prev, key]),
+  }));
 
   return (
     <div style={{ position: 'relative' }}>
@@ -597,20 +597,20 @@ const TradingViewChart: React.FC<TradingViewChartProps> = ({ data, buyPoints = [
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <div style={{ display: 'flex', gap: 4 }}>
-            <Tooltip content="蜡烛图"><Button size="small" theme={chartType === 'candlestick' ? 'solid' : 'borderless'} icon={<IconBarChartVStroked />} style={{ height: '24px' }} onClick={() => setChartType('candlestick')} /></Tooltip>
-            <Tooltip content="折线图"><Button size="small" theme={chartType === 'line' ? 'solid' : 'borderless'} icon={<IconLineChartStroked />} style={{ height: '24px' }} onClick={() => setChartType('line')} /></Tooltip>
-            <Tooltip content="面积图"><Button size="small" theme={chartType === 'area' ? 'solid' : 'borderless'} icon={<IconCandlestickChartStroked />} style={{ height: '24px' }} onClick={() => setChartType('area')} /></Tooltip>
+            <Tooltip title="蜡烛图"><Button size="small" type={chartType === 'candlestick' ? 'primary' : 'text'} icon={<BarChartOutlined />} style={{ height: '24px' }} onClick={() => setChartType('candlestick')} /></Tooltip>
+            <Tooltip title="折线图"><Button size="small" type={chartType === 'line' ? 'primary' : 'text'} icon={<LineChartOutlined />} style={{ height: '24px' }} onClick={() => setChartType('line')} /></Tooltip>
+            <Tooltip title="面积图"><Button size="small" type={chartType === 'area' ? 'primary' : 'text'} icon={<FundOutlined />} style={{ height: '24px' }} onClick={() => setChartType('area')} /></Tooltip>
           </div>
           <div style={{ width: '1px', height: '20px', background: 'var(--border-color)' }} />
-          <Dropdown render={indicatorDropdownMenu} position="bottomLeft">
+          <Dropdown menu={{ items: indicatorMenuItems }} placement="bottomLeft">
             <Button size="small" style={{ height: '24px', fontSize: '12px' }}>指标</Button>
           </Dropdown>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <Tooltip content="放大"><Button size="small" theme="borderless" icon={<IconPlusStroked />} onClick={handleZoomIn} style={{ height: '24px' }} /></Tooltip>
-          <Tooltip content="缩小"><Button size="small" theme="borderless" icon={<IconMinusStroked />} onClick={handleZoomOut} style={{ height: '24px' }} /></Tooltip>
-          <Tooltip content="重置"><Button size="small" theme="borderless" onClick={handleResetZoom} style={{ height: '24px', fontSize: '12px' }}>重置</Button></Tooltip>
-          <Tooltip content="截图"><Button size="small" theme="borderless" icon={<IconCamera />} onClick={handleScreenshot} style={{ height: '24px' }} /></Tooltip>
+          <Tooltip title="放大"><Button size="small" type="text" icon={<PlusOutlined />} onClick={handleZoomIn} style={{ height: '24px' }} /></Tooltip>
+          <Tooltip title="缩小"><Button size="small" type="text" icon={<MinusOutlined />} onClick={handleZoomOut} style={{ height: '24px' }} /></Tooltip>
+          <Tooltip title="重置"><Button size="small" type="text" onClick={handleResetZoom} style={{ height: '24px', fontSize: '12px' }}>重置</Button></Tooltip>
+          <Tooltip title="截图"><Button size="small" type="text" icon={<CameraOutlined />} onClick={handleScreenshot} style={{ height: '24px' }} /></Tooltip>
         </div>
       </div>
 
@@ -622,21 +622,21 @@ const TradingViewChart: React.FC<TradingViewChartProps> = ({ data, buyPoints = [
       }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           {([
-            { tool: 'trendline' as const, title: '趋势线', icon: <IconLineChartStroked /> },
-            { tool: 'horizontal' as const, title: '水平线', icon: <IconMinusCircleStroked /> },
-            { tool: 'rectangle' as const, title: '矩形', icon: <IconGridRectangle /> },
-            { tool: 'arrow' as const, title: '箭头', icon: <IconArrowUp /> },
-            { tool: 'text' as const, title: '文本', icon: <IconFont /> },
+            { tool: 'trendline' as const, title: '趋势线', icon: <LineChartOutlined /> },
+            { tool: 'horizontal' as const, title: '水平线', icon: <MinusCircleOutlined /> },
+            { tool: 'rectangle' as const, title: '矩形', icon: <BorderOutlined /> },
+            { tool: 'arrow' as const, title: '箭头', icon: <ArrowUpOutlined /> },
+            { tool: 'text' as const, title: '文本', icon: <FontSizeOutlined /> },
           ]).map(({ tool, title, icon }) => (
-            <Tooltip key={tool} content={title} position="right">
-              <Button size="small" theme={drawingMode && drawingTool === tool ? 'solid' : 'borderless'} icon={icon}
+            <Tooltip key={tool} title={title} placement="right">
+              <Button size="small" type={drawingMode && drawingTool === tool ? 'primary' : 'text'} icon={icon}
                 style={{ width: '32px', height: '32px' }}
                 onClick={() => { setDrawingMode(!drawingMode || drawingTool !== tool); setDrawingTool(tool); setDrawingStart(null); }} />
             </Tooltip>
           ))}
           <div style={{ height: '1px', background: 'var(--border-color)', margin: '4px 0' }} />
-          <Tooltip content="撤销" position="right"><Button size="small" theme="borderless" icon={<IconUndo />} style={{ width: '32px', height: '32px' }} onClick={handleUndoLine} disabled={lines.length === 0} /></Tooltip>
-          <Tooltip content="清除所有" position="right"><Button size="small" theme="borderless" icon={<IconDeleteStroked />} style={{ width: '32px', height: '32px', color: lines.length > 0 ? 'var(--color-loss)' : undefined }} onClick={handleClearLines} disabled={lines.length === 0} /></Tooltip>
+          <Tooltip title="撤销" placement="right"><Button size="small" type="text" icon={<UndoOutlined />} style={{ width: '32px', height: '32px' }} onClick={handleUndoLine} disabled={lines.length === 0} /></Tooltip>
+          <Tooltip title="清除所有" placement="right"><Button size="small" type="text" icon={<DeleteOutlined />} style={{ width: '32px', height: '32px', color: lines.length > 0 ? 'var(--color-loss)' : undefined }} onClick={handleClearLines} disabled={lines.length === 0} /></Tooltip>
         </div>
       </div>
       {/* OHLC + Indicator Widget Bar */}
@@ -679,7 +679,7 @@ const TradingViewChart: React.FC<TradingViewChartProps> = ({ data, buyPoints = [
         <div ref={subChartContainerRef} style={{ position: 'relative', borderRadius: '8px', overflow: 'hidden', border: '1px solid var(--border-color)', marginTop: '8px' }} />
       )}
 
-      <Modal title={`${currentIndicator.toUpperCase()} 参数设置`} visible={settingsVisible} onCancel={() => setSettingsVisible(false)} footer={null} width={400}>
+      <Modal title={`${currentIndicator.toUpperCase()} 参数设置`} open={settingsVisible} onCancel={() => setSettingsVisible(false)} footer={null} width={400}>
         {renderSettingsForm()}
       </Modal>
     </div>

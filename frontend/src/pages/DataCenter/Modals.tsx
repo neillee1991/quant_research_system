@@ -2,7 +2,7 @@
  * 同步任务配置模态框组件
  */
 import React from 'react';
-import { Modal, Tag } from '@douyinfe/semi-ui';
+import { Modal, Tag } from 'antd';
 import dayjs from 'dayjs';
 import QuantDatePicker from '../../components/QuantDatePicker';
 import type { SyncTask } from '../../types';
@@ -35,7 +35,7 @@ export const SyncModal: React.FC<SyncModalProps> = ({
   return (
     <Modal
       title={`同步任务: ${task?.task_id || ''}`}
-      visible={visible}
+      open={visible}
       onOk={onOk}
       onCancel={onCancel}
       okText="开始同步"
@@ -151,7 +151,7 @@ export const BatchSyncModal: React.FC<BatchSyncModalProps> = ({
   return (
     <Modal
       title={`批量同步 (${selectedTaskIds.length} 个任务)`}
-      visible={visible}
+      open={visible}
       onOk={onOk}
       onCancel={onCancel}
       okText="开始同步"
@@ -274,7 +274,7 @@ export const ETLBackfillModal: React.FC<ETLBackfillModalProps> = ({
   return (
     <Modal
       title={isBatchMode ? `批量回溯 (${selectedTaskIds.length} 个任务)` : `ETL 任务回溯: ${taskId}`}
-      visible={visible}
+      open={visible}
       onOk={onOk}
       onCancel={onCancel}
       okText="开始回溯"
@@ -377,7 +377,7 @@ export const ETLBackfillModal: React.FC<ETLBackfillModalProps> = ({
           <div
             style={{
               padding: '12px',
-              background: 'var(--color-success-light-default)',
+              background: 'rgba(82, 196, 26, 0.1)',
               borderRadius: '6px',
             }}
           >
@@ -394,12 +394,12 @@ export const ETLBackfillModal: React.FC<ETLBackfillModalProps> = ({
           <div
             style={{
               padding: '12px',
-              background: 'var(--color-success-light-default)',
+              background: 'rgba(82, 196, 26, 0.1)',
               borderRadius: '6px',
               border: '1px solid var(--border-color)',
             }}
           >
-            <div style={{ color: 'var(--color-success)', fontSize: '13px', fontWeight: 500 }}>
+            <div style={{ color: 'var(--color-gain)', fontSize: '13px', fontWeight: 500 }}>
               全量任务回溯
             </div>
             <div style={{ marginTop: 6, color: 'var(--text-secondary)', fontSize: 12 }}>
@@ -430,12 +430,12 @@ export const DeleteConfirmModal: React.FC<DeleteConfirmModalProps> = ({
   return (
     <Modal
       title="确认删除"
-      visible={visible}
+      open={visible}
       onOk={onOk}
       onCancel={onCancel}
       okText="确认删除"
       cancelText="取消"
-      type="warning"
+      okButtonProps={{ danger: true }}
     >
       <div style={{ padding: '12px 0' }}>
         <p style={{ marginBottom: 8 }}>
@@ -477,24 +477,24 @@ export const SchemaChangeConfirmModal: React.FC<SchemaChangeConfirmModalProps> =
   return (
     <Modal
       title="⚠️ 表结构变化确认"
-      visible={visible}
+      open={visible}
       onOk={onOk}
       onCancel={onCancel}
       okText="确认并清空数据"
       cancelText="取消"
-      okButtonProps={{ type: 'danger' }}
+      okButtonProps={{ danger: true }}
       style={{ width: 600 }}
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
         <div
           style={{
             padding: '12px 16px',
-            backgroundColor: 'var(--semi-color-warning-light-default)',
+            backgroundColor: 'rgba(250, 173, 20, 0.1)',
             borderRadius: '6px',
-            border: '1px solid var(--semi-color-warning)',
+            border: '1px solid var(--color-warning)',
           }}
         >
-          <div style={{ fontWeight: 600, marginBottom: 8, color: 'var(--semi-color-warning-dark)' }}>
+          <div style={{ fontWeight: 600, marginBottom: 8, color: 'var(--color-warning)' }}>
             检测到表结构变化
           </div>
           <div style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
@@ -508,7 +508,7 @@ export const SchemaChangeConfirmModal: React.FC<SchemaChangeConfirmModalProps> =
           <code
             style={{
               padding: '6px 12px',
-              backgroundColor: 'var(--semi-color-fill-0)',
+              backgroundColor: 'var(--bg-tertiary)',
               borderRadius: '4px',
               fontSize: '13px',
               color: 'var(--color-primary)',
@@ -524,7 +524,7 @@ export const SchemaChangeConfirmModal: React.FC<SchemaChangeConfirmModalProps> =
             <div
               style={{
                 padding: '12px',
-                backgroundColor: 'var(--semi-color-fill-0)',
+                backgroundColor: 'var(--bg-tertiary)',
                 borderRadius: '4px',
                 fontSize: '12px',
               }}
@@ -562,12 +562,12 @@ export const SchemaChangeConfirmModal: React.FC<SchemaChangeConfirmModalProps> =
         <div
           style={{
             padding: '12px 16px',
-            backgroundColor: 'var(--semi-color-danger-light-default)',
+            backgroundColor: 'rgba(248, 81, 73, 0.1)',
             borderRadius: '6px',
-            border: '1px solid var(--semi-color-danger-light-active)',
+            border: '1px solid var(--color-loss)',
           }}
         >
-          <div style={{ fontWeight: 600, marginBottom: 8, color: 'var(--semi-color-danger)' }}>
+          <div style={{ fontWeight: 600, marginBottom: 8, color: 'var(--color-loss)' }}>
             ⚠️ 警告
           </div>
           <div style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.6 }}>

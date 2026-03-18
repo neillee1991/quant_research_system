@@ -3,7 +3,7 @@
  */
 
 import { useState } from 'react';
-import { Toast } from '@douyinfe/semi-ui';
+import { message } from 'antd';
 import { productionApi } from '../../../api';
 import type { PreprocessOptions } from '../../../types';
 import type { TestResult, TestLog } from '../types';
@@ -45,14 +45,14 @@ export const useFactorTest = () => {
 
       if (data.error) {
         setTestError(data.error);
-        Toast.error('测试失败');
+        message.error('测试失败');
       } else {
-        Toast.success('测试成功');
+        message.success('测试成功');
       }
     } catch (error: any) {
       const errorMessage = error.response?.data?.detail || error.message || '测试失败';
       setTestError(errorMessage);
-      Toast.error(errorMessage);
+      message.error(errorMessage);
       throw error;
     } finally {
       setTestLoading(false);

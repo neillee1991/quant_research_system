@@ -15,23 +15,22 @@ import {
   Tag,
   Space,
   Input,
-  Toast,
   Spin,
-} from '@douyinfe/semi-ui';
+} from 'antd';
+import type { ColumnType } from 'antd/es/table';
 import {
-  IconEdit,
-  IconDelete,
-  IconSearch,
-  IconPlus,
-} from '@douyinfe/semi-icons';
+  EditOutlined,
+  DeleteOutlined,
+  SearchOutlined,
+  PlusOutlined,
+} from '@ant-design/icons';
 import type { BaseTaskConfig, TaskType } from '../../types/task';
 import type { TaskService } from '../../services/taskService';
-import type { ColumnProps } from '@douyinfe/semi-ui/lib/es/table';
 
 interface TaskListProps<T extends BaseTaskConfig> {
   taskType: TaskType;
   service: TaskService<T>;
-  columns: ColumnProps<T>[];
+  columns: ColumnType<T>[];
   onEdit?: (task: T) => void;
   onCreate?: () => void;
   onRefresh?: () => void;
@@ -106,7 +105,7 @@ export function TaskList<T extends BaseTaskConfig>({
   });
 
   // Build table columns with actions
-  const tableColumns: ColumnProps<T>[] = [
+  const tableColumns: ColumnType<T>[] = [
     ...columns,
     {
       title: '状态',
@@ -125,9 +124,9 @@ export function TaskList<T extends BaseTaskConfig>({
       render: (_: any, record: T) => (
         <Space>
           {onEdit && (
-            <Tooltip content="编辑">
+            <Tooltip title="编辑">
               <Button
-                icon={<IconEdit />}
+                icon={<EditOutlined />}
                 size="small"
                 onClick={() => onEdit(record)}
               />
@@ -136,14 +135,14 @@ export function TaskList<T extends BaseTaskConfig>({
           {extraActions?.(record)}
           <Popconfirm
             title="确认删除？"
-            content="删除后无法恢复"
+            description="删除后无法恢复"
             onConfirm={() => handleDelete(record)}
           >
-            <Tooltip content="删除">
+            <Tooltip title="删除">
               <Button
-                icon={<IconDelete />}
+                icon={<DeleteOutlined />}
                 size="small"
-                type="danger"
+                danger
               />
             </Tooltip>
           </Popconfirm>
@@ -157,17 +156,17 @@ export function TaskList<T extends BaseTaskConfig>({
       <div style={{ marginBottom: 16, display: 'flex', gap: 8 }}>
         {showSearch && (
           <Input
-            prefix={<IconSearch />}
+            prefix={<SearchOutlined />}
             placeholder="搜索任务ID或描述"
             value={searchText}
-            onChange={setSearchText}
+            onChange={(e) => setSearchText(e.target.value)}
             style={{ width: 300 }}
           />
         )}
         {showCreate && onCreate && (
           <Button
-            icon={<IconPlus />}
-            theme="solid"
+            icon={<PlusOutlined />}
+            type="primary"
             onClick={onCreate}
           >
             创建任务
@@ -183,7 +182,7 @@ export function TaskList<T extends BaseTaskConfig>({
           pagination={{
             pageSize: 20,
             showSizeChanger: true,
-            formatPageText: ({ currentStart, currentEnd, total }: any) => `${currentStart}-${currentEnd} 共 ${total} 条`,
+            showTotal: (total, range) => `${range[0]}-${range[1]} 共 ${total} 条`,
           }}
           rowKey={idField}
         />

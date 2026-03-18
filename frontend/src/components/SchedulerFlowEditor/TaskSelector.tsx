@@ -1,8 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Checkbox, CheckboxGroup, Spin, Typography } from '@douyinfe/semi-ui';
+import { Checkbox, Spin } from 'antd';
 import { dataApi, productionApi, TaskConfig } from '../../api';
-
-const { Title } = Typography;
 
 interface TaskSelectorProps {
   selectedTasks: TaskConfig[];
@@ -48,14 +46,14 @@ const TaskSelector: React.FC<TaskSelectorProps> = ({ selectedTasks, onChange }) 
 
   const handleSyncChange = (values: string[]) => {
     const newSyncTasks: TaskConfig[] = values.map(id => ({ id, type: 'sync' }));
-    const factorTasks = selectedTasks.filter(t => t.type === 'factor');
-    onChange([...newSyncTasks, ...factorTasks]);
+    const currentFactorTasks = selectedTasks.filter(t => t.type === 'factor');
+    onChange([...newSyncTasks, ...currentFactorTasks]);
   };
 
   const handleFactorChange = (values: string[]) => {
     const newFactorTasks: TaskConfig[] = values.map(id => ({ id, type: 'factor' }));
-    const syncTasks = selectedTasks.filter(t => t.type === 'sync');
-    onChange([...syncTasks, ...newFactorTasks]);
+    const currentSyncTasks = selectedTasks.filter(t => t.type === 'sync');
+    onChange([...currentSyncTasks, ...newFactorTasks]);
   };
 
   if (loading) {
@@ -69,13 +67,12 @@ const TaskSelector: React.FC<TaskSelectorProps> = ({ selectedTasks, onChange }) 
   return (
     <div>
       <div style={{ marginBottom: 16 }}>
-        <Title heading={6} style={{ marginBottom: 8, color: '#3b82f6' }}>
+        <div style={{ marginBottom: 8, fontWeight: 600, fontSize: 14, color: '#3b82f6' }}>
           同步任务
-        </Title>
-        <CheckboxGroup
+        </div>
+        <Checkbox.Group
           value={selectedSyncIds}
           onChange={handleSyncChange as any}
-          direction="horizontal"
           style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}
         >
           {syncTasks.map(task => (
@@ -83,22 +80,21 @@ const TaskSelector: React.FC<TaskSelectorProps> = ({ selectedTasks, onChange }) 
               {task.task_id}
             </Checkbox>
           ))}
-        </CheckboxGroup>
+        </Checkbox.Group>
         {syncTasks.length === 0 && (
-          <div style={{ color: 'var(--semi-color-text-2)', fontSize: 12 }}>
+          <div style={{ color: 'var(--text-secondary)', fontSize: 12 }}>
             暂无同步任务
           </div>
         )}
       </div>
 
       <div>
-        <Title heading={6} style={{ marginBottom: 8, color: '#10b981' }}>
+        <div style={{ marginBottom: 8, fontWeight: 600, fontSize: 14, color: '#10b981' }}>
           因子任务
-        </Title>
-        <CheckboxGroup
+        </div>
+        <Checkbox.Group
           value={selectedFactorIds}
           onChange={handleFactorChange as any}
-          direction="horizontal"
           style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}
         >
           {factorTasks.map(task => (
@@ -106,9 +102,9 @@ const TaskSelector: React.FC<TaskSelectorProps> = ({ selectedTasks, onChange }) 
               {task.factor_id}
             </Checkbox>
           ))}
-        </CheckboxGroup>
+        </Checkbox.Group>
         {factorTasks.length === 0 && (
-          <div style={{ color: 'var(--semi-color-text-2)', fontSize: 12 }}>
+          <div style={{ color: 'var(--text-secondary)', fontSize: 12 }}>
             暂无因子任务
           </div>
         )}

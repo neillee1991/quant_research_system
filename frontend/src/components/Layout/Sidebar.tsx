@@ -1,15 +1,22 @@
 import React, { useState } from 'react';
-import { Nav } from '@douyinfe/semi-ui';
-import { IconServer, IconTestScoreStroked, IconLineChartStroked, IconCalendarClock, IconCandlestickChartStroked, IconGridStroked } from '@douyinfe/semi-icons';
+import { Menu } from 'antd';
+import {
+  DatabaseOutlined,
+  ExperimentOutlined,
+  LineChartOutlined,
+  ScheduleOutlined,
+  FundOutlined,
+  AppstoreOutlined,
+} from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 
-const navItems = [
-  { itemKey: '/market', text: '行情', icon: <IconCandlestickChartStroked /> },
-  { itemKey: '/', text: '数据', icon: <IconServer /> },
-  { itemKey: '/factor', text: '因子', icon: <IconTestScoreStroked /> },
-  { itemKey: '/index-pool', text: '股票池', icon: <IconGridStroked /> },
-  { itemKey: '/strategy', text: '策略', icon: <IconLineChartStroked /> },
-  { itemKey: '/scheduler', text: '调度', icon: <IconCalendarClock /> },
+const menuItems = [
+  { key: '/market', label: '行情', icon: <FundOutlined /> },
+  { key: '/', label: '数据', icon: <DatabaseOutlined /> },
+  { key: '/factor', label: '因子', icon: <ExperimentOutlined /> },
+  { key: '/index-pool', label: '股票池', icon: <AppstoreOutlined /> },
+  { key: '/strategy', label: '策略', icon: <LineChartOutlined /> },
+  { key: '/scheduler', label: '调度', icon: <ScheduleOutlined /> },
 ];
 
 const Sidebar: React.FC = () => {
@@ -21,10 +28,10 @@ const Sidebar: React.FC = () => {
     const path = location.pathname;
     if (path === '/') return '/';
     if (path.startsWith('/market')) return '/market';
-    const match = navItems.find(
-      (item) => item.itemKey !== '/' && item.itemKey !== '/market' && path.startsWith(item.itemKey)
+    const match = menuItems.find(
+      (item) => item.key !== '/' && item.key !== '/market' && path.startsWith(item.key)
     );
-    return match ? match.itemKey : '/';
+    return match ? match.key : '/';
   };
 
   const sidebarStyle: React.CSSProperties = {
@@ -70,13 +77,14 @@ const Sidebar: React.FC = () => {
         {collapsed ? '⚡' : '⚡ 量化研究系统'}
       </div>
       <div style={{ flex: 1, overflow: 'hidden' }}>
-        <Nav
-          isCollapsed={collapsed}
+        <Menu
+          mode="inline"
+          inlineCollapsed={collapsed}
           selectedKeys={[selectedKey()]}
-          items={navItems}
-          onSelect={({ itemKey }) => navigate(itemKey as string)}
-          style={{ background: 'transparent', border: 'none' }}
-          footer={{ collapseButton: false }}
+          items={menuItems}
+          onClick={({ key }) => navigate(key)}
+          style={{ background: 'transparent', border: 'none', height: '100%' }}
+          theme="dark"
         />
       </div>
       <div style={toggleBtnStyle} onClick={() => setCollapsed(!collapsed)}>

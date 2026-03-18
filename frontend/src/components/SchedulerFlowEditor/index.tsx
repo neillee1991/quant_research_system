@@ -1,17 +1,16 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
-  SideSheet,
+  Drawer,
   Input,
   Button,
-  TagInput,
+  Select,
   Radio,
-  RadioGroup,
   Typography,
-  Toast,
   Divider,
-} from '@douyinfe/semi-ui';
+} from 'antd';
 import cronstrue from 'cronstrue/i18n';
 import { FlowConfig, TaskConfig, flowApi } from '../../api';
+import { useMessage } from '../../hooks/useMessage';
 import TaskSelector from './TaskSelector';
 import DAGEditor from './DAGEditor';
 
@@ -19,7 +18,7 @@ const { Text, Title } = Typography;
 
 interface FlowEditorProps {
   visible: boolean;
-  flowName?: string; // 编辑时传入，新建时为空
+  flowName?: string;
   onClose: () => void;
   onSaved: () => void;
 }
@@ -49,10 +48,10 @@ const FlowEditor: React.FC<FlowEditorProps> = ({ visible, flowName, onClose, onS
   const [flow, setFlow] = useState<FlowConfig>(defaultFlow);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const message = useMessage();
 
   const isEdit = !!flowName;
 
-  // 加载 Flow 配置
   useEffect(() => {
     if (visible && flowName) {
       setLoading(true);
@@ -61,7 +60,7 @@ const FlowEditor: React.FC<FlowEditorProps> = ({ visible, flowName, onClose, onS
           setFlow(res.data);
         })
         .catch(e => {
-          Toast.error({ content: '加载 Flow 失败' });
+          message.error('加载 Flow 失败');
           console.error(e);
         })
         .finally(() => setLoading(false));
@@ -70,7 +69,6 @@ const FlowEditor: React.FC<FlowEditorProps> = ({ visible, flowName, onClose, onS
     }
   }, [visible, flowName]);
 
-  // Cron 表达式可读描述
   const cronDescription = useMemo(() => {
     try {
       return cronstrue.toString(flow.cron, { locale: 'zh_CN' });
@@ -81,11 +79,11 @@ const FlowEditor: React.FC<FlowEditorProps> = ({ visible, flowName, onClose, onS
 
   const handleSave = async () => {
     if (!flow.name.trim()) {
-      Toast.warning({ content: '请输入 Flow 名称' });
+      message.warning('请输入 Flow 名称');
       return;
     }
     if (!flow.cron.trim()) {
-      Toast.warning({ content: '请输入 Cron 表达式' });
+      message.warning('请输入 Cron 表达式');
       return;
     }
 
@@ -93,15 +91,15 @@ const FlowEditor: React.FC<FlowEditorProps> = ({ visible, flowName, onClose, onS
     try {
       if (isEdit) {
         await flowApi.update(flowName!, flow);
-        Toast.success({ content: 'Flow 更新成功' });
+        message.success('Flow 更新成功');
       } else {
         await flowApi.create(flow);
-        Toast.success({ content: 'Flow 创建成功' });
+        message.success('Flow 创建成功');
       }
       onSaved();
       onClose();
     } catch (e: any) {
-      Toast.error({ content: e?.response?.data?.detail || '保存失败' });
+      message.error(e?.response?.data?.detail || '保存失败');
     } finally {
       setSaving(false);
     }
@@ -112,15 +110,15 @@ const FlowEditor: React.FC<FlowEditorProps> = ({ visible, flowName, onClose, onS
   };
 
   return (
-    <SideSheet
+    <Drawer
       title={isEdit ? `编辑 Flow: ${flowName}` : '新建 Flow'}
-      visible={visible}
-      onCancel={onClose}
+      open={visible}
+      onClose={onClose}
       width={600}
       footer={
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           <Button onClick={onClose}>取消</Button>
-          <Button theme="solid" onClick={handleSave} loading={saving}>
+          <Button type="primary" onClick={handleSave} loading={saving}>
             保存
           </Button>
         </div>
@@ -134,7 +132,7 @@ const FlowEditor: React.FC<FlowEditorProps> = ({ visible, flowName, onClose, onS
             <Input
               placeholder="如 daily-sync"
               value={flow.name}
-              onChange={v => setFlow(prev => ({ ...prev, name: v }))}
+              onChange={e => setFlow(prev => ({ ...prev, name: e.target.value }))}
               disabled={isEdit}
             />
           </FormItem>
@@ -143,14 +141,14 @@ const FlowEditor: React.FC<FlowEditorProps> = ({ visible, flowName, onClose, onS
             <Input
               placeholder="Flow 描述"
               value={flow.description}
-              onChange={v => setFlow(prev => ({ ...prev, description: v }))}
+              onChange={e => setFlow(prev => ({ ...prev, description: e.target.value }))}
             />
           </FormItem>
 
           <FormItem
             label="Cron 表达式"
             extra={
-              <Text type="tertiary" size="small">
+              <Text type="secondary" style={{ fontSize: 12 }}>
                 {cronDescription}
               </Text>
             }
@@ -158,48 +156,50 @@ const FlowEditor: React.FC<FlowEditorProps> = ({ visible, flowName, onClose, onS
             <Input
               placeholder="0 18 * * 1-5"
               value={flow.cron}
-              onChange={v => setFlow(prev => ({ ...prev, cron: v }))}
+              onChange={e => setFlow(prev => ({ ...prev, cron: e.target.value }))}
             />
           </FormItem>
 
           <FormItem label="标签">
-            <TagInput
+            <Select
+              mode="tags"
               value={flow.tags}
               onChange={v => setFlow(prev => ({ ...prev, tags: v as string[] }))}
               placeholder="输入标签后按回车"
+              style={{ width: '100%' }}
+              open={false}
             />
           </FormItem>
 
           <FormItem label="状态">
-            <RadioGroup
+            <Radio.Group
               value={flow.enabled ? 'enabled' : 'disabled'}
               onChange={e => setFlow(prev => ({ ...prev, enabled: e.target.value === 'enabled' }))}
-              direction="horizontal"
             >
               <Radio value="enabled">启用</Radio>
               <Radio value="disabled">禁用</Radio>
-            </RadioGroup>
+            </Radio.Group>
           </FormItem>
 
-          <Divider margin={16} />
+          <Divider style={{ margin: '16px 0' }} />
 
-          <Title heading={6} style={{ marginBottom: 12 }}>
+          <Title level={5} style={{ marginBottom: 12 }}>
             任务选择
           </Title>
           <TaskSelector selectedTasks={flow.tasks} onChange={handleTasksChange} />
 
-          <Divider margin={16} />
+          <Divider style={{ margin: '16px 0' }} />
 
-          <Title heading={6} style={{ marginBottom: 12 }}>
+          <Title level={5} style={{ marginBottom: 12 }}>
             依赖关系 (DAG)
           </Title>
-          <Text type="tertiary" size="small" style={{ display: 'block', marginBottom: 8 }}>
+          <Text type="secondary" style={{ display: 'block', marginBottom: 8, fontSize: 12 }}>
             拖拽连线设置任务依赖，箭头指向下游任务
           </Text>
           <DAGEditor tasks={flow.tasks} onChange={handleTasksChange} />
         </div>
       )}
-    </SideSheet>
+    </Drawer>
   );
 };
 

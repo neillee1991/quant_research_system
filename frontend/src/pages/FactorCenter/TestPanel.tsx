@@ -4,9 +4,10 @@
 
 import React, { useState } from 'react';
 import {
-  Button, Toast, Banner, Select, Table, Tag,
-} from '@douyinfe/semi-ui';
-import { IconAlertTriangle } from '@douyinfe/semi-icons';
+  Button, Alert, Select, Table, Tag,
+} from 'antd';
+import { WarningOutlined } from '@ant-design/icons';
+import { useMessage } from '../../hooks/useMessage';
 import QuantDatePicker from '../../components/QuantDatePicker';
 import { productionApi } from '../../api';
 import type { PreprocessOptions } from '../../types';
@@ -20,6 +21,7 @@ interface TestPanelProps {
 }
 
 const TestPanel: React.FC<TestPanelProps> = ({ code, dependsOn, preprocess, lookbackDays = 60 }) => {
+  const message = useMessage();
   const [dateRange, setDateRange] = useState<[string, string]>(['', '']);
   const [testing, setTesting] = useState<boolean>(false);
   const [testResult, setTestResult] = useState<TestResult | null>(null);
@@ -32,11 +34,11 @@ const TestPanel: React.FC<TestPanelProps> = ({ code, dependsOn, preprocess, look
 
   const handleTest = async (): Promise<void> => {
     if (!code.trim()) {
-      Toast.warning('请先编写因子代码');
+      message.warning('请先编写因子代码');
       return;
     }
     if (!dateRange[0] || !dateRange[1]) {
-      Toast.warning('请选择测试日期范围');
+      message.warning('请选择测试日期范围');
       return;
     }
 
@@ -121,8 +123,8 @@ const TestPanel: React.FC<TestPanelProps> = ({ code, dependsOn, preprocess, look
         />
         <Button
           size="small"
-          theme="solid"
-          icon={<IconAlertTriangle />}
+          type="primary"
+          icon={<WarningOutlined />}
           loading={testing}
           onClick={handleTest}
         >
@@ -182,7 +184,7 @@ const TestPanel: React.FC<TestPanelProps> = ({ code, dependsOn, preprocess, look
 
       {/* 错误信息 */}
       {testError && (
-        <Banner type="danger" description={testError} closeIcon={null} style={{ marginBottom: 8, fontSize: 12 }} />
+        <Alert type="error" message={testError} closable={false} style={{ marginBottom: 8, fontSize: 12 }} />
       )}
 
       {/* 测试结果 */}
@@ -241,10 +243,10 @@ const TestPanel: React.FC<TestPanelProps> = ({ code, dependsOn, preprocess, look
           </div>
 
           {testResult.truncated && (
-            <Banner
+            <Alert
               type="warning"
-              description="结果已截断，仅显示前 2000 行"
-              closeIcon={null}
+              message="结果已截断，仅显示前 2000 行"
+              closable={false}
               style={{ marginBottom: 8, fontSize: 12 }}
             />
           )}
@@ -252,23 +254,23 @@ const TestPanel: React.FC<TestPanelProps> = ({ code, dependsOn, preprocess, look
           <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
             <Select
               size="small"
-              showClear
+              allowClear
               placeholder="筛选股票"
               style={{ width: 160 }}
               value={filterStock}
               onChange={v => setFilterStock(v as string | undefined)}
-              filter
-              optionList={testResult.stocks?.map((s: string) => ({ label: s, value: s })) || []}
+              showSearch
+              options={testResult.stocks?.map((s: string) => ({ label: s, value: s })) || []}
             />
             <Select
               size="small"
-              showClear
+              allowClear
               placeholder="筛选日期"
               style={{ width: 140 }}
               value={filterDate}
               onChange={v => setFilterDate(v as string | undefined)}
-              filter
-              optionList={testResult.dates?.map((d: string) => ({ label: d, value: d })) || []}
+              showSearch
+              options={testResult.dates?.map((d: string) => ({ label: d, value: d })) || []}
             />
             <span style={{ color: 'var(--text-muted)', fontSize: 12, lineHeight: '24px' }}>
               显示 {filteredPreview.length} 条

@@ -3,7 +3,7 @@
  */
 
 import { useState, useCallback, useEffect } from 'react';
-import { Toast } from '@douyinfe/semi-ui';
+import { message } from 'antd';
 import { productionApi } from '../../../api';
 import type { FactorDefinition, FactorRunRecord } from '../../../types';
 
@@ -21,7 +21,7 @@ export const useFactorList = () => {
       setFactors(res.data?.data || []);
     } catch (error) {
       console.error('Failed to load factors:', error);
-      Toast.error('加载因子列表失败');
+      message.error('加载因子列表失败');
     } finally {
       setLoading(false);
     }
@@ -33,7 +33,7 @@ export const useFactorList = () => {
       setHistory(res.data?.data || []);
     } catch (error) {
       console.error('Failed to load history:', error);
-      Toast.error('加载历史记录失败');
+      message.error('加载历史记录失败');
     }
   }, []);
 
@@ -49,12 +49,12 @@ export const useFactorList = () => {
       const params = factor?.params as any;
       const pp = params?.preprocess || undefined;
       await productionApi.runProduction(factorId, runMode, undefined, startDate, endDate, pp);
-      Toast.success(`因子 ${factorId} ${runMode === 'incremental' ? '增量' : '全量'}计算完成`);
+      message.success(`因子 ${factorId} ${runMode === 'incremental' ? '增量' : '全量'}计算完成`);
       await loadFactors();
       await loadHistory(selectedFactor || undefined);
     } catch (error: any) {
       const errorMessage = error.response?.data?.detail || '执行失败';
-      Toast.error(errorMessage);
+      message.error(errorMessage);
       throw error;
     } finally {
       setRunLoading(null);
@@ -64,12 +64,12 @@ export const useFactorList = () => {
   const deleteFactor = async (factorId: string): Promise<void> => {
     try {
       await productionApi.deleteFactor(factorId);
-      Toast.success('因子已删除');
+      message.success('因子已删除');
       await loadFactors();
       await loadHistory();
     } catch (error: any) {
       const errorMessage = error.response?.data?.detail || '删除失败';
-      Toast.error(errorMessage);
+      message.error(errorMessage);
       throw error;
     }
   };

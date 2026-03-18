@@ -3,8 +3,8 @@
  */
 
 import React from 'react';
-import { Tabs, TabPane } from '@douyinfe/semi-ui';
-import { IconTestScoreStroked, IconBarChartHStroked, IconSetting } from '@douyinfe/semi-icons';
+import { Tabs } from 'antd';
+import { BarChartOutlined, SettingOutlined, UnorderedListOutlined } from '@ant-design/icons';
 import FactorManageTab from './FactorManageTab';
 import AnalysisPanel from './AnalysisPanel';
 import DataConfigPanel from './DataConfigPanel';
@@ -21,7 +21,7 @@ const FactorCenter: React.FC = () => (
           letterSpacing: '1px',
         }}
       >
-        <IconTestScoreStroked style={{ marginRight: '8px' }} />
+        <UnorderedListOutlined style={{ marginRight: '8px' }} />
         因子
       </h1>
       <p style={{ color: 'var(--text-secondary)', margin: '4px 0 0 0', fontSize: '12px' }}>
@@ -29,38 +29,23 @@ const FactorCenter: React.FC = () => (
       </p>
     </div>
 
-    <Tabs defaultActiveKey="factors">
-      <TabPane
-        itemKey="factors"
-        tab={
-          <span>
-            <IconTestScoreStroked /> 因子管理
-          </span>
-        }
-      >
-        <FactorManageTab />
-      </TabPane>
-      <TabPane
-        itemKey="analysis"
-        tab={
-          <span>
-            <IconBarChartHStroked /> 因子分析
-          </span>
-        }
-      >
-        <AnalysisPanel />
-      </TabPane>
-      <TabPane
-        itemKey="dataconfig"
-        tab={
-          <span>
-            <IconSetting /> 数据配置
-          </span>
-        }
-      >
-        <DataConfigPanel />
-      </TabPane>
-    </Tabs>
+    <Tabs defaultActiveKey="factors" items={[
+      {
+        key: 'factors',
+        label: <span><UnorderedListOutlined /> 因子管理</span>,
+        children: <FactorManageTab />,
+      },
+      {
+        key: 'analysis',
+        label: <span><BarChartOutlined /> 因子分析</span>,
+        children: <AnalysisPanel />,
+      },
+      {
+        key: 'dataconfig',
+        label: <span><SettingOutlined /> 数据配置</span>,
+        children: <DataConfigPanel />,
+      },
+    ]} />
   </div>
 );
 

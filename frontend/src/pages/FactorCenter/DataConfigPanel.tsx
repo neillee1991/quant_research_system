@@ -5,8 +5,8 @@
 import React from 'react';
 import {
   Card, Button, Spin, Empty, Select, Tag,
-} from '@douyinfe/semi-ui';
-import { IconRefresh, IconSave } from '@douyinfe/semi-icons';
+} from 'antd';
+import { ReloadOutlined, SaveOutlined } from '@ant-design/icons';
 import { useDataConfig } from './hooks/useDataConfig';
 
 const DataConfigPanel: React.FC = () => {
@@ -33,13 +33,13 @@ const DataConfigPanel: React.FC = () => {
           </span>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <Button size="small" icon={<IconRefresh />} onClick={loadConfig}>
+          <Button icon={<ReloadOutlined />} onClick={loadConfig}>
             刷新
           </Button>
           <Button
-            size="small"
-            theme="solid"
-            icon={<IconSave />}
+           
+            type="primary"
+            icon={<SaveOutlined />}
             disabled={!changed}
             loading={saving}
             onClick={saveConfig}
@@ -88,7 +88,7 @@ const DataConfigPanel: React.FC = () => {
                       {Object.entries(enumValues).map(([k, v]) => (
                         <Tag
                           key={k}
-                          size="small"
+                         
                           style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px' }}
                           color={k === '0' ? 'green' : k === '1' ? 'red' : k === '-1' ? 'blue' : 'grey'}
                         >
@@ -122,32 +122,32 @@ const DataConfigPanel: React.FC = () => {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span style={{ color: 'var(--text-muted)', fontSize: 11, flexShrink: 0 }}>数据表</span>
                   <Select
-                    size="small"
+                   
                     style={{ width: 240 }}
                     placeholder="选择数据表"
-                    showClear
-                    filter
+                    allowClear
+                    showSearch
                     value={m.table_name || undefined}
                     onChange={(v) => {
                       updateMapping(idx, { table_name: (v as string) || '', column_name: '' });
                       if (v) loadColumnsForTable(v as string);
                     }}
-                    optionList={tables.map(t => ({ label: t, value: t }))}
+                    options={tables.map(t => ({ label: t, value: t }))}
                   />
                   <span style={{ color: 'var(--text-muted)', fontSize: 11, flexShrink: 0 }}>列</span>
                   <Select
-                    size="small"
+                   
                     style={{ width: 200 }}
                     placeholder="选择列"
-                    showClear
-                    filter
+                    allowClear
+                    showSearch
                     value={m.column_name || undefined}
                     disabled={!m.table_name}
                     onFocus={() => {
                       if (m.table_name) loadColumnsForTable(m.table_name);
                     }}
                     onChange={(v) => updateMapping(idx, { column_name: (v as string) || '' })}
-                    optionList={(tableColumns[m.table_name] || []).map(c => ({ label: c, value: c }))}
+                    options={(tableColumns[m.table_name] || []).map(c => ({ label: c, value: c }))}
                   />
                 </div>
               </div>
