@@ -225,7 +225,10 @@ const FactorManageTab: React.FC = () => {
         <div style={{ display: 'flex', gap: 4 }}>
           <Button icon={<PlayCircleOutlined />} type="text"
             loading={runLoading === record.factor_id}
-            onClick={() => handleRun(record.factor_id, record.compute_mode || 'incremental')}>运行</Button>
+            onClick={() => {
+              setFullRunModal({ visible: true, factorId: record.factor_id, computeMode: 'incremental' });
+              setFullRunDates(['', '']);
+            }}>计算</Button>
           <Button icon={<EditOutlined />} type="text" onClick={() => openDrawer(record)}>编辑</Button>
           <Popconfirm title="确认删除此因子？" onConfirm={() => handleDelete(record.factor_id)}>
             <Button icon={<DeleteOutlined />} type="text" danger>删除</Button>
@@ -439,6 +442,46 @@ const FactorManageTab: React.FC = () => {
           </div>
         </div>
       </Drawer>
+
+      {/* 单因子计算模态框 */}
+      <Modal
+        title={`计算因子：${fullRunModal.factorId}`}
+        open={fullRunModal.visible}
+        onCancel={() => setFullRunModal(s => ({ ...s, visible: false }))}
+        onOk={() => {
+          const startDate = fullRunDates[0] || undefined;
+          const endDate = fullRunDates[1] || undefined;
+          const runMode = (startDate && endDate) ? 'full' : 'incremental';
+          handleRun(fullRunModal.factorId!, runMode, startDate, endDate);
+          setFullRunModal(s => ({ ...s, visible: false }));
+        }}
+        okText="开始计算"
+        cancelText="取消"
+      >
+        <div>
+          <Alert
+            type="info"
+            message="选择计算日期范围。留空则执行增量计算（仅计算缺失数据）。"
+            style={{ marginBottom: 12 }}
+            closable={false}
+          />
+          <div>
+            <div style={{ marginBottom: 6, fontWeight: 500, fontSize: 13 }}>计算日期范围</div>
+            <QuantDatePicker
+              value={fullRunDates}
+              onChange={(s, e) => setFullRunDates([s, e])}
+              style={{ width: '100%' }}
+            />
+            {fullRunDates[0] && fullRunDates[1] && (
+              <div style={{ marginTop: 8, padding: '8px 12px', background: 'var(--color-primary-light-default)', borderRadius: 6 }}>
+                <span style={{ color: 'var(--color-primary)', fontSize: 13, fontWeight: 500 }}>
+                  共 {dayjs(fullRunDates[1], 'YYYYMMDD').diff(dayjs(fullRunDates[0], 'YYYYMMDD'), 'day') + 1} 天
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+      </Modal>
 
       {/* 批量计算模态框 */}
       <Modal

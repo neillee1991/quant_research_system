@@ -1,0 +1,32 @@
+[
+  {
+    "factor_id": "factor_ma_5",
+    "description": "5日移动平均线",
+    "category": "technical",
+    "compute_mode": "incremental",
+    "storage_target": "factor_values",
+    "depends_on": ["sync_daily_data"],
+    "params": {"window": 5},
+    "code": "import polars as pl\ndef compute(df, params):\n    window = params.get('window', 5)\n    return (\n        df.sort(['ts_code', 'trade_date'])\n        .with_columns(\n            pl.col('close').rolling_mean(window_size=window)\n            .over('ts_code')\n            .alias('factor_value')\n        )\n        .select(['ts_code', 'trade_date', 'factor_value'])\n    )\n"
+  },
+  {
+    "factor_id": "factor_ma_20",
+    "description": "20日移动平均线",
+    "category": "technical",
+    "compute_mode": "incremental",
+    "storage_target": "factor_values",
+    "depends_on": ["sync_daily_data"],
+    "params": {"window": 20},
+    "code": "import polars as pl\ndef compute(df, params):\n    window = params.get('window', 20)\n    return (\n        df.sort(['ts_code', 'trade_date'])\n        .with_columns(\n            pl.col('close').rolling_mean(window_size=window)\n            .over('ts_code')\n            .alias('factor_value')\n        )\n        .select(['ts_code', 'trade_date', 'factor_value'])\n    )\n"
+  },
+  {
+    "factor_id": "factor_momentum_20",
+    "description": "20日价格动量（当日收盘价 / 20日前收盘价 - 1）",
+    "category": "momentum",
+    "compute_mode": "incremental",
+    "storage_target": "factor_values",
+    "depends_on": ["sync_daily_data"],
+    "params": {"window": 20},
+    "code": "import polars as pl\ndef compute(df, params):\n    window = params.get('window', 20)\n    return (\n        df.sort(['ts_code', 'trade_date'])\n        .with_columns(\n            (pl.col('close') / pl.col('close').shift(window).over('ts_code') - 1)\n            .alias('factor_value')\n        )\n        .select(['ts_code', 'trade_date', 'factor_value'])\n    )\n"
+  }
+]

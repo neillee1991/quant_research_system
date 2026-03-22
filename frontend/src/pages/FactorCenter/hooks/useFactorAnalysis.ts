@@ -25,13 +25,16 @@ export const useFactorAnalysis = () => {
   const [neutralize, setNeutralize] = useState(true);
   const [neutralizeControls, setNeutralizeControls] = useState<string[]>(['market', 'industry', 'size']);
   const [industryLevel, setIndustryLevel] = useState<'industry_l1' | 'industry_l2'>('industry_l1');
+  const [winsorize, setWinsorize] = useState(false);
+  const [winsorizeLower, setWinsorizeLower] = useState(0.01);
+  const [winsorizeUpper, setWinsorizeUpper] = useState(0.99);
   const [resolvedConfig, setResolvedConfig] = useState<Record<string, { source_label: string }>>({});
   const [analysisResult, setAnalysisResult] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [runLoading, setRunLoading] = useState(false);
   const [analysisHistory, setAnalysisHistory] = useState<any[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
-  const [taskId, setTaskId] = useState<number | null>(null);
+  const [taskId, setTaskId] = useState<string | null>(null);
   const [taskStatus, setTaskStatus] = useState<'idle' | 'pending' | 'running' | 'completed' | 'failed'>('idle');
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -54,7 +57,7 @@ export const useFactorAnalysis = () => {
     }
   };
 
-  const startPolling = (id: number) => {
+  const startPolling = (id: string) => {
     stopPolling();
     pollingRef.current = setInterval(async () => {
       try {
@@ -83,6 +86,14 @@ export const useFactorAnalysis = () => {
 
   useEffect(() => () => stopPolling(), []);
 
+  useEffect(() => {
+    if (selectedFactor) {
+      loadHistory(selectedFactor);
+    } else {
+      setAnalysisHistory([]);
+    }
+  }, [selectedFactor]);
+
   const runAnalysis = async () => {
     if (!selectedFactor) {
       message.warning('请选择因子');
@@ -104,9 +115,14 @@ export const useFactorAnalysis = () => {
         neutralize,
         neutralize_controls: neutralize ? neutralizeControls : undefined,
         industry_level: neutralize && neutralizeControls.includes('industry') ? industryLevel : undefined,
+        winsorize,
+        winsorize_lower: winsorize ? winsorizeLower : undefined,
+        winsorize_upper: winsorize ? winsorizeUpper : undefined,
       });
       const id = res.data?.data?.task_id;
       setTaskId(id);
+      // 提交成功后立即刷新历史记录
+      await loadHistory(selectedFactor);
       startPolling(id);
     } catch (error: any) {
       setRunLoading(false);
@@ -141,6 +157,18 @@ export const useFactorAnalysis = () => {
     }
   };
 
+  const deleteAnalysis = async (analysisId: string) => {
+    if (!selectedFactor) return false;
+    try {
+      await productionApi.deleteAlphalensAnalysisById(selectedFactor, analysisId);
+      await loadHistory(selectedFactor);
+      return true;
+    } catch (error) {
+      console.error('Failed to delete analysis:', error);
+      return false;
+    }
+  };
+
   return {
     factors,
     indexPools,
@@ -168,10 +196,17 @@ export const useFactorAnalysis = () => {
     setNeutralizeControls,
     industryLevel,
     setIndustryLevel,
+    winsorize,
+    setWinsorize,
+    winsorizeLower,
+    setWinsorizeLower,
+    winsorizeUpper,
+    setWinsorizeUpper,
     resolvedConfig,
     taskId,
     taskStatus,
     analysisResult,
+    setAnalysisResult,
     loading,
     runLoading,
     analysisHistory,
@@ -179,5 +214,6 @@ export const useFactorAnalysis = () => {
     runAnalysis,
     loadAnalysis,
     loadHistory,
+    deleteAnalysis,
   };
 };

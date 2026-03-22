@@ -1,0 +1,53 @@
+// ============================================================
+// 迁移脚本：factor_analysis_extended 表结构重构
+// 将大字段（ic_ts, quantile_returns 等）替换为 report_path 文件路径
+// 创建日期: 2026-03-21
+// ============================================================
+
+login("admin", "123456")
+db = database("dfs://quant")
+
+// 1. 备份旧表数据
+if (existsTable("dfs://quant", "factor_analysis_extended")) {
+    old_data = select * from loadTable("dfs://quant", "factor_analysis_extended")
+    print("备份旧表数据，共 " + string(size(old_data)) + " 条记录")
+
+    // 删除旧表
+    dropTable(db, "factor_analysis_extended")
+    print("✓ 已删除旧表 factor_analysis_extended")
+} else {
+    print("⚠ 表不存在，直接创建新表")
+}
+
+// 2. 创建新表结构
+schema_analysis = table(
+    array(INT, 0) as id,
+    array(SYMBOL, 0) as factor_id,
+    array(TIMESTAMP, 0) as analysis_date,
+    array(DATE, 0) as start_date,
+    array(DATE, 0) as end_date,
+
+    // 配置和摘要指标（DB 存储，用于列表展示和跨因子比较）
+    array(STRING, 0) as config,
+    array(STRING, 0) as ic_summary,
+    array(STRING, 0) as ic_by_period,
+    array(STRING, 0) as decay_analysis,
+
+    // 完整报告文件路径（详情页从文件加载）
+    array(STRING, 0) as report_path,
+
+    // 任务状态
+    array(SYMBOL, 0) as task_status,
+    array(STRING, 0) as task_id,
+    array(STRING, 0) as error_message
+)
+
+db.createTable(schema_analysis, "factor_analysis_extended", sortColumns=["factor_id", "analysis_date"])
+print("✓ 已创建新表 factor_analysis_extended")
+print("  DB 字段: id, factor_id, analysis_date, start_date, end_date")
+print("  摘要字段: config, ic_summary, ic_by_period, decay_analysis")
+print("  文件路径: report_path")
+print("  状态字段: task_status, task_id, error_message")
+print("========================================")
+print("迁移完成！旧数据已清除，请重新运行因子分析以生成新格式数据。")
+print("========================================")

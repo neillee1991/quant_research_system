@@ -2,9 +2,13 @@
 通用工具类
 提供重试、速率限制、日期处理等通用功能
 """
+import json
+import gzip
+import base64
 import time
-from datetime import datetime, timedelta
-from typing import Any, Callable, Optional, TypeVar
+from datetime import datetime, timedelta, date
+from pathlib import Path
+from typing import Any, Callable, Optional, TypeVar, Dict, List
 from functools import wraps
 
 from app.core.logger import logger
@@ -160,6 +164,161 @@ class DateUtils:
             except ValueError:
                 continue
         raise ValueError(f"Unrecognized date format: {date_str}")
+
+    @staticmethod
+    def normalize_date_to_object(d: Any) -> Optional[date]:
+        """将多种日期类型转换为 date 对象
+
+        支持: date 对象, datetime 对象, YYYYMMDD 字符串, YYYY-MM-DD 字符串
+        """
+        if d is None:
+            return None
+        if hasattr(d, 'date'):
+            return d.date()
+        if isinstance(d, date):
+            return d
+        if isinstance(d, datetime):
+            return d.date()
+        return datetime.strptime(str(d), "%Y%m%d").date()
+
+    @staticmethod
+    def format_date_for_display(date_value: Any) -> Optional[str]:
+        """将日期值格式化为 YYYY-MM-DD 显示格式
+
+        自动处理: YYYYMMDD 字符串, date/datetime 对象
+        """
+        if date_value is None:
+            return None
+        date_str = str(date_value)
+        if len(date_str) == 8 and date_str.isdigit():
+            return f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
+        # 如果已经是带连字符的格式，直接返回前10个字符
+        if len(date_str) >= 10 and date_str[4] == '-' and date_str[7] == '-':
+            return date_str[:10]
+        # 处理 ISO 格式带时间的情况
+        if 'T' in date_str:
+            return date_str.split('T')[0][:10]
+        return date_str
+
+    @staticmethod
+    def validate_yyyymmdd(date_str: str) -> bool:
+        """验证字符串是否为有效的 YYYYMMDD 格式"""
+        if not date_str or not date_str.isdigit() or len(date_str) != 8:
+            return False
+        try:
+            datetime.strptime(date_str, "%Y%m%d")
+            return True
+        except ValueError:
+            return False
+
+
+def safe_str_datetime(dt: Any) -> Optional[str]:
+    """安全地将 datetime/date 转换为字符串，处理 None 值"""
+    if dt is None:
+        return None
+    return str(dt)
+
+
+def unify_record_fields(record: Dict[str, Any]) -> Dict[str, Any]:
+    """统一数据库记录的字段名（旧字段名 -> 新字段名）"""
+    field_mapping = {
+        "rows_affected": "rows",
+        "duration_seconds": "elapsed_seconds",
+    }
+    # 创建新字典而不是修改原字典
+    result = dict(record)
+    for old_key, new_key in field_mapping.items():
+        if old_key in result:
+            result[new_key] = result[old_key]
+            del result[old_key]
+    return result
+
+
+def decompress_json(compressed_str: str) -> Any:
+    """解压缩 JSON 数据"""
+    try:
+        compressed = base64.b64decode(compressed_str.encode('ascii'))
+        json_str = gzip.decompress(compressed).decode('utf-8')
+        return json.loads(json_str)
+    except Exception:
+        # 兼容未压缩的旧数据
+        return json.loads(compressed_str)
+
+
+def load_json_from_file(file_path: str, default: Any = None) -> Any:
+    """从文件路径加载 JSON 数据，兼容旧的压缩格式
+
+    Args:
+        file_path: 文件路径，或者是压缩的 JSON 字符串（旧数据兼容）
+        default: 加载失败时的默认值
+
+    Returns:
+        解析后的 JSON 数据
+    """
+    p = Path(file_path)
+    # 首先尝试作为文件读取
+    try:
+        if p.exists():
+            return json.loads(p.read_text(encoding='utf-8'))
+    except Exception as e:
+        logger.warning(f"Failed to read file {file_path}: {e}")
+
+    # 兼容旧数据：尝试作为压缩 JSON 解析
+    try:
+        return decompress_json(file_path)
+    except Exception:
+        return default
+
+
+def parse_json_fields(record: Dict[str, Any], fields: List[str]) -> Dict[str, Any]:
+    """解析记录中的多个 JSON 字段
+
+    Args:
+        record: 数据库记录字典
+        fields: 需要解析的字段名列表
+
+    Returns:
+        更新后的记录（新字典，不修改原记录）
+    """
+    result = dict(record)
+    for field in fields:
+        if result.get(field):
+            result[field] = safe_json_parse(result[field])
+    return result
+
+
+def normalize_trade_date_pl(df: Any, date_col: str = "trade_date") -> Any:
+    """归一化 Polars DataFrame 中的 trade_date 列为 YYYYMMDD 字符串格式
+
+    Args:
+        df: Polars DataFrame
+        date_col: 日期列名，默认为 "trade_date"
+
+    Returns:
+        新的 DataFrame，日期列已归一化
+    """
+    import polars as pl
+
+    if date_col not in df.columns:
+        return df
+
+    dtype = df[date_col].dtype
+
+    if dtype == pl.Utf8:
+        # 已经是字符串，去掉连字符
+        return df.with_columns(
+            pl.col(date_col).str.replace_all("-", "").alias(date_col)
+        )
+    elif dtype in (pl.Date, pl.Datetime):
+        # 日期类型，格式化为 YYYYMMDD
+        return df.with_columns(
+            pl.col(date_col).dt.strftime("%Y%m%d").alias(date_col)
+        )
+    else:
+        # 其他类型，先转字符串再去掉连字符
+        return df.with_columns(
+            pl.col(date_col).cast(pl.Utf8).str.replace_all("-", "").alias(date_col)
+        )
 
 
 def safe_json_parse(raw: any, default: any = None) -> any:

@@ -3,8 +3,9 @@
 提供跨任务类型的统一 RESTful API 端点
 """
 from typing import Dict, Any, Optional
-from fastapi import APIRouter, HTTPException, Query, Path
+from fastapi import APIRouter, HTTPException, Query, Path, BackgroundTasks
 from pydantic import BaseModel, Field
+import time
 
 from app.services.task_service import sync_service, etl_service, factor_service, TaskService
 from app.core.logger import logger
@@ -278,13 +279,62 @@ def delete_task(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _execute_sync_task_background(task_id: str, start_date: Optional[str], end_date: Optional[str], run_id: str):
+    """后台执行同步任务"""
+    try:
+        from data_manager.refactored_sync_engine import sync_engine
+        result = sync_engine.sync_task(
+            task_id=task_id,
+            start_date=start_date,
+            end_date=end_date
+        )
+        logger.info(f"Sync task {task_id} completed: run_id={run_id}, success={result}")
+    except Exception as e:
+        logger.error(f"Sync task {task_id} failed: run_id={run_id}, error={e}")
+
+
+def _execute_etl_task_background(task_id: str, start_date: Optional[str], end_date: Optional[str], run_id: str):
+    """后台执行 ETL 任务"""
+    try:
+        from data_manager.etl_engine import etl_engine
+        result = etl_engine.run_etl_task(
+            task_id=task_id,
+            start_date=start_date,
+            end_date=end_date
+        )
+        logger.info(f"ETL task {task_id} completed: run_id={run_id}, success={result}")
+    except Exception as e:
+        logger.error(f"ETL task {task_id} failed: run_id={run_id}, error={e}")
+
+
+def _execute_factor_task_background(task_id: str, start_date: Optional[str], end_date: Optional[str], run_id: str):
+    """后台执行因子任务"""
+    try:
+        from services.factor_compute_service import FactorComputeService
+        from store.dolphindb_client import db_client
+        service = FactorComputeService(db_client)
+        compute_result = service.compute_factor(
+            factor_id=task_id,
+            start_date=start_date,
+            end_date=end_date,
+            mode="full" if start_date else "incremental"
+        )
+        logger.info(f"Factor task {task_id} completed: run_id={run_id}, success={compute_result.success}, rows={compute_result.rows}")
+    except Exception as e:
+        logger.error(f"Factor task {task_id} failed: run_id={run_id}, error={e}")
+
+
 @router.post("/tasks/{task_type}/{task_id}/execute", response_model=TaskExecuteResponse)
-def execute_task(
+async def execute_task(
     task_type: str = Path(..., description="任务类型: sync, etl, factor"),
     task_id: str = Path(..., description="任务ID"),
-    request: TaskExecuteRequest = None
+    request: TaskExecuteRequest = None,
+    background_tasks: BackgroundTasks = None
 ):
-    """执行任务"""
+    """执行任务（异步）
+
+    立即返回 run_id，后台执行任务。使用 /tasks/{task_type}/status/{run_id} 查询状态。
+    """
     try:
         service = _get_service(task_type)
 
@@ -296,46 +346,46 @@ def execute_task(
                 detail=f"Task {task_id} not found in {task_type}"
             )
 
-        # 根据任务类型执行不同的逻辑
-        result = None
+        # 生成 run_id
+        run_id = f"{task_id}_{int(time.time() * 1000)}"
 
+        # 根据任务类型添加后台任务
         if task_type == "sync":
-            from data_manager.refactored_sync_engine import sync_engine
-            result = sync_engine.sync_task(
+            background_tasks.add_task(
+                _execute_sync_task_background,
                 task_id=task_id,
-                start_date=request.start_date if request else None,
-                end_date=request.end_date if request else None
-            )
-            message = f"Sync task {task_id} executed successfully"
-
-        elif task_type == "etl":
-            from data_manager.etl_engine import etl_engine
-            result = etl_engine.run_etl_task(
-                task_id=task_id,
-                start_date=request.start_date if request else None,
-                end_date=request.end_date if request else None
-            )
-            message = f"ETL task {task_id} executed successfully"
-
-        elif task_type == "factor":
-            from services.factor_compute_service import FactorComputeService
-            from store.dolphindb_client import db_client
-            service = FactorComputeService(db_client)
-            compute_result = service.compute_factor(
-                factor_id=task_id,
                 start_date=request.start_date if request else None,
                 end_date=request.end_date if request else None,
-                mode="full" if not request or not request.start_date else "incremental"
+                run_id=run_id
             )
-            result = {"success": compute_result.success, "rows": compute_result.rows}
-            message = f"Factor task {task_id} executed successfully"
+            message = f"Sync task {task_id} started in background"
+
+        elif task_type == "etl":
+            background_tasks.add_task(
+                _execute_etl_task_background,
+                task_id=task_id,
+                start_date=request.start_date if request else None,
+                end_date=request.end_date if request else None,
+                run_id=run_id
+            )
+            message = f"ETL task {task_id} started in background"
+
+        elif task_type == "factor":
+            background_tasks.add_task(
+                _execute_factor_task_background,
+                task_id=task_id,
+                start_date=request.start_date if request else None,
+                end_date=request.end_date if request else None,
+                run_id=run_id
+            )
+            message = f"Factor task {task_id} started in background"
 
         return TaskExecuteResponse(
             status="success",
             message=message,
             task_id=task_id,
             task_type=task_type,
-            result=result if isinstance(result, dict) else None
+            result={"run_id": run_id, "status": "pending"}
         )
 
     except HTTPException:
@@ -346,6 +396,70 @@ def execute_task(
             status_code=500,
             detail=f"Task execution failed: {str(e)}"
         )
+
+
+@router.get("/tasks/{task_type}/status/{run_id}")
+async def get_task_status(
+    task_type: str = Path(..., description="任务类型: sync, etl, factor"),
+    run_id: str = Path(..., description="运行ID")
+):
+    """查询任务执行状态
+
+    根据任务类型查询对应的日志表。
+    """
+    try:
+        from store.dolphindb_client import db_client
+
+        if task_type == "sync":
+            # 查询 sync_log_history
+            df = db_client.query("""
+                SELECT * FROM sync_log_history
+                WHERE data_type = %s
+                ORDER BY created_at DESC
+                LIMIT 1
+            """, (run_id.split('_')[0],))  # 从 run_id 提取 task_id
+
+        elif task_type == "etl":
+            # 查询 sync_log_history (source='etl')
+            df = db_client.query("""
+                SELECT * FROM sync_log_history
+                WHERE source = 'etl' AND data_type = %s
+                ORDER BY created_at DESC
+                LIMIT 1
+            """, (run_id.split('_')[0],))
+
+        elif task_type == "factor":
+            # 查询 factor_run_log
+            df = db_client.query("""
+                SELECT * FROM factor_run_log
+                WHERE run_id = %s
+                ORDER BY created_at DESC
+                LIMIT 1
+            """, (run_id,))
+
+        else:
+            raise HTTPException(status_code=400, detail=f"Invalid task_type: {task_type}")
+
+        if df.is_empty():
+            raise HTTPException(
+                status_code=404,
+                detail=f"Task status not found for run_id: {run_id}"
+            )
+
+        record = df.to_dicts()[0]
+
+        # 格式化时间戳
+        for field in ["created_at", "updated_at", "finished_at"]:
+            if field in record and record[field]:
+                record[field] = str(record[field])
+
+        return {"status": "success", "data": record}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get task status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/tasks/version", response_model=VersionResponse)

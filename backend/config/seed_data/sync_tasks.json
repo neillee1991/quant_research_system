@@ -1,0 +1,278 @@
+[
+  {
+    "task_id": "sync_stock_basic",
+    "api_name": "stock_basic",
+    "description": "股票基础信息（代码、名称、行业、上市日期等）",
+    "sync_type": "full",
+    "date_field": "",
+    "table_name": "sync_stock_basic",
+    "params": {
+      "exchange": "",
+      "list_status": "",
+      "fields": "ts_code,symbol,name,area,industry,market,list_date"
+    },
+    "primary_keys": ["ts_code"],
+    "api_limit": 5000,
+    "schema": {
+      "ts_code": {"type": "SYMBOL"},
+      "symbol": {"type": "STRING"},
+      "name": {"type": "STRING"},
+      "area": {"type": "STRING"},
+      "industry": {"type": "STRING"},
+      "market": {"type": "STRING"},
+      "list_date": {"type": "STRING"}
+    }
+  },
+  {
+    "task_id": "sync_trade_cal",
+    "api_name": "trade_cal",
+    "description": "交易日历（A股交易日、休市日）",
+    "sync_type": "full",
+    "date_field": "cal_date",
+    "table_name": "sync_trade_cal",
+    "params": {
+      "exchange": "SSE",
+      "start_date": "20100101",
+      "end_date": "20301231",
+      "fields": "exchange,cal_date,is_open,pretrade_date"
+    },
+    "primary_keys": ["exchange", "cal_date"],
+    "api_limit": 10000,
+    "schema": {
+      "exchange": {"type": "SYMBOL"},
+      "cal_date": {"type": "DATE"},
+      "is_open": {"type": "INT"},
+      "pretrade_date": {"type": "DATE"}
+    }
+  },
+  {
+    "task_id": "sync_daily_data",
+    "api_name": "daily",
+    "description": "日线行情（开高低收、成交量、成交额）",
+    "sync_type": "incremental",
+    "date_field": "trade_date",
+    "table_name": "sync_daily_data",
+    "params": {
+      "trade_date": "{date}",
+      "fields": "ts_code,trade_date,open,high,low,close,pre_close,change,pct_chg,vol,amount"
+    },
+    "primary_keys": ["ts_code", "trade_date"],
+    "api_limit": 5000,
+    "schema": {
+      "ts_code": {"type": "SYMBOL"},
+      "trade_date": {"type": "DATE"},
+      "open": {"type": "DOUBLE"},
+      "high": {"type": "DOUBLE"},
+      "low": {"type": "DOUBLE"},
+      "close": {"type": "DOUBLE"},
+      "pre_close": {"type": "DOUBLE"},
+      "change": {"type": "DOUBLE"},
+      "pct_chg": {"type": "DOUBLE"},
+      "vol": {"type": "DOUBLE"},
+      "amount": {"type": "DOUBLE"}
+    }
+  },
+  {
+    "task_id": "sync_adj_factor",
+    "api_name": "adj_factor",
+    "description": "复权因子（用于前复权、后复权计算）",
+    "sync_type": "incremental",
+    "date_field": "trade_date",
+    "table_name": "sync_adj_factor",
+    "params": {
+      "trade_date": "{date}",
+      "fields": "ts_code,trade_date,adj_factor"
+    },
+    "primary_keys": ["ts_code", "trade_date"],
+    "api_limit": 5000,
+    "schema": {
+      "ts_code": {"type": "SYMBOL"},
+      "trade_date": {"type": "DATE"},
+      "adj_factor": {"type": "DOUBLE"}
+    }
+  },
+  {
+    "task_id": "sync_daily_basic",
+    "api_name": "daily_basic",
+    "description": "每日指标（换手率、量比、市盈率、市净率、市值等）",
+    "sync_type": "incremental",
+    "date_field": "trade_date",
+    "table_name": "sync_daily_basic",
+    "params": {
+      "trade_date": "{date}",
+      "fields": "ts_code,trade_date,close,turnover_rate,turnover_rate_f,volume_ratio,pe,pe_ttm,pb,ps,ps_ttm,dv_ratio,dv_ttm,total_share,float_share,free_share,total_mv,circ_mv"
+    },
+    "primary_keys": ["ts_code", "trade_date"],
+    "api_limit": 6000,
+    "schema": {
+      "ts_code": {"type": "SYMBOL"},
+      "trade_date": {"type": "DATE"},
+      "close": {"type": "DOUBLE"},
+      "turnover_rate": {"type": "DOUBLE"},
+      "turnover_rate_f": {"type": "DOUBLE"},
+      "volume_ratio": {"type": "DOUBLE"},
+      "pe": {"type": "DOUBLE"},
+      "pe_ttm": {"type": "DOUBLE"},
+      "pb": {"type": "DOUBLE"},
+      "ps": {"type": "DOUBLE"},
+      "ps_ttm": {"type": "DOUBLE"},
+      "dv_ratio": {"type": "DOUBLE"},
+      "dv_ttm": {"type": "DOUBLE"},
+      "total_share": {"type": "DOUBLE"},
+      "float_share": {"type": "DOUBLE"},
+      "free_share": {"type": "DOUBLE"},
+      "total_mv": {"type": "DOUBLE"},
+      "circ_mv": {"type": "DOUBLE"}
+    }
+  },
+  {
+    "task_id": "sync_stk_limit",
+    "api_name": "stk_limit",
+    "description": "每日涨跌停价格（涨停价、跌停价、昨日收盘价）",
+    "sync_type": "incremental",
+    "date_field": "trade_date",
+    "table_name": "sync_stk_limit",
+    "params": {
+      "trade_date": "{date}",
+      "fields": "ts_code,trade_date,pre_close,up_limit,down_limit"
+    },
+    "primary_keys": ["ts_code", "trade_date"],
+    "api_limit": 5000,
+    "schema": {
+      "ts_code": {"type": "SYMBOL"},
+      "trade_date": {"type": "DATE"},
+      "pre_close": {"type": "DOUBLE"},
+      "up_limit": {"type": "DOUBLE"},
+      "down_limit": {"type": "DOUBLE"}
+    }
+  },
+  {
+    "task_id": "sync_stock_st",
+    "api_name": "stock_st",
+    "description": "ST股票列表（每日ST/退市风险警示股票）",
+    "sync_type": "incremental",
+    "date_field": "trade_date",
+    "table_name": "sync_stock_st",
+    "params": {
+      "trade_date": "{date}",
+      "fields": "ts_code,name,trade_date,type,type_name"
+    },
+    "primary_keys": ["ts_code", "trade_date"],
+    "api_limit": 1000,
+    "schema": {
+      "ts_code": {"type": "SYMBOL"},
+      "name": {"type": "STRING"},
+      "trade_date": {"type": "DATE"},
+      "type": {"type": "STRING"},
+      "type_name": {"type": "STRING"}
+    }
+  },
+  {
+    "task_id": "sync_sw_index_member_N",
+    "api_name": "index_member_all",
+    "description": "申万行业成分构成（三级分类，含纳入/剔除日期）",
+    "sync_type": "full",
+    "date_field": "",
+    "table_name": "sync_sw_index_member_N",
+    "params": {
+      "is_new": "N",
+      "fields": "l1_code,l1_name,l2_code,l2_name,l3_code,l3_name,ts_code,name,in_date,out_date,is_new"
+    },
+    "primary_keys": [],
+    "api_limit": 2000,
+    "schema": {
+      "l1_code": {"type": "SYMBOL"},
+      "l1_name": {"type": "STRING"},
+      "l2_code": {"type": "SYMBOL"},
+      "l2_name": {"type": "STRING"},
+      "l3_code": {"type": "SYMBOL"},
+      "l3_name": {"type": "STRING"},
+      "ts_code": {"type": "SYMBOL"},
+      "name": {"type": "STRING"},
+      "in_date": {"type": "DATE"},
+      "out_date": {"type": "DATE"},
+      "is_new": {"type": "STRING"}
+    }
+  },
+  {
+    "task_id": "sync_sw_index_member_Y",
+    "api_name": "index_member_all",
+    "description": "申万行业成分构成（三级分类，含纳入/剔除日期）",
+    "sync_type": "full",
+    "date_field": "",
+    "table_name": "sync_sw_index_member_Y",
+    "params": {
+      "is_new": "Y",
+      "fields": "l1_code,l1_name,l2_code,l2_name,l3_code,l3_name,ts_code,name,in_date,out_date,is_new"
+    },
+    "primary_keys": [],
+    "api_limit": 2000,
+    "schema": {
+      "l1_code": {"type": "SYMBOL"},
+      "l1_name": {"type": "STRING"},
+      "l2_code": {"type": "SYMBOL"},
+      "l2_name": {"type": "STRING"},
+      "l3_code": {"type": "SYMBOL"},
+      "l3_name": {"type": "STRING"},
+      "ts_code": {"type": "SYMBOL"},
+      "name": {"type": "STRING"},
+      "in_date": {"type": "DATE"},
+      "out_date": {"type": "DATE"},
+      "is_new": {"type": "STRING"}
+    }
+  },
+  {
+    "task_id": "sync_ci_index_member_N",
+    "api_name": "ci_index_member",
+    "description": "中信行业成分构成（三级分类，含纳入/剔除日期）",
+    "sync_type": "full",
+    "date_field": "",
+    "table_name": "sync_ci_index_member_N",
+    "params": {
+      "is_new": "N",
+      "fields": "l1_code,l1_name,l2_code,l2_name,l3_code,l3_name,ts_code,name,in_date,out_date,is_new"
+    },
+    "primary_keys": [],
+    "api_limit": 2000,
+    "schema": {
+      "l1_code": {"type": "SYMBOL"},
+      "l1_name": {"type": "STRING"},
+      "l2_code": {"type": "SYMBOL"},
+      "l2_name": {"type": "STRING"},
+      "l3_code": {"type": "SYMBOL"},
+      "l3_name": {"type": "STRING"},
+      "ts_code": {"type": "SYMBOL"},
+      "name": {"type": "STRING"},
+      "in_date": {"type": "DATE"},
+      "out_date": {"type": "DATE"},
+      "is_new": {"type": "STRING"}
+    }
+  },
+  {
+    "task_id": "sync_ci_index_member_Y",
+    "api_name": "ci_index_member",
+    "description": "中信行业成分构成（三级分类，含纳入/剔除日期）",
+    "sync_type": "full",
+    "date_field": "",
+    "table_name": "sync_ci_index_member_Y",
+    "params": {
+      "is_new": "Y",
+      "fields": "l1_code,l1_name,l2_code,l2_name,l3_code,l3_name,ts_code,name,in_date,out_date,is_new"
+    },
+    "primary_keys": [],
+    "api_limit": 2000,
+    "schema": {
+      "l1_code": {"type": "SYMBOL"},
+      "l1_name": {"type": "STRING"},
+      "l2_code": {"type": "SYMBOL"},
+      "l2_name": {"type": "STRING"},
+      "l3_code": {"type": "SYMBOL"},
+      "l3_name": {"type": "STRING"},
+      "ts_code": {"type": "SYMBOL"},
+      "name": {"type": "STRING"},
+      "in_date": {"type": "DATE"},
+      "out_date": {"type": "DATE"},
+      "is_new": {"type": "STRING"}
+    }
+  }
+]

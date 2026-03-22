@@ -1,0 +1,35 @@
+[
+  {
+    "task_id": "etl_index_member",
+    "description": "合并申万+中信行业成员表（当前有效分类）",
+    "script": "t_sw = select l1_code, l1_name, l2_code, l2_name, l3_code, l3_name, ts_code, in_date, out_date, \"sw\" as source from loadTable(\"{db_meta}\", \"sync_sw_index_member_Y\"); t_ci = select l1_code, l1_name, l2_code, l2_name, l3_code, l3_name, ts_code, in_date, out_date, \"ci\" as source from loadTable(\"{db_meta}\", \"sync_ci_index_member_Y\"); unionAll([t_sw, t_ci], false)",
+    "sync_type": "full",
+    "date_field": "",
+    "primary_keys": ["ts_code", "source", "l3_code"],
+    "table_name": "etl_index_member",
+    "source_tables": ["sync_sw_index_member_Y", "sync_ci_index_member_Y"],
+    "schema": {}
+  },
+  {
+    "task_id": "etl_index_member_daily",
+    "description": "每只股票每个交易日所属行业（行情左关联行业成员）",
+    "script": "daily = select trade_date, ts_code from loadTable(\"{db_ts}\", \"sync_daily_data\"); etl = select ts_code, source, l1_code, l1_name, l2_code, l2_name, l3_code, l3_name, in_date, out_date from loadTable(\"{db_meta}\", \"etl_index_member\"); joined = lj(daily, etl, `ts_code); select trade_date, ts_code, source, l1_code, l1_name, l2_code, l2_name, l3_code, l3_name from joined where isNull(in_date) or (trade_date >= temporalParse(in_date, \"yyyyMMdd\") and (isNull(out_date) or out_date = \"\" or trade_date < temporalParse(out_date, \"yyyyMMdd\")))",
+    "sync_type": "full",
+    "date_field": "trade_date",
+    "primary_keys": ["trade_date", "ts_code", "source", "l3_code"],
+    "table_name": "etl_index_member_daily",
+    "source_tables": ["sync_daily_data", "etl_index_member"],
+    "schema": {}
+  },
+  {
+    "task_id": "etl_stock_daily_info",
+    "description": "行情+基本面+行业宽表（每日全量刷新）",
+    "script": "daily = select trade_date, ts_code, open, high, low, close, pre_close, pct_chg, vol, amount from loadTable(\"{db_ts}\", \"sync_daily_data\"); basic = select trade_date, ts_code, pe_ttm, pb, total_mv, circ_mv, turnover_rate from loadTable(\"{db_ts}\", \"sync_daily_basic\"); ind = select trade_date, ts_code, source, l1_code, l1_name, l2_code, l2_name, l3_code, l3_name from loadTable(\"{db_meta}\", \"etl_index_member_daily\"); t1 = lj(daily, basic, `trade_date`ts_code); lj(t1, ind, `trade_date`ts_code)",
+    "sync_type": "full",
+    "date_field": "trade_date",
+    "primary_keys": ["trade_date", "ts_code", "source"],
+    "table_name": "etl_stock_daily_info",
+    "source_tables": ["sync_daily_data", "sync_daily_basic", "etl_index_member_daily"],
+    "schema": {}
+  }
+]

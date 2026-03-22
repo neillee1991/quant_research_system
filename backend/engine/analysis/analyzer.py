@@ -5,6 +5,8 @@
 import math
 import polars as pl
 import json
+import gzip
+import base64
 import numpy as np
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
@@ -12,6 +14,24 @@ from datetime import datetime, timedelta
 from app.core.logger import logger
 from engine.analysis.alphalens_adapter import AlphalensAdapter
 from engine.production.data_config import DataConfigLoader
+
+
+def _compress_json(data: Any) -> str:
+    """压缩 JSON 数据（gzip + base64）以突破 DolphinDB 256KB 字符串限制"""
+    json_str = json.dumps(data)
+    compressed = gzip.compress(json_str.encode('utf-8'))
+    return base64.b64encode(compressed).decode('ascii')
+
+
+def _decompress_json(compressed_str: str) -> Any:
+    """解压缩 JSON 数据"""
+    try:
+        compressed = base64.b64decode(compressed_str.encode('ascii'))
+        json_str = gzip.decompress(compressed).decode('utf-8')
+        return json.loads(json_str)
+    except Exception:
+        # 兼容未压缩的旧数据
+        return json.loads(compressed_str)
 
 
 def _sanitize_for_json(obj):
@@ -51,16 +71,22 @@ class FactorAnalyzer:
         neutralize: bool = False,
         neutralize_controls: Optional[List[str]] = None,
         industry_level: str = "industry_l1",
+        winsorize: bool = False,
+        winsorize_lower: float = 0.01,
+        winsorize_upper: float = 0.99,
+        task_id: Optional[int] = None,
     ) -> Optional[Dict[str, Any]]:
         """执行因子分析（Alphalens）"""
         if periods is None:
             periods = [1, 5, 10, 20]
-        logger.info(f"Analyzing factor: {factor_id}, index_pool={index_pool}, groupby_field={groupby_field}")
+        logger.info(f"Analyzing factor: {factor_id}, index_pool={index_pool}, groupby_field={groupby_field}, task_id={task_id}, winsorize={winsorize}")
         return self._analyze_with_alphalens(
             factor_id, start_date, end_date, periods, quantiles, index_pool, groupby_field,
             next_day_entry=next_day_entry, entry_price=entry_price,
             neutralize=neutralize, neutralize_controls=neutralize_controls,
             industry_level=industry_level,
+            winsorize=winsorize, winsorize_lower=winsorize_lower, winsorize_upper=winsorize_upper,
+            task_id=task_id,
         )
 
     # ==================== 数据加载 ====================
@@ -132,12 +158,17 @@ class FactorAnalyzer:
         neutralize: bool = False,
         neutralize_controls: Optional[List[str]] = None,
         industry_level: str = "industry_l1",
+        winsorize: bool = False,
+        winsorize_lower: float = 0.01,
+        winsorize_upper: float = 0.99,
+        task_id: Optional[int] = None,
     ) -> Optional[Dict[str, Any]]:
         """使用 Alphalens 框架进行因子分析"""
         started_at = datetime.now()
         logger.info(f"Starting Alphalens analysis for {factor_id}")
 
         pipeline_stats = []
+        analysis_warnings = []  # 收集分析过程中的警告，传递到前端
 
         def _record_step(step: str, count: int, prev_count: int) -> int:
             """记录一个流水线步骤的数据量变化"""
@@ -149,6 +180,15 @@ class FactorAnalyzer:
                 "drop_pct": round(dropped / prev_count * 100, 2) if prev_count > 0 else 0.0,
             })
             return count
+
+        def _add_warning(level: str, type_: str, message: str, action: Optional[str] = None):
+            """添加警告到结果中"""
+            analysis_warnings.append({
+                "level": level,
+                "type": type_,
+                "message": message,
+                "action": action,
+            })
 
         try:
             # 0. 尝试从缓存读取数据
@@ -169,6 +209,34 @@ class FactorAnalyzer:
 
             count = len(factor_df)
             _record_step("raw_factor", count, count)  # 第一步 dropped=0
+
+            # 1b. 极端值处理（Winsorize，可选）
+            if winsorize:
+                prev = count
+                try:
+                    # 计算分位数边界
+                    lower_bound = factor_df["factor_value"].quantile(winsorize_lower)
+                    upper_bound = factor_df["factor_value"].quantile(winsorize_upper)
+
+                    # 应用 winsorize
+                    factor_df = factor_df.with_columns(
+                        pl.when(pl.col("factor_value") < lower_bound)
+                        .then(lower_bound)
+                        .when(pl.col("factor_value") > upper_bound)
+                        .then(upper_bound)
+                        .otherwise(pl.col("factor_value"))
+                        .alias("factor_value")
+                    )
+                    _add_warning(
+                        "INFO",
+                        "winsorize_applied",
+                        f"已应用Winsorize处理: [{winsorize_lower*100:.0f}%, {winsorize_upper*100:.0f}%], 边界=[{lower_bound:.4f}, {upper_bound:.4f}]",
+                    )
+                    logger.info(f"Winsorize applied: bounds [{lower_bound:.4f}, {upper_bound:.4f}]")
+                except Exception as e:
+                    msg = f"Winsorize处理失败: {e}"
+                    logger.warning(msg)
+                    _add_warning("WARNING", "winsorize_failed", msg)
 
             # 2. 应用股票池过滤（如果指定）
             prev = count
@@ -209,7 +277,9 @@ class FactorAnalyzer:
                                 if value_col:
                                     industry_df = industry_df.rename({value_col[0]: "industry"})
                         except Exception as e:
-                            logger.warning(f"Failed to load industry data for neutralization: {e}")
+                            msg = f"加载行业数据失败，将跳过行业中性化: {e}"
+                            logger.warning(msg)
+                            _add_warning("WARNING", "neutralize_industry_failed", msg)
 
                     if "size" in controls:
                         try:
@@ -222,7 +292,9 @@ class FactorAnalyzer:
                                 if value_col:
                                     size_df = size_df.rename({value_col[0]: "size_value"})
                         except Exception as e:
-                            logger.warning(f"Failed to load size data for neutralization: {e}")
+                            msg = f"加载市值数据失败，将跳过市值中性化: {e}"
+                            logger.warning(msg)
+                            _add_warning("WARNING", "neutralize_size_failed", msg)
 
                     factor_df = Neutralizer.neutralize(
                         factor_df=factor_df,
@@ -232,7 +304,9 @@ class FactorAnalyzer:
                     )
                     logger.info(f"Factor neutralized with controls={controls}")
                 except Exception as e:
-                    logger.warning(f"Neutralization failed (non-fatal): {e}")
+                    msg = f"中性化失败，将使用原始因子: {e}"
+                    logger.warning(msg)
+                    _add_warning("WARNING", "neutralize_failed", msg)
 
             # 3. 加载价格数据
             if cached:
@@ -303,8 +377,14 @@ class FactorAnalyzer:
                         charts_data['returns_by_industry'] = results['returns_by_industry']
                         results['charts_data'] = charts_data
                         logger.info(f"Industry analysis done: {len(results['ic_by_industry'])} industries")
+                else:
+                    msg = "无行业数据，跳过行业分析"
+                    logger.warning(msg)
+                    _add_warning("INFO", "industry_no_data", msg)
             except Exception as e:
-                logger.warning(f"Industry analysis failed (non-fatal): {e}")
+                msg = f"行业分析失败: {e}"
+                logger.warning(msg)
+                _add_warning("WARNING", "industry_analysis_failed", msg)
 
             results["diagnostics"] = {
                 "pipeline_stats": pipeline_stats,
@@ -313,6 +393,7 @@ class FactorAnalyzer:
                 "avg_daily_coverage": round(
                     len(factor_data) / max(factor_data.index.get_level_values("date").nunique(), 1), 1
                 ),
+                "warnings": analysis_warnings,  # 添加分析过程中的警告
             }
 
             # 运行因子诊断
@@ -323,27 +404,28 @@ class FactorAnalyzer:
                     factor_data=factor_data,
                     ic_series=None,  # TODO: P1 完成后传入 ic_series
                 )
-                results["diagnostics"]["warnings"] = diag["warnings"]
-                results["diagnostics"]["distribution"] = diag["distribution"]
-                results["diagnostics"]["extreme_values"] = diag["extreme_values"]
+                # 合并诊断警告
+                results["diagnostics"]["warnings"].extend(diag.get("warnings", []))
+                results["diagnostics"]["distribution"] = diag.get("distribution")
+                results["diagnostics"]["extreme_values"] = diag.get("extreme_values")
             except Exception as e:
                 logger.warning(f"Diagnostics failed (non-fatal): {e}")
 
-            # 7. 保存到 factor_analysis_extended 表
+            # 7. 返回结果，不在这里保存（由调用者统一保存）
             actual_start = factor_df["trade_date"].min()
             actual_end = factor_df["trade_date"].max()
-            self._save_alphalens_analysis(
-                factor_id=factor_id,
-                results=results,
-                start_date=actual_start,
-                end_date=actual_end,
-                config={
-                    "periods": periods,
-                    "quantiles": quantiles,
-                    "index_pool": index_pool,
-                    "groupby_field": groupby_field,
-                }
-            )
+            results["_actual_start"] = actual_start
+            results["_actual_end"] = actual_end
+            results["_config"] = {
+                "periods": periods,
+                "quantiles": quantiles,
+                "index_pool": index_pool,
+                "groupby_field": groupby_field,
+                "entry_price": entry_price,
+                "neutralize": neutralize,
+                "neutralize_controls": neutralize_controls,
+                "industry_level": industry_level,
+            }
 
             elapsed = (datetime.now() - started_at).total_seconds()
             logger.info(f"Alphalens analysis for {factor_id} completed in {elapsed:.1f}s")
@@ -433,92 +515,103 @@ class FactorAnalyzer:
         results: Dict[str, Any],
         start_date: str,
         end_date: str,
-        config: Dict[str, Any]
+        config: Dict[str, Any],
+        task_id: Optional[int] = None,
     ):
-        """保存 Alphalens 分析结果到 factor_analysis_extended 表"""
-        try:
-            import polars as pl
-            from datetime import datetime as dt
-            import math
-            import numpy as np
+        """保存 Alphalens 分析结果
 
-            # 清理 NaN/Inf 值
-            def clean_value(v):
-                if isinstance(v, (float, np.floating)):
-                    if math.isnan(v) or math.isinf(v):
-                        return None
-                elif isinstance(v, (np.integer, np.int64, np.int32)):
-                    return int(v)
-                return v
+        如果提供了 task_id，则更新该记录；否则创建新记录。
 
-            def clean_dict(d):
-                if isinstance(d, dict):
-                    return {k: clean_dict(v) for k, v in d.items()}
-                elif isinstance(d, (list, tuple)):
-                    return [clean_dict(item) for item in d]
-                else:
-                    return clean_value(d)
+        存储策略：
+        - 数据库：任务元数据 + 摘要指标（用于列表展示和跨因子比较）
+        - 文件：完整分析报告（仅在查看单次分析详情时加载）
+        """
+        import polars as pl
+        from datetime import datetime as dt
+        import math
+        import numpy as np
+        import json
+        from pathlib import Path
+        from app.core.config import settings
 
-            # 清理结果
-            results = clean_dict(results)
-
-            # 生成唯一 ID（使用时间戳）
-            analysis_id = int(datetime.now().timestamp() * 1000)
-
-            # 转换日期格式为 DolphinDB 兼容格式
-            # analysis_date: TIMESTAMP (datetime)
-            # start_date, end_date: DATE (YYYYMMDD -> date object)
-            analysis_datetime = datetime.now()
-
-            # 将 YYYYMMDD 字符串或 datetime 转换为 date 对象
-            def _to_date(d):
-                if d is None:
+        def clean_value(v):
+            if isinstance(v, (float, np.floating)):
+                if math.isnan(v) or math.isinf(v):
                     return None
-                if hasattr(d, 'date'):
-                    return d.date()
-                return dt.strptime(str(d), "%Y%m%d").date()
-            start_date_obj = _to_date(start_date)
-            end_date_obj = _to_date(end_date)
+            elif isinstance(v, (np.integer, np.int64, np.int32)):
+                return int(v)
+            return v
 
-            # 构建记录
-            record = {
-                "id": analysis_id,
-                "factor_id": factor_id,
-                "analysis_date": analysis_datetime,
-                "start_date": start_date_obj,
-                "end_date": end_date_obj,
-                "config": json.dumps(config),
-                "ic_summary": json.dumps(results.get("ic_summary", {})),
-                "ic_by_period": json.dumps(results.get("ic_by_period", [])),
-                "ic_ts": json.dumps(results.get("ic_ts", [])),
-                "quantile_returns": json.dumps(results.get("quantile_returns", [])),
-                "cumulative_returns": json.dumps(results.get("cumulative_returns", [])),
-                "ic_by_group": json.dumps(results.get("ic_by_group", {})),
-                "returns_by_group": json.dumps(results.get("returns_by_group", {})),
-                "turnover": json.dumps(results.get("turnover", {})),
-                "decay_analysis": json.dumps(results.get("decay_analysis", {})),
-                "charts_data": json.dumps(results.get("charts_data", {})),
-                "task_status": "completed",
-                "task_id": None,
-                "error_message": None
-            }
+        def clean_dict(d):
+            if isinstance(d, dict):
+                return {k: clean_dict(v) for k, v in d.items()}
+            elif isinstance(d, (list, tuple)):
+                return [clean_dict(item) for item in d]
+            else:
+                return clean_value(d)
 
-            # 转换为 DataFrame
-            df = pl.DataFrame([record])
+        results = clean_dict(results)
 
-            # 使用 upsert 保存
-            self.db.upsert("factor_analysis_extended", df, key_columns=["id"])
+        # 如果提供了 task_id，使用它；否则生成新的
+        if task_id is not None:
+            analysis_id = task_id
+            logger.info(f"Updating existing analysis record: id={analysis_id}")
+        else:
+            analysis_id = int(datetime.now().timestamp() * 1000)
+            logger.info(f"Creating new analysis record: id={analysis_id}")
 
-            logger.info(f"Saved Alphalens analysis result for {factor_id} (id={analysis_id})")
+        analysis_datetime = datetime.now()
 
-        except Exception as e:
-            logger.error(f"Failed to save Alphalens analysis: {e}")
-            import traceback
-            traceback.print_exc()
+        def _to_date(d):
+            if d is None:
+                return None
+            if hasattr(d, 'date'):
+                return d.date()
+            return dt.strptime(str(d), "%Y%m%d").date()
+
+        # 1. 完整分析报告存文件（详情页使用）
+        report_fields = [
+            'ic_ts', 'quantile_returns', 'cumulative_returns',
+            'returns_by_group', 'turnover', 'charts_data',
+            'ic_by_group', 'spread_ts', 'alpha_beta',
+            'factor_cumulative_returns', 'ic_by_month', 'event_study',
+            'ic_by_industry', 'returns_by_industry', 'diagnostics',
+            'decay_analysis',
+        ]
+        report = {k: results.get(k) for k in report_fields if results.get(k) is not None}
+
+        factor_analysis_dir = Path(settings.analysis_dir) / factor_id
+        factor_analysis_dir.mkdir(parents=True, exist_ok=True)
+        report_path = factor_analysis_dir / f"{analysis_id}.json"
+        report_path.write_text(json.dumps(report), encoding='utf-8')
+        logger.info(f"Analysis report saved to {report_path}")
+
+        # 2. 数据库只存摘要指标 + 文件路径（列表页和比较使用）
+        record = {
+            "id": analysis_id,
+            "factor_id": factor_id,
+            "analysis_date": analysis_datetime,
+            "start_date": _to_date(start_date),
+            "end_date": _to_date(end_date),
+            "config": json.dumps(config),
+            # 摘要指标：用于列表展示和跨因子比较
+            "ic_summary": json.dumps(results.get("ic_summary", {})),
+            "ic_by_period": json.dumps(results.get("ic_by_period", [])),
+            "decay_analysis": None,
+            # 详情报告文件路径
+            "report_path": str(report_path),
+            "task_status": "completed",
+            "task_id": str(task_id) if task_id else None,
+            "error_message": None
+        }
+
+        df = pl.DataFrame([record])
+        self.db.upsert("factor_analysis_extended", df, key_columns=["id"])
+        logger.info(f"Saved analysis metadata for {factor_id} (id={analysis_id})")
 
     # ==================== 查询接口 ====================
 
-    def get_task_status(self, task_id: int) -> Optional[Dict]:
+    def get_task_status(self, task_id: str) -> Optional[Dict]:
         """查询分析任务状态"""
         try:
             df = self.db.query("""

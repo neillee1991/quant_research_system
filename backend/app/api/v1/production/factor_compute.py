@@ -2,10 +2,11 @@
 import io
 import sys
 import time
+import uuid
 import types
 import traceback
 from datetime import datetime
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 
@@ -13,9 +14,36 @@ from store.dolphindb_client import db_client
 from services.factor_compute_service import FactorComputeService, DEFAULT_PREPROCESS as _DEFAULT_PREPROCESS
 from engine.production.registry import FactorDefinition, StorageConfig
 from app.core.logger import logger
+from app.core.utils import (
+    DateUtils,
+    safe_json_parse,
+    unify_record_fields,
+    safe_str_datetime,
+    normalize_trade_date_pl,
+)
 
 router = APIRouter()
 factor_service = FactorComputeService(db_client)
+
+
+# ==================== Helper Functions ====================
+
+def _format_run_record(record: Dict[str, Any]) -> Dict[str, Any]:
+    """格式化 factor_run_log 记录（统一日期格式、字段名）"""
+    result = dict(record)
+
+    # 格式化日期字段
+    for date_field in ["start_date", "end_date"]:
+        if result.get(date_field):
+            result[date_field] = DateUtils.format_date_for_display(result[date_field])
+
+    # 格式化时间戳
+    result["created_at"] = safe_str_datetime(result.get("created_at"))
+    result["finished_at"] = safe_str_datetime(result.get("finished_at"))
+
+    # 统一字段名
+    result = unify_record_fields(result)
+    return result
 
 
 # ==================== Pydantic Models ====================
@@ -61,43 +89,139 @@ class FactorTestRequest(BaseModel):
 
 # ==================== API Endpoints ====================
 
-@router.post("/production/run")
-async def run_production(req: ProductionRunRequest):
-    """运行生产任务"""
+def _run_factor_background(
+    factor_id: str,
+    mode: str,
+    target_date: Optional[str],
+    start_date: Optional[str],
+    end_date: Optional[str],
+    preprocess: Optional[Dict],
+    run_id: str
+):
+    """后台执行因子计算"""
     try:
-        preprocess = req.preprocess.model_dump() if req.preprocess else None
         result = factor_service.compute_factor(
+            factor_id=factor_id,
+            mode=mode,
+            target_date=target_date,
+            start_date=start_date,
+            end_date=end_date,
+            preprocess=preprocess,
+        )
+        logger.info(f"Factor {factor_id} computation completed: run_id={run_id}, success={result.success}, rows={result.rows}")
+    except Exception as e:
+        logger.error(f"Factor {factor_id} computation failed: run_id={run_id}, error={e}")
+
+
+@router.post("/production/run")
+async def run_production(req: ProductionRunRequest, background_tasks: BackgroundTasks):
+    """运行生产任务（异步）
+
+    立即返回 run_id，后台执行计算。使用 /production/status/{run_id} 查询状态。
+    """
+    try:
+        # 生成 run_id
+        run_id = f"{req.factor_id}_{int(time.time() * 1000)}"
+
+        preprocess = req.preprocess.model_dump() if req.preprocess else None
+
+        # 添加后台任务
+        background_tasks.add_task(
+            _run_factor_background,
             factor_id=req.factor_id,
             mode=req.mode,
             target_date=req.target_date,
             start_date=req.start_date,
             end_date=req.end_date,
             preprocess=preprocess,
+            run_id=run_id
         )
-        return {"status": "success", "data": {"completed": result.success}}
+
+        return {
+            "status": "success",
+            "data": {
+                "run_id": run_id,
+                "factor_id": req.factor_id,
+                "status": "pending",
+                "message": "Factor computation started in background"
+            }
+        }
     except Exception as e:
-        logger.error(f"Production run failed: {e}")
+        logger.error(f"Failed to start factor computation: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/production/batch-run")
-async def batch_run_production(req: BatchRunRequest):
-    """批量计算因子"""
-    preprocess = req.preprocess.model_dump() if req.preprocess else None
-    results = []
-    for fid in req.factor_ids:
-        try:
-            result = factor_service.compute_factor(
+async def batch_run_production(req: BatchRunRequest, background_tasks: BackgroundTasks):
+    """批量计算因子（异步）
+
+    立即返回所有 run_id，后台并行执行。使用 /production/status/{run_id} 查询各因子状态。
+    """
+    try:
+        preprocess = req.preprocess.model_dump() if req.preprocess else None
+        run_ids = []
+
+        for fid in req.factor_ids:
+            # 使用 UUID 替代 timestamp + sleep，避免冲突且无需延迟
+            run_id = f"{fid}_{uuid.uuid4().hex[:12]}"
+            run_ids.append({"factor_id": fid, "run_id": run_id, "status": "pending"})
+
+            # 每个因子独立后台任务
+            background_tasks.add_task(
+                _run_factor_background,
                 factor_id=fid,
                 mode=req.mode,
+                target_date=None,
                 start_date=req.start_date,
                 end_date=req.end_date,
                 preprocess=preprocess,
+                run_id=run_id
             )
-            results.append({"factor_id": fid, "success": result.success})
-        except Exception as e:
-            results.append({"factor_id": fid, "success": False, "error": str(e)})
-    return {"status": "success", "data": results}
+
+        return {
+            "status": "success",
+            "data": {
+                "tasks": run_ids,
+                "message": f"{len(req.factor_ids)} factor computations started in background"
+            }
+        }
+    except Exception as e:
+        logger.error(f"Failed to start batch computation: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/production/status/{run_id}")
+async def get_run_status(run_id: str):
+    """查询因子计算任务状态
+
+    返回任务的执行状态、耗时、数据条数等信息。
+    """
+    try:
+        # 只查询需要的列，而不是 SELECT *
+        df = db_client.query("""
+            SELECT id, factor_id, run_id, start_date, end_date, status,
+                   created_at, finished_at, rows_affected, duration_seconds, error_message
+            FROM factor_run_log
+            WHERE run_id = %s
+            ORDER BY created_at DESC
+            LIMIT 1
+        """, (run_id,))
+
+        if df.is_empty():
+            raise HTTPException(
+                status_code=404,
+                detail=f"Run {run_id} not found"
+            )
+
+        record = df.to_dicts()[0]
+        record = _format_run_record(record)
+
+        return {"status": "success", "data": record}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get run status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/production/history")
@@ -115,35 +239,30 @@ async def get_production_history(
             conditions.append("factor_id = %s")
             params.append(factor_id)
         if start_date:
-            if not start_date.isdigit() or len(start_date) != 8:
+            if not DateUtils.validate_yyyymmdd(start_date):
                 raise HTTPException(status_code=400, detail="start_date must be YYYYMMDD")
             conditions.append(f"date(created_at) >= {start_date[:4]}.{start_date[4:6]}.{start_date[6:8]}")
         if end_date:
-            if not end_date.isdigit() or len(end_date) != 8:
+            if not DateUtils.validate_yyyymmdd(end_date):
                 raise HTTPException(status_code=400, detail="end_date must be YYYYMMDD")
             conditions.append(f"date(created_at) <= {end_date[:4]}.{end_date[4:6]}.{end_date[6:8]}")
         where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
         params.append(limit)
 
+        # 只查询需要的列
         df = db_client.query(f"""
-            SELECT * FROM factor_run_log
+            SELECT id, factor_id, run_id, start_date, end_date, status,
+                   created_at, finished_at, rows_affected, duration_seconds, error_message
+            FROM factor_run_log
             {where}
             ORDER BY created_at DESC LIMIT %s
         """, tuple(params))
+
         data = []
         if not df.is_empty():
             for row in df.to_dicts():
-                row["created_at"] = str(row["created_at"]) if row.get("created_at") else None
-                # 格式化日期字段：YYYYMMDD -> YYYY-MM-DD
-                if row.get("start_date"):
-                    date_str = str(row["start_date"])
-                    if len(date_str) == 8:
-                        row["start_date"] = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
-                if row.get("end_date"):
-                    date_str = str(row["end_date"])
-                    if len(date_str) == 8:
-                        row["end_date"] = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
-                data.append(row)
+                data.append(_format_run_record(row))
+
         return {"status": "success", "data": data}
     except Exception as e:
         if "does not exist" in str(e):
@@ -328,27 +447,8 @@ async def test_factor_code(req: FactorTestRequest):
 
         # 过滤结果：只保留测试区间内的数据
         if "trade_date" in result.columns:
-            # 确保 trade_date 是字符串类型，格式为 YYYYMMDD
-            original_dtype = result["trade_date"].dtype
-            log("stats", f"trade_date 原始类型: {original_dtype}")
-
-            if result["trade_date"].dtype == pl.Utf8:
-                # 已经是字符串，检查格式并转换为 YYYYMMDD
-                # 可能是 "2026-03-02" 或 "20260302" 格式
-                result = result.with_columns(
-                    pl.col("trade_date").str.replace_all("-", "").alias("trade_date")
-                )
-            elif result["trade_date"].dtype in [pl.Date, pl.Datetime]:
-                # 日期类型，转换为 YYYYMMDD 字符串格式
-                result = result.with_columns(
-                    pl.col("trade_date").dt.strftime("%Y%m%d").alias("trade_date")
-                )
-            else:
-                # 其他类型，先转字符串再去掉连字符
-                result = result.with_columns(
-                    pl.col("trade_date").cast(pl.Utf8).str.replace_all("-", "").alias("trade_date")
-                )
-
+            # 使用统一的日期归一化工具
+            result = normalize_trade_date_pl(result, "trade_date")
             log("stats", f"已将 trade_date 转换为 YYYYMMDD 格式")
             log("stats", f"过滤前行数: {result.shape[0]}, 过滤条件: {req.start_date} <= trade_date <= {req.end_date}")
 

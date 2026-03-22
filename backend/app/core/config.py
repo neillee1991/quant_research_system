@@ -77,6 +77,7 @@ class Settings(BaseSettings):
     raw_data_dir: Path = Field(default=BASE_DIR / "data" / "raw")
     factors_dir: Path = Field(default=BASE_DIR / "data" / "factors")
     models_dir: Path = Field(default=BASE_DIR / "data" / "models")
+    analysis_dir: Path = Field(default=BASE_DIR / "data" / "analysis")
     # 日志目录：使用用户主目录避免权限问题，支持环境变量覆盖
     log_dir: Path = Field(
         default=Path(os.path.expanduser("~")) / ".quant_research" / "logs",
@@ -91,7 +92,7 @@ class Settings(BaseSettings):
     ml: MLConfig = Field(default_factory=MLConfig)
     sync: SyncConfig = Field(default_factory=SyncConfig)
 
-    @field_validator("data_dir", "raw_data_dir", "factors_dir", "models_dir", "log_dir")
+    @field_validator("data_dir", "raw_data_dir", "factors_dir", "models_dir", "log_dir", "analysis_dir")
     @classmethod
     def create_directories(cls, v: Path) -> Path:
         """自动创建目录"""

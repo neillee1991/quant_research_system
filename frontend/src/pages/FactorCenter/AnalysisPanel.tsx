@@ -2,64 +2,45 @@
  * 因子分析面板
  */
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import {
-  Card, Button, Select, InputNumber, Spin, Empty, Table, Tag, Checkbox, Collapse,
+  Card, Button, Select, InputNumber, Spin, Empty, Table, Tag, Checkbox, Collapse, Popconfirm,
 } from 'antd';
 
-/** YYYYMMDD → YYYY-MM-DD */
-const formatDate = (d: string) =>
-  d?.length === 8 ? `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}` : d;
+/** 统一日期格式化：YYYYMMDD 或 datetime 字符串 → YYYY-MM-DD */
+const formatDate = (d: string) => {
+  if (!d) return d;
+  if (/^\d{8}$/.test(d)) return `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`;
+  return d.slice(0, 10); // 截断时间部分
+};
+
+/** 从任意日期字符串提取 YYYYMMDD */
+const toYYYYMMDD = (d: string): string => {
+  if (!d) return '';
+  if (/^\d{8}$/.test(d)) return d;
+  return d.slice(0, 10).replace(/-/g, '');
+};
+
+/** 加载交易日 Set，用于过滤非交易日 */
+const useTradingDaySet = (startDate?: string, endDate?: string): Set<string> => {
+  const [tradingDaySet, setTradingDaySet] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    if (!startDate || !endDate) return;
+    const start = toYYYYMMDD(startDate);
+    const end = toYYYYMMDD(endDate);
+    if (!start || !end) return;
+    productionApi.getTradingDays(start, end)
+      .then((res: { data?: { data?: string[] } }) => setTradingDaySet(new Set(res.data?.data || [])))
+      .catch(() => {});
+  }, [startDate, endDate]);
+  return tradingDaySet;
+};
 import { BarChartOutlined } from '@ant-design/icons';
 import { useMessage } from '../../hooks/useMessage';
 import ReactECharts from 'echarts-for-react';
 import QuantDatePicker from '../../components/QuantDatePicker';
 import { useFactorAnalysis } from './hooks/useFactorAnalysis';
 import { productionApi } from '../../api';
-
-/**
- * 因子自相关衰减子组件
- */
-const DecayAnalysisSection: React.FC<{ data: Record<string, number> }> = ({ data }) => {
-  const entries = useMemo(
-    () => Object.entries(data).map(([k, v]) => ({ period: k, value: v })).sort((a, b) => Number(a.period) - Number(b.period)),
-    [data]
-  );
-  const option = {
-    backgroundColor: 'transparent',
-    tooltip: { trigger: 'axis', formatter: (params: any[]) => `${params[0].name}天: ${params[0].value?.toFixed(4)}` },
-    grid: { top: 30, bottom: 30, left: 60, right: 20 },
-    xAxis: { type: 'category', data: entries.map(e => `${e.period}天`), axisLabel: { color: '#94A3B8' } },
-    yAxis: {
-      type: 'value',
-      name: '自相关系数',
-      axisLabel: { color: '#94A3B8' },
-      splitLine: { lineStyle: { color: 'rgba(148,163,184,0.15)' } },
-    },
-    series: [{
-      type: 'bar',
-      data: entries.map(e => ({
-        value: e.value,
-        itemStyle: { color: e.value >= 0 ? '#0077FA' : '#ef4444' },
-      })),
-    }],
-  };
-  return (
-    <Card
-      style={{ background: 'var(--bg-card)', marginTop: 16 }}
-      title={
-        <span style={{ color: 'var(--text-secondary)' }}>
-          因子排名自相关（衰减分析）
-          <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 8 }}>
-            衡量因子排名的稳定性，值越高说明因子信号持续性越强
-          </span>
-        </span>
-      }
-    >
-      <ReactECharts option={option} style={{ height: 220 }} />
-    </Card>
-  );
-};
 
 /**
  * 分组分析子组件（有 groupby 时才显示）
@@ -92,120 +73,6 @@ const GroupAnalysisSection: React.FC<{ icByGroup: Record<string, any>; returnsBy
 };
 
 /**
- * 分行业 IC 和收益率分析
- * icByIndustry: { [industry]: { [period]: ic_mean } }
- * returnsByIndustry: { [industry]: [{period, quantile, mean_return}] }
- */
-const IndustryAnalysisSection: React.FC<{
-  icByIndustry: Record<string, Record<string, number>>;
-  returnsByIndustry: Record<string, Array<{ period: string; quantile: number; mean_return: number }>>;
-}> = ({ icByIndustry, returnsByIndustry }) => {
-  const industries = useMemo(() => Object.keys(icByIndustry), [icByIndustry]);
-  const periods = useMemo(
-    () => industries.length > 0 ? Object.keys(icByIndustry[industries[0]]) : [],
-    [icByIndustry, industries]
-  );
-
-  // 按第一个周期的 IC 均值排序行业
-  const sortedIndustries = useMemo(() => {
-    if (!periods.length) return industries;
-    return [...industries].sort(
-      (a, b) => (icByIndustry[b][periods[0]] ?? 0) - (icByIndustry[a][periods[0]] ?? 0)
-    );
-  }, [industries, periods, icByIndustry]);
-
-  const colors = ['#0077FA', '#14C9C9', '#f97316', '#22c55e', '#8b5cf6'];
-
-  const icOption = {
-    backgroundColor: 'transparent',
-    tooltip: { trigger: 'axis' },
-    legend: { data: periods, textStyle: { color: '#94A3B8' }, top: 0 },
-    grid: { top: 40, bottom: 80, left: 60, right: 20 },
-    xAxis: {
-      type: 'category',
-      data: sortedIndustries,
-      axisLabel: { color: '#94A3B8', rotate: 40, fontSize: 11 },
-    },
-    yAxis: {
-      type: 'value',
-      name: 'IC均值',
-      axisLabel: { color: '#94A3B8', formatter: (v: number) => v.toFixed(3) },
-      splitLine: { lineStyle: { color: 'rgba(148,163,184,0.15)' } },
-    },
-    series: periods.map((p, i) => ({
-      name: p,
-      type: 'bar',
-      data: sortedIndustries.map(ind => {
-        const v = icByIndustry[ind]?.[p] ?? 0;
-        return { value: v, itemStyle: { color: v >= 0 ? colors[i % colors.length] : '#ef4444' } };
-      }),
-    })),
-  };
-
-  // Q5-Q1 spread by industry（因子溢价）
-  const spreadOption = useMemo(() => {
-    if (!Object.keys(returnsByIndustry).length) return null;
-    const firstPeriod = periods[0];
-    if (!firstPeriod) return null;
-
-    const spreads = sortedIndustries.map(ind => {
-      const rows = (returnsByIndustry[ind] || []).filter(r => r.period === firstPeriod);
-      const quantiles = rows.map(r => r.quantile).sort((a, b) => a - b);
-      if (quantiles.length < 2) return { ind, spread: 0 };
-      const q1 = rows.find(r => r.quantile === quantiles[0])?.mean_return ?? 0;
-      const qN = rows.find(r => r.quantile === quantiles[quantiles.length - 1])?.mean_return ?? 0;
-      return { ind, spread: qN - q1 };
-    });
-
-    return {
-      backgroundColor: 'transparent',
-      tooltip: { trigger: 'axis', formatter: (params: any[]) => `${params[0].name}: ${(params[0].value * 100).toFixed(3)}%` },
-      grid: { top: 30, bottom: 80, left: 70, right: 20 },
-      xAxis: {
-        type: 'category',
-        data: spreads.map(s => s.ind),
-        axisLabel: { color: '#94A3B8', rotate: 40, fontSize: 11 },
-      },
-      yAxis: {
-        type: 'value',
-        name: 'Q5-Q1',
-        axisLabel: { color: '#94A3B8', formatter: (v: number) => `${(v * 100).toFixed(2)}%` },
-        splitLine: { lineStyle: { color: 'rgba(148,163,184,0.15)' } },
-      },
-      series: [{
-        type: 'bar',
-        data: spreads.map(s => ({
-          value: s.spread,
-          itemStyle: { color: s.spread >= 0 ? '#22c55e' : '#ef4444' },
-        })),
-      }],
-    };
-  }, [returnsByIndustry, sortedIndustries, periods]);
-
-  return (
-    <Card
-      style={{ background: 'var(--bg-card)', marginTop: 16 }}
-      title={<span style={{ color: 'var(--text-secondary)' }}>分行业分析</span>}
-    >
-      <div style={{ display: 'grid', gridTemplateColumns: spreadOption ? '1fr 1fr' : '1fr', gap: 16 }}>
-        <div>
-          <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 8 }}>各行业 IC 均值</div>
-          <ReactECharts option={icOption} style={{ height: 300 }} />
-        </div>
-        {spreadOption && (
-          <div>
-            <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 8 }}>
-              各行业因子溢价（Q5-Q1，{periods[0]}）
-            </div>
-            <ReactECharts option={spreadOption} style={{ height: 300 }} />
-          </div>
-        )}
-      </div>
-    </Card>
-  );
-};
-
-/**
  * 单周期分析面板（在 Collapse 内展开）
  */
 const PeriodPanel: React.FC<{ period: number; analysisResult: any; isFirstPeriod: boolean }> = ({
@@ -215,6 +82,9 @@ const PeriodPanel: React.FC<{ period: number; analysisResult: any; isFirstPeriod
   const icTsCol = `ic_${periodKey}`;
   const turnoverKey = `period_${period}`;
   const colors = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#0077FA', '#8b5cf6'];
+
+  const tradingDaySet = useTradingDaySet(analysisResult?.start_date, analysisResult?.end_date);
+  const isTradingDay = (d: string) => tradingDaySet.size === 0 || tradingDaySet.has(toYYYYMMDD(d));
 
   const icRow = useMemo(
     () => (analysisResult?.ic_by_period || []).find((r: any) => r.period === periodKey),
@@ -226,21 +96,20 @@ const PeriodPanel: React.FC<{ period: number; analysisResult: any; isFirstPeriod
   );
   const icTsData = useMemo(() => {
     return (analysisResult?.ic_ts || [])
-      .filter((d: any) => d[icTsCol] != null)
+      .filter((d: any) => d[icTsCol] != null && isTradingDay(d.date))
       .map((d: any) => ({ date: formatDate(d.date), value: d[icTsCol] }));
-  }, [analysisResult, icTsCol]);
+  }, [analysisResult, icTsCol, tradingDaySet]);
   const quantileReturns = useMemo(
     () => (analysisResult?.quantile_returns || []).filter((r: any) => r.period === periodKey),
     [analysisResult, periodKey]
   );
   const cumulativeData = useMemo(() => {
-    if (!isFirstPeriod) return null;
-    const raw = analysisResult?.cumulative_returns || [];
+    const raw = (analysisResult?.cumulative_returns?.[periodKey]) || [];
     const qKeys = Object.keys(raw[0] || {}).filter(k => k.startsWith('quantile_')).sort();
     return raw
-      .filter((d: any) => qKeys.some(k => d[k] != null))
+      .filter((d: any) => qKeys.some(k => d[k] != null) && isTradingDay(d.date))
       .map((d: any) => ({ ...d, date: formatDate(d.date) }));
-  }, [analysisResult, isFirstPeriod]);
+  }, [analysisResult, periodKey, tradingDaySet]);
   const turnoverTs = useMemo(() => {
     const tv = analysisResult?.turnover || {};
     const qs = Object.keys(tv).sort((a, b) =>
@@ -251,7 +120,7 @@ const PeriodPanel: React.FC<{ period: number; analysisResult: any; isFirstPeriod
     const botQ = qs[0];
     const allDates = Object.keys(tv[topQ]?.[turnoverKey] || {}).sort();
     const dates = allDates.filter(d =>
-      tv[topQ]?.[turnoverKey]?.[d] != null || tv[botQ]?.[turnoverKey]?.[d] != null
+      (tv[topQ]?.[turnoverKey]?.[d] != null || tv[botQ]?.[turnoverKey]?.[d] != null) && isTradingDay(d)
     );
     if (!dates.length) return null;
     return {
@@ -261,7 +130,7 @@ const PeriodPanel: React.FC<{ period: number; analysisResult: any; isFirstPeriod
       topLabel: `Q${topQ.replace('quantile_', '')}`,
       botLabel: `Q${botQ.replace('quantile_', '')}`,
     };
-  }, [analysisResult, turnoverKey]);
+  }, [analysisResult, turnoverKey, tradingDaySet]);
 
   const StatCard = ({ label, value, color }: { label: string; value: string; color: string }) => (
     <div style={{ minWidth: 110, padding: '8px 12px', background: 'var(--bg-tertiary)', borderRadius: 6 }}>
@@ -286,6 +155,24 @@ const PeriodPanel: React.FC<{ period: number; analysisResult: any; isFirstPeriod
               <StatCard label="t 统计量" value={icRow.t_stat?.toFixed(3)} color={Math.abs(icRow.t_stat ?? 0) > 1.96 ? 'var(--color-gain)' : 'var(--text-secondary)'} />
               <StatCard label="p 值" value={`${icRow.p_value?.toFixed(4)}${sigLabel(icRow.p_value)}`} color={icRow.p_value < 0.05 ? 'var(--color-gain)' : 'var(--text-secondary)'} />
               <StatCard label="样本数" value={String(icRow.n_obs ?? '-')} color="var(--text-primary)" />
+              {(() => {
+                const abRow = (analysisResult?.alpha_beta || []).find((r: any) => r.period === periodKey);
+                if (!abRow) return null;
+                return (
+                  <>
+                    <StatCard
+                      label="年化 Alpha"
+                      value={`${(abRow.ann_alpha * 100).toFixed(2)}%`}
+                      color={abRow.ann_alpha > 0 ? 'var(--color-gain)' : 'var(--color-loss)'}
+                    />
+                    <StatCard
+                      label="Beta"
+                      value={abRow.beta?.toFixed(3)}
+                      color={Math.abs(abRow.beta) < 0.1 ? 'var(--color-gain)' : 'var(--text-secondary)'}
+                    />
+                  </>
+                );
+              })()}
             </div>
           </div>
           {rankIcRow && (
@@ -316,10 +203,51 @@ const PeriodPanel: React.FC<{ period: number; analysisResult: any; isFirstPeriod
                 yAxis: { type: 'value', axisLabel: { color: '#94A3B8' }, splitLine: { lineStyle: { color: 'rgba(148,163,184,0.15)' } } },
                 series: [{ type: 'line', data: icTsData.map((d: any) => d.value), showSymbol: false, lineStyle: { color: '#0077FA' }, areaStyle: { color: 'rgba(0,119,250,0.07)' } }],
               }}
-              style={{ height: 180 }}
+              style={{ height: 220 }}
             />
           </div>
         )}
+        {/* 月度 IC */}
+        {(() => {
+          const monthlyIc = analysisResult?.ic_by_month || [];
+          const filtered = monthlyIc.filter((d: any) => d[icTsCol.replace('ic_', '')] != null);
+          if (!filtered.length) return null;
+          const months = filtered.map((d: any) => d.month);
+          const values = filtered.map((d: any) => d[icTsCol.replace('ic_', '')] ?? null);
+          const maxAbs = Math.max(...values.filter(Boolean).map(Math.abs), 0.01);
+          return (
+            <div>
+              <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 6 }}>
+                月度 IC
+                <span style={{ color: 'var(--text-muted)', fontSize: 11, marginLeft: 8 }}>
+                  看因子预测能力的季节性和时段分布，颜色越深越强
+                </span>
+              </div>
+              <ReactECharts
+                option={{
+                  backgroundColor: 'transparent',
+                  tooltip: { trigger: 'axis', formatter: (p: any[]) => `${p[0].name}: ${p[0].value?.toFixed(4) ?? '-'}` },
+                  grid: { top: 10, bottom: 50, left: 60, right: 10 },
+                  xAxis: { type: 'category', data: months.map((m: string) => m.slice(0, 7)), axisLabel: { color: '#94A3B8', rotate: 45, fontSize: 10 } },
+                  yAxis: { type: 'value', axisLabel: { color: '#94A3B8' }, splitLine: { lineStyle: { color: 'rgba(148,163,184,0.15)' } } },
+                  series: [{
+                    type: 'bar',
+                    data: values.map((v: number | null) => ({
+                      value: v,
+                      itemStyle: {
+                        color: v == null ? 'transparent'
+                          : v >= 0
+                            ? `rgba(34,197,94,${Math.min(0.3 + Math.abs(v) / maxAbs * 0.7, 1)})`
+                            : `rgba(239,68,68,${Math.min(0.3 + Math.abs(v) / maxAbs * 0.7, 1)})`,
+                      },
+                    })),
+                  }],
+                }}
+                style={{ height: 220 }}
+              />
+            </div>
+          );
+        })()}
         {quantileReturns.length > 0 && (
           <div>
             <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 6 }}>分层收益</div>
@@ -332,11 +260,124 @@ const PeriodPanel: React.FC<{ period: number; analysisResult: any; isFirstPeriod
                 yAxis: { type: 'value', axisLabel: { color: '#94A3B8', formatter: (v: number) => `${(v * 100).toFixed(2)}%` }, splitLine: { lineStyle: { color: 'rgba(148,163,184,0.15)' } } },
                 series: [{ type: 'bar', data: quantileReturns.map((r: any, i: number) => ({ value: r.mean_return, itemStyle: { color: colors[i % colors.length] } })) }],
               }}
-              style={{ height: 180 }}
+              style={{ height: 220 }}
             />
           </div>
         )}
+        {(() => {
+          const icByInd = analysisResult?.ic_by_industry;
+          if (!icByInd || !Object.keys(icByInd).length) return null;
+          const icValues: Record<string, number> = {};
+          Object.keys(icByInd).forEach(ind => {
+            const v = icByInd[ind]?.[periodKey];
+            if (v != null) icValues[ind] = v;
+          });
+          const sortedInds = Object.keys(icValues).sort((a, b) => icValues[b] - icValues[a]);
+          if (!sortedInds.length) return null;
+          const icColors = sortedInds.map(ind => icValues[ind] >= 0 ? '#0077FA' : '#ef4444');
+          return (
+            <div>
+              <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 6 }}>各行业 IC 均值</div>
+              <ReactECharts
+                option={{
+                  backgroundColor: 'transparent',
+                  tooltip: { trigger: 'axis' },
+                  grid: { top: 10, bottom: 80, left: 60, right: 10 },
+                  xAxis: { type: 'category', data: sortedInds, axisLabel: { color: '#94A3B8', rotate: 40, fontSize: 10 } },
+                  yAxis: { type: 'value', axisLabel: { color: '#94A3B8', formatter: (v: number) => v.toFixed(3) }, splitLine: { lineStyle: { color: 'rgba(148,163,184,0.15)' } } },
+                  series: [{ type: 'bar', data: sortedInds.map((ind, i) => ({ value: icValues[ind], itemStyle: { color: icColors[i] } })) }],
+                }}
+                style={{ height: 220 }}
+              />
+            </div>
+          );
+        })()}
       </div>
+
+      {/* 各行业 Q5-Q1 Spread */}
+      {(() => {
+        const icByInd = analysisResult?.ic_by_industry;
+        const retByInd = analysisResult?.returns_by_industry;
+        if (!icByInd || !retByInd) return null;
+        const icValues: Record<string, number> = {};
+        Object.keys(icByInd).forEach(ind => {
+          const v = icByInd[ind]?.[periodKey];
+          if (v != null) icValues[ind] = v;
+        });
+        const sortedInds = Object.keys(icValues).sort((a, b) => icValues[b] - icValues[a]);
+        const spreadByInd: Record<string, number> = {};
+        sortedInds.forEach(ind => {
+          const rows = (retByInd[ind] || []).filter((r: any) => r.period === periodKey);
+          const q5 = rows.find((r: any) => r.quantile === Math.max(...rows.map((x: any) => x.quantile)));
+          const q1 = rows.find((r: any) => r.quantile === Math.min(...rows.map((x: any) => x.quantile)));
+          if (q5 && q1) spreadByInd[ind] = q5.mean_return - q1.mean_return;
+        });
+        if (!Object.keys(spreadByInd).length) return null;
+        const spreadColors = sortedInds.map(ind => (spreadByInd[ind] ?? 0) >= 0 ? '#22c55e' : '#ef4444');
+        return (
+          <div>
+            <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 6 }}>各行业 Q5-Q1 Spread</div>
+            <ReactECharts
+              option={{
+                backgroundColor: 'transparent',
+                tooltip: { trigger: 'axis' },
+                grid: { top: 10, bottom: 80, left: 70, right: 10 },
+                xAxis: { type: 'category', data: sortedInds, axisLabel: { color: '#94A3B8', rotate: 40, fontSize: 10 } },
+                yAxis: { type: 'value', axisLabel: { color: '#94A3B8', formatter: (v: number) => `${(v * 100).toFixed(2)}%` }, splitLine: { lineStyle: { color: 'rgba(148,163,184,0.15)' } } },
+                series: [{ type: 'bar', data: sortedInds.map((ind, i) => ({ value: spreadByInd[ind] ?? null, itemStyle: { color: spreadColors[i] } })) }],
+              }}
+              style={{ height: 220 }}
+            />
+          </div>
+        );
+      })()}
+
+      {/* Q5-Q1 多空 Spread 时序 */}
+      {(() => {
+        const spreadMap = analysisResult?.spread_ts?.[periodKey] || {};
+        const allDates = Object.keys(spreadMap).sort();
+        const tradingDates = allDates.filter(d => spreadMap[d] != null && isTradingDay(d));
+        if (!tradingDates.length) return null;
+        const spreadValues = tradingDates.map(d => spreadMap[d]);
+        return (
+          <div>
+            <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 6 }}>
+              Q5-Q1 多空 Spread 时序
+              <span style={{ color: 'var(--text-muted)', fontSize: 11, marginLeft: 8 }}>
+                逐日多空收益差，均值越大越好，负值天数占比越低越好
+              </span>
+            </div>
+            <ReactECharts
+              option={{
+                backgroundColor: 'transparent',
+                tooltip: {
+                  trigger: 'axis',
+                  formatter: (p: any[]) => `${p[0].name}: ${p[0].value != null ? (p[0].value * 100).toFixed(3) + '%' : '-'}`,
+                },
+                grid: { top: 10, bottom: 40, left: 70, right: 10 },
+                xAxis: {
+                  type: 'category',
+                  data: tradingDates.map(formatDate),
+                  axisLabel: { color: '#94A3B8', rotate: 30, fontSize: 10 },
+                },
+                yAxis: {
+                  type: 'value',
+                  axisLabel: { color: '#94A3B8', formatter: (v: number) => `${(v * 100).toFixed(2)}%` },
+                  splitLine: { lineStyle: { color: 'rgba(148,163,184,0.15)' } },
+                },
+                series: [{
+                  type: 'bar',
+                  data: spreadValues.map((v: number | null) => ({
+                    value: v,
+                    itemStyle: { color: (v ?? 0) >= 0 ? '#22c55e' : '#ef4444' },
+                  })),
+                }],
+              }}
+              style={{ height: 160 }}
+            />
+          </div>
+        );
+      })()}
 
       {cumulativeData && cumulativeData.length > 0 && (() => {
         const qKeys = Object.keys(cumulativeData[0]).filter(k => k.startsWith('quantile_')).sort();
@@ -350,8 +391,53 @@ const PeriodPanel: React.FC<{ period: number; analysisResult: any; isFirstPeriod
                 legend: { data: qKeys.map(k => k.replace('quantile_', 'Q')), textStyle: { color: '#94A3B8' }, top: 0 },
                 grid: { top: 30, bottom: 40, left: 60, right: 10 },
                 xAxis: { type: 'category', data: cumulativeData.map((d: any) => d.date), axisLabel: { color: '#94A3B8', rotate: 30, fontSize: 10 } },
-                yAxis: { type: 'value', axisLabel: { color: '#94A3B8', formatter: (v: number) => v.toFixed(2) }, splitLine: { lineStyle: { color: 'rgba(148,163,184,0.15)' } } },
+                yAxis: { type: 'value', scale: true, axisLabel: { color: '#94A3B8', formatter: (v: number) => v.toFixed(2) }, splitLine: { lineStyle: { color: 'rgba(148,163,184,0.15)' } } },
                 series: qKeys.map((k, i) => ({ name: k.replace('quantile_', 'Q'), type: 'line', data: cumulativeData.map((d: any) => d[k]), showSymbol: false, lineStyle: { color: colors[i % colors.length] }, itemStyle: { color: colors[i % colors.length] } })),
+              }}
+              style={{ height: 200 }}
+            />
+          </div>
+        );
+      })()}
+
+      {/* 因子加权多空组合净值 */}
+      {(() => {
+        const fcr = analysisResult?.factor_cumulative_returns || [];
+        const tradingFcr = fcr.filter((d: any) => d[periodKey] != null && isTradingDay(d.date));
+        if (!tradingFcr.length) return null;
+        return (
+          <div>
+            <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 6 }}>
+              因子加权多空组合净值
+              <span style={{ color: 'var(--text-muted)', fontSize: 11, marginLeft: 8 }}>
+                按因子值连续加权的多空组合，比分位数更精细，持续上升为好
+              </span>
+            </div>
+            <ReactECharts
+              option={{
+                backgroundColor: 'transparent',
+                tooltip: { trigger: 'axis' },
+                grid: { top: 10, bottom: 40, left: 60, right: 10 },
+                xAxis: {
+                  type: 'category',
+                  data: tradingFcr.map((d: any) => formatDate(d.date)),
+                  axisLabel: { color: '#94A3B8', rotate: 30, fontSize: 10 },
+                },
+                yAxis: {
+                  type: 'value',
+                  scale: true,
+                  axisLabel: { color: '#94A3B8', formatter: (v: number) => v.toFixed(2) },
+                  splitLine: { lineStyle: { color: 'rgba(148,163,184,0.15)' } },
+                },
+                series: [{
+                  name: periodKey,
+                  type: 'line',
+                  data: tradingFcr.map((d: any) => d[periodKey] ?? null),
+                  showSymbol: false,
+                  lineStyle: { color: '#0077FA' },
+                  itemStyle: { color: '#0077FA' },
+                  areaStyle: { color: 'rgba(0,119,250,0.07)' },
+                }],
               }}
               style={{ height: 200 }}
             />
@@ -379,6 +465,105 @@ const PeriodPanel: React.FC<{ period: number; analysisResult: any; isFirstPeriod
           />
         </div>
       )}
+
+      {/* 因子排名自相关 */}
+      {(() => {
+        const decayData = analysisResult?.decay_analysis?.[periodKey];
+        if (!decayData || !Object.keys(decayData).length) return null;
+        const entries = Object.entries(decayData as Record<string, number>)
+          .filter(([d, v]) => v != null && isTradingDay(d))
+          .sort(([a], [b]) => a.localeCompare(b));
+        if (!entries.length) return null;
+        return (
+          <div>
+            <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 6 }}>
+              因子排名自相关
+              <span style={{ color: 'var(--text-muted)', fontSize: 11, marginLeft: 8 }}>
+                lag={period}天，值越高说明因子信号持续性越强
+              </span>
+            </div>
+            <ReactECharts
+              option={{
+                backgroundColor: 'transparent',
+                tooltip: { trigger: 'axis', formatter: (p: any[]) => `${p[0].name}: ${p[0].value?.toFixed(4)}` },
+                grid: { top: 10, bottom: 40, left: 60, right: 10 },
+                xAxis: { type: 'category', data: entries.map(([d]) => formatDate(d)), axisLabel: { color: '#94A3B8', rotate: 30, fontSize: 10 } },
+                yAxis: { type: 'value', scale: true, axisLabel: { color: '#94A3B8' }, splitLine: { lineStyle: { color: 'rgba(148,163,184,0.15)' } } },
+                series: [{
+                  type: 'line',
+                  showSymbol: false,
+                  data: entries.map(([, v]) => v),
+                  lineStyle: { color: '#0077FA' },
+                  areaStyle: { color: 'rgba(0,119,250,0.07)' },
+                }],
+              }}
+              style={{ height: 180 }}
+            />
+          </div>
+        );
+      })()}
+
+      {/* 事件研究：因子形成前后累积收益 */}
+      {(() => {
+        const es = analysisResult?.event_study;
+        if (!es || !Object.keys(es).length) return null;
+        const quantileKeys = Object.keys(es).sort((a, b) => Number(a) - Number(b));
+        const firstQ = quantileKeys[0];
+        const offsets = Object.keys(es[firstQ]?.mean || {}).sort((a, b) => Number(a) - Number(b));
+        if (!offsets.length) return null;
+        const esColors = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#0077FA', '#8b5cf6'];
+        return (
+          <div>
+            <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 6 }}>
+              事件研究：因子形成前后累积收益
+              <span style={{ color: 'var(--text-muted)', fontSize: 11, marginLeft: 8 }}>
+                t=0 为因子形成日，正值区间收益持续上升说明信号有效；t=0 前已有收益需警惕前视偏差
+              </span>
+            </div>
+            <ReactECharts
+              option={{
+                backgroundColor: 'transparent',
+                tooltip: { trigger: 'axis' },
+                legend: {
+                  data: quantileKeys.map(q => `Q${q}`),
+                  textStyle: { color: '#94A3B8' },
+                  top: 0,
+                },
+                grid: { top: 30, bottom: 30, left: 60, right: 10 },
+                xAxis: {
+                  type: 'category',
+                  data: offsets.map(o => `t${Number(o) >= 0 ? '+' : ''}${o}`),
+                  axisLabel: { color: '#94A3B8' },
+                  axisLine: { lineStyle: { color: 'rgba(148,163,184,0.3)' } },
+                  markLine: undefined,
+                },
+                yAxis: {
+                  type: 'value',
+                  axisLabel: {
+                    color: '#94A3B8',
+                    formatter: (v: number) => `${(v * 100).toFixed(2)}%`,
+                  },
+                  splitLine: { lineStyle: { color: 'rgba(148,163,184,0.15)' } },
+                },
+                series: quantileKeys.map((q, i) => ({
+                  name: `Q${q}`,
+                  type: 'line',
+                  smooth: true,
+                  data: offsets.map(o => {
+                    const v = es[q]?.mean?.[o];
+                    return v != null ? v : null;
+                  }),
+                  showSymbol: false,
+                  lineStyle: { color: esColors[i % esColors.length] },
+                  itemStyle: { color: esColors[i % esColors.length] },
+                })),
+              }}
+              style={{ height: 220 }}
+            />
+          </div>
+        );
+      })()}
+
     </div>
   );
 };
@@ -408,15 +593,23 @@ const AnalysisPanel: React.FC = () => {
     setNeutralizeControls,
     industryLevel,
     setIndustryLevel,
+    winsorize,
+    setWinsorize,
+    winsorizeLower,
+    setWinsorizeLower,
+    winsorizeUpper,
+    setWinsorizeUpper,
     resolvedConfig,
     taskStatus,
     analysisResult,
+    setAnalysisResult,
     loading,
     runLoading,
     analysisHistory,
     historyLoading,
     runAnalysis,
     loadAnalysis,
+    deleteAnalysis,
   } = useFactorAnalysis();
 
   const historyColumns = [
@@ -425,48 +618,132 @@ const AnalysisPanel: React.FC = () => {
       dataIndex: 'analysis_date',
       key: 'analysis_date',
       render: (v: any) => (v ? new Date(v).toLocaleString('zh-CN') : '-'),
+      width: 160,
     },
     {
       title: '日期范围',
       key: 'range',
+      width: 200,
       render: (_: any, r: any) => `${r.start_date || '-'} ~ ${r.end_date || '-'}`,
     },
     {
       title: '股票池',
       dataIndex: 'index_pool',
       key: 'index_pool',
+      width: 120,
       render: (v: string) => v || '全市场',
     },
     {
-      title: '分组',
-      dataIndex: 'groupby_field',
-      key: 'groupby_field',
-      render: (v: string) => v || '-',
+      title: '持仓周期',
+      dataIndex: 'periods',
+      key: 'periods',
+      width: 140,
+      render: (v: number[]) => v?.length ? v.map(p => `${p}D`).join(' / ') : '-',
+    },
+    {
+      title: '分层数',
+      dataIndex: 'quantiles',
+      key: 'quantiles',
+      width: 80,
+      render: (v: number) => v ?? '-',
+    },
+    {
+      title: '买入价格',
+      dataIndex: 'entry_price',
+      key: 'entry_price',
+      width: 100,
+      render: (v: string) => {
+        const priceMap: Record<string, string> = {
+          open: '次日开盘',
+          close: '次日收盘',
+          high: '次日最高',
+          low: '次日最低',
+        };
+        return priceMap[v] || v || '-';
+      },
+    },
+    {
+      title: '预处理',
+      key: 'preprocess',
+      width: 200,
+      render: (_: any, r: any) => {
+        const tags: React.ReactNode[] = [];
+        if (r.neutralize) {
+          const controls = r.neutralize_controls || [];
+          const labels: Record<string, string> = {
+            market: '有截距',
+            industry: '行业',
+            size: '市值',
+          };
+          controls.forEach((c: string) => {
+            tags.push(
+              <Tag key={c} color="blue" style={{ marginBottom: 4 }}>
+                {labels[c] || c}
+              </Tag>
+            );
+          });
+        }
+        if (r.winsorize) {
+          tags.push(
+            <Tag key="winsorize" color="purple" style={{ marginBottom: 4 }}>
+              Winsorize [{(r.winsorize_lower * 100).toFixed(0)}%, {(r.winsorize_upper * 100).toFixed(0)}%]
+            </Tag>
+          );
+        }
+        if (tags.length === 0) {
+          return <Tag color="default">无</Tag>;
+        }
+        return <div>{tags}</div>;
+      },
     },
     {
       title: '状态',
       dataIndex: 'task_status',
       key: 'task_status',
+      width: 80,
       render: (v: string) => <Tag color={v === 'completed' ? 'green' : 'orange'}>{v}</Tag>,
     },
     {
       title: '操作',
       key: 'action',
+      width: 160,
+      fixed: 'right' as const,
       render: (_: any, r: any) => (
-        <Button
-         
-          onClick={async () => {
-            try {
-              const res = await productionApi.getLatestAlphalensAnalysis(selectedFactor);
-              message.success('加载成功');
-            } catch (error) {
-              console.error('Failed to load analysis:', error);
-              message.error('加载失败');
-            }
-          }}
-        >
-          查看
-        </Button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Button
+            size="small"
+            onClick={async () => {
+              try {
+                const res = await productionApi.getAlphalensAnalysisById(selectedFactor, r.id);
+                setAnalysisResult(res.data?.data);
+                message.success('加载成功');
+              } catch (error) {
+                console.error('Failed to load analysis:', error);
+                message.error('加载失败');
+              }
+            }}
+          >
+            查看
+          </Button>
+          <Popconfirm
+            title="确定要删除这条分析记录吗？"
+            description="删除后无法恢复"
+            onConfirm={async () => {
+              const success = await deleteAnalysis(r.id);
+              if (success) {
+                message.success('删除成功');
+              } else {
+                message.error('删除失败');
+              }
+            }}
+            okText="确定"
+            cancelText="取消"
+          >
+            <Button size="small" danger>
+              删除
+            </Button>
+          </Popconfirm>
+        </div>
       ),
     },
   ];
@@ -570,6 +847,38 @@ const AnalysisPanel: React.FC = () => {
                   )}
                 </div>
               ))}
+            </div>
+          </div>
+          <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+            <Checkbox checked={winsorize} onChange={(e) => setWinsorize(e.target.checked!)}>
+              极端值处理 (Winsorize)
+            </Checkbox>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, opacity: winsorize ? 1 : 0.4 }}>
+              <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>下界:</span>
+              <InputNumber
+                size="small"
+                disabled={!winsorize}
+                value={winsorizeLower}
+                onChange={(v) => setWinsorizeLower(v as number)}
+                min={0}
+                max={0.49}
+                step={0.01}
+                style={{ width: 80 }}
+              />
+              <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>上界:</span>
+              <InputNumber
+                size="small"
+                disabled={!winsorize}
+                value={winsorizeUpper}
+                onChange={(v) => setWinsorizeUpper(v as number)}
+                min={0.51}
+                max={1}
+                step={0.01}
+                style={{ width: 80 }}
+              />
+              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                保留 [{(winsorizeLower * 100).toFixed(0)}%, {(winsorizeUpper * 100).toFixed(0)}%] 分位数范围内的值
+              </span>
             </div>
           </div>
         </div>
@@ -729,19 +1038,6 @@ const AnalysisPanel: React.FC = () => {
             </Card>
           )}
 
-          {/* ── 因子排名自相关（全局） ── */}
-          {analysisResult?.decay_analysis && Object.keys(analysisResult.decay_analysis).length > 0 && (
-            <DecayAnalysisSection data={analysisResult.decay_analysis} />
-          )}
-
-          {/* ── 分行业分析（全局） ── */}
-          {analysisResult?.ic_by_industry && Object.keys(analysisResult.ic_by_industry).length > 0 && (
-            <IndustryAnalysisSection
-              icByIndustry={analysisResult.ic_by_industry}
-              returnsByIndustry={analysisResult.returns_by_industry || {}}
-            />
-          )}
-
           {/* ── 分组分析（有 groupby 时） ── */}
           {analysisResult?.ic_by_group && Object.keys(analysisResult.ic_by_group).length > 0 && (
             <GroupAnalysisSection icByGroup={analysisResult.ic_by_group} returnsByGroup={analysisResult.returns_by_group} />
@@ -806,8 +1102,8 @@ const AnalysisPanel: React.FC = () => {
               dataSource={analysisHistory}
               columns={historyColumns}
               rowKey="id"
-
               pagination={{ pageSize: 5 }}
+              scroll={{ x: 1200 }}
             />
           </Spin>
         </Card>

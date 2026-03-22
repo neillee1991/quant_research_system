@@ -1,0 +1,66 @@
+[
+  {
+    "field_key": "adj_factor",
+    "description": "复权因子",
+    "table_name": "sync_adj_factor",
+    "column_name": "adj_factor",
+    "extra_config": {}
+  },
+  {
+    "field_key": "list_date",
+    "description": "股票上市日期",
+    "table_name": "sync_stock_basic",
+    "column_name": "list_date",
+    "extra_config": {}
+  },
+  {
+    "field_key": "is_st",
+    "description": "是否ST（0=正常, 1=ST/*ST/退市风险警示）",
+    "table_name": "sync_stock_st",
+    "column_name": "ts_code",
+    "extra_config": {
+      "mode": "exists_in_table",
+      "values": {
+        "0": "正常",
+        "1": "ST/*ST/退市风险警示"
+      }
+    }
+  },
+  {
+    "field_key": "is_limit",
+    "description": "涨跌停状态（0=未涨跌停, 1=涨停, -1=跌停）",
+    "table_name": "sync_stk_limit",
+    "column_name": "up_limit,down_limit",
+    "extra_config": {
+      "mode": "compare_with_price",
+      "price_table": "sync_daily_data",
+      "price_column": "close",
+      "values": {
+        "0": "未涨跌停",
+        "1": "涨停",
+        "-1": "跌停"
+      }
+    }
+  },
+  {
+    "field_key": "industry_l1",
+    "description": "股票一级行业",
+    "table_name": "sync_stock_basic",
+    "column_name": "industry",
+    "extra_config": {}
+  },
+  {
+    "field_key": "industry_l2",
+    "description": "股票二级行业",
+    "table_name": "",
+    "column_name": "",
+    "extra_config": {}
+  },
+  {
+    "field_key": "market_cap",
+    "description": "股票总市值（万元）",
+    "table_name": "sync_daily_basic",
+    "column_name": "total_mv",
+    "extra_config": {}
+  }
+]

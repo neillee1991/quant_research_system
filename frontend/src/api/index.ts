@@ -190,12 +190,19 @@ export const productionApi = {
     neutralize?: boolean;
     neutralize_controls?: string[];
     industry_level?: string;
+    winsorize?: boolean;
+    winsorize_lower?: number;
+    winsorize_upper?: number;
   }) => longRunningApi.post('/analysis/alphalens', data),
   getLatestAlphalensAnalysis: (factorId: string) => api.get(`/analysis/alphalens/${factorId}/latest`),
+  getAlphalensAnalysisById: (factorId: string, analysisId: string) => api.get(`/analysis/alphalens/${factorId}/detail/${analysisId}`),
+  deleteAlphalensAnalysisById: (factorId: string, analysisId: string) => api.delete(`/analysis/alphalens/${factorId}/detail/${analysisId}`),
   getAlphalensAnalysisHistory: (factorId: string, limit = 20, offset = 0) =>
     api.get(`/analysis/alphalens/${factorId}/history`, { params: { limit, offset } }),
-  getAnalysisTaskStatus: (taskId: number) =>
+  getAnalysisTaskStatus: (taskId: string) =>
     api.get(`/analysis/alphalens/status/${taskId}`),
+  getTradingDays: (start: string, end: string) =>
+    api.get('/analysis/trading-days', { params: { start, end } }),
 };
 
 // Flow 配置管理
