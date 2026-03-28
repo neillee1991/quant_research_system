@@ -12,6 +12,7 @@ from app.api.v1 import data  # 使用拆分后的 data 模块
 from app.api.v1.generic_task import create_task_router
 from app.services import sync_service, etl_service, factor_service
 from store.dolphindb_client import db_client
+from infrastructure.seed import SeedDataLoader, SeedDataManager
 
 
 @asynccontextmanager
@@ -26,16 +27,13 @@ async def lifespan(app: FastAPI):
         raise  # 表结构创建失败应该终止启动
 
     # Seed 数据（失败不影响启动）
-    for seed_func, name in [
-        (db_client.seed_sync_task_config, "同步任务配置"),
-        (db_client.seed_etl_task_config, "ETL任务配置"),
-        (db_client.seed_factor_data_config, "因子数据配置"),
-        (db_client.seed_factor_metadata, "因子元数据"),
-    ]:
-        try:
-            seed_func()
-        except Exception as e:
-            logger.error(f"Seed {name} 失败: {e}", exc_info=True)
+    try:
+        seed_loader = SeedDataLoader()
+        seed_manager = SeedDataManager(db_client=db_client, loader=seed_loader)
+        seed_manager.seed_all()
+        logger.info("Seed data initialization completed")
+    except Exception as e:
+        logger.error(f"Seed 数据失败: {e}", exc_info=True)
 
     yield
     logger.info("Shutting down application...")

@@ -3,46 +3,32 @@ Seed Data Manager
 Applies seed data from JSON configuration files to the database
 """
 import json
-import threading
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import Any
 
-import pandas as pd
 import polars as pl
 
 from app.core.logger import logger
 
 from .loader import SeedDataLoader
 
-if TYPE_CHECKING:
-    from store.dolphindb.connection import DolphinDBConnection
-    from store.dolphindb.query_builder import QueryBuilder
-
 
 class SeedDataManager:
     """数据初始化管理器（配置文件版本）"""
 
-    # factor_values 等非 sync 任务表的日期列配置
-    _EXTRA_DATE_COLUMNS = {
-        "factor_values": ["trade_date"],
-    }
-
     def __init__(
         self,
-        connection: "DolphinDBConnection",
-        query_builder: "QueryBuilder",
+        db_client: Any,
         loader: SeedDataLoader | None = None,
     ) -> None:
         """
         初始化数据种子管理器
 
         Args:
-            connection: DolphinDB 连接管理器
-            query_builder: SQL 查询构建器
+            db_client: DolphinDB 客户端
             loader: 种子数据加载器（可选，默认创建新实例）
         """
-        self.conn = connection
-        self.query = query_builder
+        self.db_client = db_client
         self.loader = loader or SeedDataLoader()
 
     def seed_all(self) -> None:
@@ -60,7 +46,7 @@ class SeedDataManager:
         仅在首次启动时生效，后续可通过 API 增删改
         """
         try:
-            count = self.query.query("SELECT count(*) as cnt FROM sync_task_config")
+            count = self.db_client.query("SELECT count(*) as cnt FROM sync_task_config")
             if not count.is_empty() and count["cnt"][0] > 0:
                 logger.info("sync_task_config 已有数据，跳过 seed")
                 return
@@ -91,7 +77,7 @@ class SeedDataManager:
             "updated_at": [now] * len(tasks),
         })
 
-        self._upsert_data("sync_task_config", seed_df, ["task_id"])
+        self.db_client.upsert("sync_task_config", seed_df, ["task_id"])
         logger.info(f"已写入 {len(tasks)} 条默认同步任务配置")
 
     def seed_etl_task_config(self) -> None:
@@ -100,7 +86,7 @@ class SeedDataManager:
         仅在首次启动时生效，后续可通过 API 增删改
         """
         try:
-            count = self.query.query("SELECT count(*) as cnt FROM etl_task_config")
+            count = self.db_client.query("SELECT count(*) as cnt FROM etl_task_config")
             if not count.is_empty() and count["cnt"][0] > 0:
                 logger.info("etl_task_config 已有数据，跳过 seed")
                 return
@@ -117,7 +103,7 @@ class SeedDataManager:
             return
 
         # 替换脚本中的数据库路径模板
-        db_meta = self.conn.db_path
+        db_meta = self.db_client._db_path
         db_ts = "dfs://quant_ts"
 
         for task in tasks:
@@ -138,7 +124,7 @@ class SeedDataManager:
             "updated_at": [now] * len(tasks),
         })
 
-        self._upsert_data("etl_task_config", seed_df, ["task_id"])
+        self.db_client.upsert("etl_task_config", seed_df, ["task_id"])
         logger.info(f"已写入 {len(tasks)} 条默认 ETL 任务配置")
 
     def seed_factor_data_config(self) -> None:
@@ -147,7 +133,7 @@ class SeedDataManager:
         仅在首次启动时生效，后续可通过 API 修改
         """
         try:
-            count = self.query.query("SELECT count(*) as cnt FROM factor_data_config")
+            count = self.db_client.query("SELECT count(*) as cnt FROM factor_data_config")
             if not count.is_empty() and count["cnt"][0] > 0:
                 logger.info("factor_data_config 已有数据，跳过 seed")
                 return
@@ -170,7 +156,7 @@ class SeedDataManager:
             "updated_at": [now] * len(mappings),
         })
 
-        self._upsert_data("factor_data_config", seed_df, ["field_key"])
+        self.db_client.upsert("factor_data_config", seed_df, ["field_key"])
         logger.info(f"已写入 {len(mappings)} 条默认因子数据配置")
 
     def seed_factor_metadata(self) -> None:
@@ -179,7 +165,7 @@ class SeedDataManager:
         仅在首次启动时生效，后续可通过 API 增删改
         """
         try:
-            count = self.query.query("SELECT count(*) as cnt FROM factor_metadata")
+            count = self.db_client.query("SELECT count(*) as cnt FROM factor_metadata")
             if not count.is_empty() and count["cnt"][0] > 0:
                 logger.info("factor_metadata 已有数据，跳过 seed")
                 return
@@ -206,72 +192,5 @@ class SeedDataManager:
             "updated_at": [now] * len(factors),
         })
 
-        self._upsert_data("factor_metadata", seed_df, ["factor_id"])
+        self.db_client.upsert("factor_metadata", seed_df, ["factor_id"])
         logger.info(f"已写入 {len(factors)} 条默认因子定义")
-
-    def _upsert_data(
-        self,
-        table_name: str,
-        df: pl.DataFrame,
-        key_columns: list[str],
-    ) -> None:
-        """
-        插入或更新数据（内部辅助方法）
-
-        Args:
-            table_name: 表名
-            df: Polars DataFrame
-            key_columns: 主键列
-        """
-        if df.is_empty():
-            logger.warning(f"空 DataFrame，跳过写入: {table_name}")
-            return
-
-        db_path = self.conn.db_path
-
-        try:
-            # 转换日期列
-            date_cols = self._EXTRA_DATE_COLUMNS.get(table_name, [])
-            for col in date_cols:
-                if col in df.columns and df[col].dtype == pl.Utf8:
-                    df = df.with_columns(
-                        pl.col(col).str.to_date("%Y%m%d", strict=False).alias(col)
-                    )
-
-            pdf = df.to_pandas()
-            for col in date_cols:
-                if col in pdf.columns and pd.api.types.is_datetime64_any_dtype(pdf[col]):
-                    pdf[col] = pdf[col].dt.date
-
-            with self.conn.lock:
-                self.conn._ensure_connected()
-
-                # 上传临时变量
-                tmp_var = f"tmp_{table_name}_{threading.current_thread().ident}"
-                self.conn.session.upload({tmp_var: pdf})
-
-                # 先删除旧记录，再插入（模拟 upsert）
-                if key_columns:
-                    handle = f"{table_name}_handle"
-                    delete_conds = [f'{kc} in {tmp_var}.{kc}' for kc in key_columns]
-                    cond_str = " and ".join(delete_conds)
-                    self.conn.session.run(
-                        f"{handle} = loadTable('{db_path}', '{table_name}')"
-                    )
-                    self.conn.session.run(f"delete from {handle} where {cond_str}")
-                    self.conn.session.run(
-                        f"tableInsert({handle}, {tmp_var});"
-                        f"undef('{tmp_var}')"
-                    )
-                else:
-                    # 无主键，直接插入
-                    self.conn.session.run(
-                        f"{table_name}_handle = loadTable('{db_path}', '{table_name}');"
-                        f"tableInsert({table_name}_handle, {tmp_var});"
-                        f"undef('{tmp_var}')"
-                    )
-
-            logger.info(f"写入 {len(df)} 行到 {table_name}")
-        except Exception as e:
-            logger.error(f"写入失败 [{table_name}]: {e}")
-            raise
