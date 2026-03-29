@@ -30,7 +30,7 @@ import {
 } from '@ant-design/icons';
 import { useMessage } from '../../hooks/useMessage';
 import { indexApi, dataApi } from '../../api';
-import type { IndexInfo, FilterOptions, UserPreference, FilterFieldConfig } from '../../types/indexSubscribe';
+import type { IndexInfo, UserPreference, FilterFieldConfig } from '../../types/indexSubscribe';
 
 interface IndexSubscribeDrawerProps {
   visible: boolean;
@@ -80,12 +80,8 @@ export const IndexSubscribeDrawer: React.FC<IndexSubscribeDrawerProps> = ({
 
   // 阶段2: 指数列表
   const [indices, setIndices] = useState<IndexInfo[]>([]);
-  const [filterOptions, setFilterOptions] = useState<FilterOptions>({
-    markets: [],
-    publishers: [],
-  });
+  const [activeFilters, setActiveFilters] = useState<Record<string, string>>({});
   const [searchText, setSearchText] = useState('');
-  const [selectedMarket, setSelectedMarket] = useState<string>();
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [total, setTotal] = useState(0);
@@ -180,6 +176,11 @@ export const IndexSubscribeDrawer: React.FC<IndexSubscribeDrawerProps> = ({
       if (pref?.filter_config && pref.filter_config.length > 0) {
         setFilterConfig(pref.filter_config);
       }
+      const initialFilters: Record<string, string> = {};
+      (pref?.filter_config || [])
+        .filter((f: any) => f.enabled && f.default_value)
+        .forEach((f: any) => { initialFilters[f.field] = f.default_value; });
+      setActiveFilters(initialFilters);
     } catch (error) {
       console.error('Failed to load user preference:', error);
     }
@@ -209,22 +210,12 @@ export const IndexSubscribeDrawer: React.FC<IndexSubscribeDrawerProps> = ({
     }
   };
 
-  // 加载筛选选项
-  const loadFilterOptions = useCallback(async () => {
-    try {
-      const res = await indexApi.getFilterOptions();
-      setFilterOptions(res.data || { markets: [], publishers: [] });
-    } catch (error) {
-      console.error('Failed to load filter options:', error);
-    }
-  }, []);
-
   // 加载指数列表
   const loadIndices = useCallback(async (
     currentPage = 1,
     currentPageSize = 20,
     search = '',
-    market = undefined as string | undefined
+    filters: Record<string, string> = {}
   ) => {
     setLoading(true);
     try {
@@ -232,7 +223,7 @@ export const IndexSubscribeDrawer: React.FC<IndexSubscribeDrawerProps> = ({
         page: currentPage,
         limit: currentPageSize,
         search: search || undefined,
-        market: market || undefined,
+        filters: Object.keys(filters).length > 0 ? filters : undefined,
       });
       setIndices(res.data.indices || []);
       setTotal(res.data.total || 0);
@@ -257,7 +248,7 @@ export const IndexSubscribeDrawer: React.FC<IndexSubscribeDrawerProps> = ({
           await indexApi.unsubscribeIndex(index.ts_code);
           message.success(`已取消订阅 ${index.name}`);
           onUnsubscribeSuccess?.();
-          loadIndices(page, pageSize, searchText, selectedMarket);
+          loadIndices(page, pageSize, searchText, activeFilters);
         } catch (error: any) {
           message.error(`取消订阅失败: ${error.response?.data?.detail || error.message}`);
         }
@@ -296,7 +287,7 @@ export const IndexSubscribeDrawer: React.FC<IndexSubscribeDrawerProps> = ({
   const resetState = () => {
     setCurrentStep(0);
     setSearchText('');
-    setSelectedMarket(undefined);
+    setActiveFilters({});
     setPage(1);
   };
 
@@ -307,7 +298,7 @@ export const IndexSubscribeDrawer: React.FC<IndexSubscribeDrawerProps> = ({
       loadUserPreference();
       // 不重置currentStep，让loadUserPreference决定
       setSearchText('');
-      setSelectedMarket(undefined);
+      setActiveFilters({});
       setPage(1);
     }
   }, [visible, loadAvailableTables, loadUserPreference]);
@@ -315,10 +306,9 @@ export const IndexSubscribeDrawer: React.FC<IndexSubscribeDrawerProps> = ({
   // 进入指数列表阶段时加载数据
   useEffect(() => {
     if (visible && currentStep === 1) {
-      loadFilterOptions();
-      loadIndices(page, pageSize, searchText, selectedMarket);
+      loadIndices(page, pageSize, searchText, activeFilters);
     }
-  }, [visible, currentStep, loadFilterOptions, loadIndices, page, pageSize, searchText, selectedMarket]);
+  }, [visible, currentStep]);
 
   // selectedTable 变化时加载字段列表
   useEffect(() => {
@@ -329,14 +319,17 @@ export const IndexSubscribeDrawer: React.FC<IndexSubscribeDrawerProps> = ({
 
   const handleSearch = () => {
     setPage(1);
-    loadIndices(1, pageSize, searchText, selectedMarket);
+    loadIndices(1, pageSize, searchText, activeFilters);
   };
 
   const handleReset = () => {
     setSearchText('');
-    setSelectedMarket(undefined);
+    const defaultFilters: Record<string, string> = {};
+    filterConfig.filter(f => f.enabled && f.default_value)
+      .forEach(f => { defaultFilters[f.field] = f.default_value!; });
+    setActiveFilters(defaultFilters);
     setPage(1);
-    loadIndices(1, pageSize, '', undefined);
+    loadIndices(1, pageSize, '', defaultFilters);
   };
 
   const columns = [
@@ -567,17 +560,24 @@ export const IndexSubscribeDrawer: React.FC<IndexSubscribeDrawerProps> = ({
             allowClear
             onPressEnter={handleSearch}
           />
-          <Select
-            placeholder="选择市场"
-            value={selectedMarket}
-            onChange={setSelectedMarket}
-            style={{ width: 150 }}
-            allowClear
-            options={filterOptions.markets.map((m) => ({
-              label: marketMap[m] || m,
-              value: m,
-            }))}
-          />
+          {filterConfig.filter(f => f.enabled).map(f => (
+            <Input
+              key={f.field}
+              placeholder={f.label}
+              value={activeFilters[f.field] || ''}
+              onChange={e => setActiveFilters(prev => ({
+                ...prev,
+                [f.field]: e.target.value,
+              }))}
+              style={{ width: 150 }}
+              allowClear
+              onClear={() => setActiveFilters(prev => {
+                const next = { ...prev };
+                delete next[f.field];
+                return next;
+              })}
+            />
+          ))}
           <Button type="primary" onClick={handleSearch}>
             搜索
           </Button>
@@ -591,7 +591,7 @@ export const IndexSubscribeDrawer: React.FC<IndexSubscribeDrawerProps> = ({
           {!loading && indices.length === 0 ? (
             <Empty
               description={
-                searchText || selectedMarket
+                searchText || Object.keys(activeFilters).length > 0
                   ? '没有找到匹配的指数'
                   : '暂无可订阅的指数'
               }
