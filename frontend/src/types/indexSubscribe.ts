@@ -47,8 +47,3 @@ export interface UserPreference {
   filter_config?: FilterFieldConfig[];
 }
 
-// 筛选选项类型
-export interface FilterOptions {
-  markets: string[];
-  publishers: string[];
-}

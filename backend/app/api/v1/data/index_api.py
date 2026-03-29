@@ -46,12 +46,6 @@ class IndexListResponse(BaseModel):
     limit: int
 
 
-class FilterOptionsResponse(BaseModel):
-    """筛选选项响应"""
-    markets: List[str]
-    publishers: List[str]
-
-
 class IndexSubscribeRequest(BaseModel):
     """指数订阅请求"""
     index_code: str = Field(..., description="指数代码，如 000001.SH")
@@ -267,33 +261,6 @@ async def list_available_indices(
     except Exception as e:
         logger.error(f"Failed to list available indices: {e}")
         raise HTTPException(status_code=500, detail=f"查询指数列表失败: {str(e)}")
-
-
-@router.get("/data/index/filter-options", response_model=FilterOptionsResponse)
-async def get_filter_options():
-    """
-    获取市场和发布机构的筛选选项
-
-    用于前端构建筛选下拉菜单
-    """
-    try:
-        # 查询所有市场
-        market_sql = "SELECT DISTINCT market FROM sync_index_basic WHERE market IS NOT NULL ORDER BY market"
-        market_df = db_client.query(market_sql)
-        markets = [row["market"] for row in market_df.to_dicts()] if not market_df.is_empty() else []
-
-        # 查询所有发布机构
-        publisher_sql = "SELECT DISTINCT publisher FROM sync_index_basic WHERE publisher IS NOT NULL ORDER BY publisher"
-        publisher_df = db_client.query(publisher_sql)
-        publishers = [row["publisher"] for row in publisher_df.to_dicts()] if not publisher_df.is_empty() else []
-
-        return FilterOptionsResponse(
-            markets=markets,
-            publishers=publishers
-        )
-    except Exception as e:
-        logger.error(f"Failed to get filter options: {e}")
-        raise HTTPException(status_code=500, detail=f"获取筛选选项失败: {str(e)}")
 
 
 @router.post("/data/index/subscribe", response_model=IndexSubscribeResponse)

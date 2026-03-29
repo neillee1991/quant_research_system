@@ -101,6 +101,12 @@ export const factorApi = {
 
 export const strategyApi = {
   backtest: (graph: object) => longRunningApi.post('/strategy/backtest', { graph }), // 回测可能耗时
+  backtestAsync: (name: string, graph: object) =>
+    api.post('/strategy/backtest/async', { name, graph }),
+  getBacktestResult: (runId: string) =>
+    api.get(`/strategy/backtest/${runId}/result`),
+  getBacktestHistory: (limit = 20) =>
+    api.get('/strategy/backtest/history', { params: { limit } }),
   listOperators: () => api.get('/strategy/operators'),
 };
 
@@ -247,10 +253,6 @@ export const indexApi = {
       },
     });
   },
-
-  // 获取筛选选项
-  getFilterOptions: () =>
-    api.get('/data/index/filter-options'),
 
   // 订阅指数
   subscribeIndex: (data: { index_code: string }) =>
