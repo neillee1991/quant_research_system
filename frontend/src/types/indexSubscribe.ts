@@ -33,9 +33,18 @@ export interface IndexInfo {
   subscribed_task_id?: string;
 }
 
+// 筛选字段配置类型
+export interface FilterFieldConfig {
+  field: string;
+  label: string;
+  enabled: boolean;
+  default_value: string | null;
+}
+
 // 用户偏好配置类型
 export interface UserPreference {
   index_basic_table: string;
+  filter_config?: FilterFieldConfig[];
 }
 
 // 筛选选项类型

@@ -35,8 +35,6 @@ export const dataApi = {
     api.get('/data/daily', { params: { ts_code: tsCode, start_date: startDate, end_date: endDate, limit } }),
   triggerSync: (tsCode?: string, source = 'tushare') =>
     longRunningApi.post('/data/sync', null, { params: { ts_code: tsCode, source } }), // 使用长超时
-  getSyncStatus: (source?: string, dataType?: string, startDate?: string, endDate?: string, limit = 1000) =>
-    api.get('/data/sync/status', { params: { source, data_type: dataType, start_date: startDate, end_date: endDate, limit } }),
 
   // 同步任务管理
   listSyncTasks: () => api.get('/data/sync/tasks'),
@@ -50,8 +48,6 @@ export const dataApi = {
     }),
   syncAllTasks: (targetDate?: string) =>
     longRunningApi.post('/data/sync/all', null, { params: { target_date: targetDate } }),
-  getTaskStatus: (taskId: string) => api.get(`/data/sync/status/${taskId}`),
-  getTaskStatusBatch: () => api.get('/data/sync/tasks/status-batch'),
   getTaskConfig: (taskId: string) => api.get(`/data/sync/task/${taskId}/config`),
   updateTaskConfig: (taskId: string, config: any) => api.put(`/data/sync/task/${taskId}/config`, config),
   createTask: (config: any) => api.post('/data/sync/tasks', config),
@@ -75,8 +71,6 @@ export const dataApi = {
     }),
   createEtlTable: (taskId: string, tableName: string, fields: any[]) =>
     api.post(`/data/etl/task/${taskId}/create-table`, { table_name: tableName, fields }),
-  getEtlLogs: (taskId?: string, startDate?: string, endDate?: string, limit = 1000) =>
-    api.get('/data/etl/logs', { params: { task_id: taskId, start_date: startDate, end_date: endDate, limit } }),
 
   // 数据库管理
   listTables: () => api.get('/data/tables'),
@@ -124,57 +118,57 @@ export const mlApi = {
 
 export const productionApi = {
   // 因子 CRUD
-  listFactors: () => api.get('/production/factors'),
+  listFactors: () => api.get('/factor/factors'),
   createFactor: (data: { factor_id: string; description?: string; category?: string; compute_mode?: string; depends_on?: string[]; storage_target?: string; params?: Record<string, any>; code?: string; align_calendar?: boolean }) =>
-    api.post('/production/factors', data),
+    api.post('/factor/factors', data),
   updateFactor: (factorId: string, data: { description?: string; category?: string; compute_mode?: string; depends_on?: string[]; storage_target?: string; params?: Record<string, any>; align_calendar?: boolean }) =>
-    api.put(`/production/factors/${factorId}`, data),
+    api.put(`/factor/factors/${factorId}`, data),
   deleteFactor: (factorId: string, deleteData = false) =>
-    api.delete(`/production/factors/${factorId}`, { params: { delete_data: deleteData } }),
+    api.delete(`/factor/factors/${factorId}`, { params: { delete_data: deleteData } }),
 
   // 生产任务
   runProduction: (factorId: string, mode = 'incremental', targetDate?: string, startDate?: string, endDate?: string, preprocess?: PreprocessOptions) =>
-    longRunningApi.post('/production/run', { factor_id: factorId, mode, target_date: targetDate, start_date: startDate, end_date: endDate, preprocess }),
+    longRunningApi.post('/factor/run', { factor_id: factorId, mode, target_date: targetDate, start_date: startDate, end_date: endDate, preprocess }),
   batchRunFactors: (factorIds: string[], mode = 'incremental', startDate?: string, endDate?: string, preprocess?: PreprocessOptions) =>
-    longRunningApi.post('/production/batch-run', { factor_ids: factorIds, mode, start_date: startDate, end_date: endDate, preprocess }),
+    longRunningApi.post('/factor/batch-run', { factor_ids: factorIds, mode, start_date: startDate, end_date: endDate, preprocess }),
   getProductionHistory: (factorId?: string, limit = 20, startDate?: string, endDate?: string) =>
-    api.get('/production/history', { params: { factor_id: factorId, limit, start_date: startDate, end_date: endDate } }),
+    api.get('/factor/history', { params: { factor_id: factorId, limit, start_date: startDate, end_date: endDate } }),
 
   // 因子代码查看/编辑
-  getFactorCode: (factorId: string) => api.get(`/production/factors/${factorId}/code`),
+  getFactorCode: (factorId: string) => api.get(`/factor/factors/${factorId}/code`),
   updateFactorCode: (factorId: string, filename: string, code: string) =>
-    api.put(`/production/factors/${factorId}/code`, { filename, code }),
+    api.put(`/factor/factors/${factorId}/code`, { filename, code }),
 
   // DataFrame schema 预览
   getDataFrameSchema: (dependsOn: string[]) =>
-    api.post('/production/dataframe-schema', { depends_on: dependsOn }),
+    api.post('/factor/dataframe-schema', { depends_on: dependsOn }),
 
   // 因子代码测试
   testFactorCode: (data: { code: string; start_date: string; end_date: string; depends_on?: string[]; params?: Record<string, any>; preprocess?: PreprocessOptions; lookback_days?: number }) =>
-    longRunningApi.post('/production/factors/test', data),
+    longRunningApi.post('/factor/factors/test', data),
 
   // 因子数据探查
   getFactorData: (factorId: string, params?: { start_date?: string; end_date?: string; ts_code?: string; limit?: number }) =>
-    api.get(`/production/factors/${factorId}/data`, { params }),
-  getFactorStats: (factorId: string) => api.get(`/production/factors/${factorId}/stats`),
-  getFactorMissingDates: (factorId: string) => api.get(`/production/factors/${factorId}/missing-dates`),
+    api.get(`/factor/factors/${factorId}/data`, { params }),
+  getFactorStats: (factorId: string) => api.get(`/factor/factors/${factorId}/stats`),
+  getFactorMissingDates: (factorId: string) => api.get(`/factor/factors/${factorId}/missing-dates`),
 
   // 数据配置
-  getDataConfig: () => api.get('/production/data-config'),
-  updateDataConfig: (mappings: DataFieldMapping[]) => api.put('/production/data-config', { mappings }),
-  getResolvedDataConfig: () => api.get('/production/data-config/resolved'),
-  getAvailableTables: () => api.get('/production/available-tables'),
+  getDataConfig: () => api.get('/factor/data-config'),
+  updateDataConfig: (mappings: DataFieldMapping[]) => api.put('/factor/data-config', { mappings }),
+  getResolvedDataConfig: () => api.get('/factor/data-config/resolved'),
+  getAvailableTables: () => api.get('/factor/available-tables'),
 
   // 指数股票池管理
-  listIndexPools: () => api.get('/index-pool/list'),
+  listIndexPools: () => api.get('/factor/index-pool/list'),
   getIndexPool: (indexCode: string, tradeDate?: string) =>
-    api.get(`/index-pool/${indexCode}`, { params: { trade_date: tradeDate } }),
+    api.get(`/factor/index-pool/${indexCode}`, { params: { trade_date: tradeDate } }),
   batchUploadIndexPool: (data: { index_code: string; index_name?: string; description?: string; data: any[] }) =>
-    api.post('/index-pool/batch-upload', data),
+    api.post('/factor/index-pool/batch-upload', data),
   csvUploadIndexPool: (data: { index_code: string; index_name?: string; description?: string; csv_content: string }) =>
-    api.post('/index-pool/csv-upload', data),
-  deleteIndexPool: (indexCode: string) => api.delete(`/index-pool/${indexCode}`),
-  downloadIndexPoolTemplate: () => api.get('/index-pool/template', { responseType: 'text' }),
+    api.post('/factor/index-pool/csv-upload', data),
+  deleteIndexPool: (indexCode: string) => api.delete(`/factor/index-pool/${indexCode}`),
+  downloadIndexPoolTemplate: () => api.get('/factor/index-pool/template', { responseType: 'text' }),
 
   // Alphalens 分析 API
   runAlphalensAnalysis: (data: {
@@ -193,16 +187,16 @@ export const productionApi = {
     winsorize?: boolean;
     winsorize_lower?: number;
     winsorize_upper?: number;
-  }) => longRunningApi.post('/analysis/alphalens', data),
-  getLatestAlphalensAnalysis: (factorId: string) => api.get(`/analysis/alphalens/${factorId}/latest`),
-  getAlphalensAnalysisById: (factorId: string, analysisId: string) => api.get(`/analysis/alphalens/${factorId}/detail/${analysisId}`),
-  deleteAlphalensAnalysisById: (factorId: string, analysisId: string) => api.delete(`/analysis/alphalens/${factorId}/detail/${analysisId}`),
+  }) => longRunningApi.post('/factor/analysis/alphalens', data),
+  getLatestAlphalensAnalysis: (factorId: string) => api.get(`/factor/analysis/${factorId}/latest`),
+  getAlphalensAnalysisById: (factorId: string, analysisId: string) => api.get(`/factor/analysis/${factorId}/detail/${analysisId}`),
+  deleteAlphalensAnalysisById: (factorId: string, analysisId: string) => api.delete(`/factor/analysis/${factorId}/detail/${analysisId}`),
   getAlphalensAnalysisHistory: (factorId: string, limit = 20, offset = 0) =>
-    api.get(`/analysis/alphalens/${factorId}/history`, { params: { limit, offset } }),
+    api.get(`/factor/analysis/${factorId}/history`, { params: { limit, offset } }),
   getAnalysisTaskStatus: (taskId: string) =>
-    api.get(`/analysis/alphalens/status/${taskId}`),
+    api.get(`/factor/analysis/status/${taskId}`),
   getTradingDays: (start: string, end: string) =>
-    api.get('/analysis/trading-days', { params: { start, end } }),
+    api.get('/factor/analysis/trading-days', { params: { start, end } }),
 };
 
 export const stockPoolApi = {
@@ -239,14 +233,20 @@ export const stockPoolApi = {
 export const indexApi = {
   // 获取可订阅的指数列表
   listAvailableIndices: (params?: {
-    search?: string;
-    market?: string;
-    publisher?: string;
     page?: number;
     limit?: number;
+    search?: string;
+    filters?: Record<string, string>;
     show_subscribed_only?: boolean;
-  }) =>
-    api.get('/data/index/available', { params }),
+  }) => {
+    const { filters, ...rest } = params || {};
+    return api.get('/data/index/available', {
+      params: {
+        ...rest,
+        filters: filters ? JSON.stringify(filters) : undefined,
+      },
+    });
+  },
 
   // 获取筛选选项
   getFilterOptions: () =>
@@ -265,7 +265,7 @@ export const indexApi = {
     api.get('/data/index/preference'),
 
   // 保存用户偏好配置
-  saveUserPreference: (data: { index_basic_table: string }) =>
+  saveUserPreference: (data: { index_basic_table: string; filter_config?: Array<{ field: string; label: string; enabled: boolean; default_value: string | null }> }) =>
     api.post('/data/index/preference', data),
 };
 
@@ -344,9 +344,10 @@ export interface TaskHistoryResponse {
 }
 
 export const taskMonitorApi = {
-  getRunningTasks: () => api.get<RunningTasksResponse>('/tasks/running'),
-  getTaskHistory: (limit = 50) =>
-    api.get<TaskHistoryResponse>('/tasks/history', { params: { limit } }),
+  getRunningTasks: (taskType?: string, taskId?: string) =>
+    api.get<RunningTasksResponse>('/tasks/running', { params: { task_type: taskType, task_id: taskId } }),
+  getTaskHistory: (limit = 50, taskType?: string, taskId?: string) =>
+    api.get<TaskHistoryResponse>('/tasks/history', { params: { limit, task_type: taskType, task_id: taskId } }),
   cleanupStale: (timeoutMinutes = 0) =>
     api.post('/tasks/cleanup', null, { params: { timeout_minutes: timeoutMinutes } }),
   getTaskStatus: (taskType: string, runId: string) =>
