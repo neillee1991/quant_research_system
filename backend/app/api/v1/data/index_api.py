@@ -439,7 +439,7 @@ async def get_user_preference():
     try:
         # 查询用户偏好
         df = db_client.query(
-            "SELECT user_id, index_table FROM user_sync_preference WHERE user_id = %s",
+            "SELECT user_id, index_table, filter_config FROM user_sync_preference WHERE user_id = %s",
             ("default",)
         )
 
@@ -452,9 +452,21 @@ async def get_user_preference():
             )
 
         row = df.to_dicts()[0]
+
+        # 解析 filter_config JSON 字符串
+        filter_config = None
+        raw_filter = row.get("filter_config")
+        if raw_filter:
+            try:
+                parsed = json.loads(raw_filter)
+                filter_config = [FilterFieldConfig(**item) for item in parsed]
+            except Exception:
+                filter_config = None
+
         return UserSyncPreferenceResponse(
             user_id=row.get("user_id", "default"),
-            index_basic_table=row.get("index_table", "sync_index_basic")
+            index_basic_table=row.get("index_table", "sync_index_basic"),
+            filter_config=filter_config
         )
     except HTTPException:
         raise
@@ -482,6 +494,13 @@ async def save_user_preference(request: UserSyncPreference):
 
         now = datetime.now()
 
+        # 序列化 filter_config
+        filter_config_json = ""
+        if request.filter_config is not None:
+            filter_config_json = json.dumps(
+                [f.model_dump() for f in request.filter_config], ensure_ascii=False
+            )
+
         # 检查是否已存在配置
         check_df = db_client.query(
             "SELECT user_id FROM user_sync_preference WHERE user_id = %s",
@@ -493,6 +512,7 @@ async def save_user_preference(request: UserSyncPreference):
             data = {
                 "user_id": "default",
                 "index_table": index_table,
+                "filter_config": filter_config_json or "",
                 "created_at": now,
                 "updated_at": now,
             }
@@ -503,6 +523,7 @@ async def save_user_preference(request: UserSyncPreference):
             data = {
                 "user_id": "default",
                 "index_table": index_table,
+                "filter_config": filter_config_json or "",
                 "created_at": check_df.to_dicts()[0].get("created_at", now),
                 "updated_at": now,
             }
@@ -511,7 +532,8 @@ async def save_user_preference(request: UserSyncPreference):
 
         return UserSyncPreferenceResponse(
             user_id="default",
-            index_basic_table=index_table
+            index_basic_table=index_table,
+            filter_config=request.filter_config
         )
     except HTTPException:
         raise

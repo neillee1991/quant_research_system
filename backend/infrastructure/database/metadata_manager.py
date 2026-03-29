@@ -17,27 +17,6 @@ class MetadataManager:
 
     # 元数据表结构定义 (table_name: (schema_expr, primary_keys))
     _META_TABLE_SCHEMAS = {
-        "sync_log": (
-            "table("
-            "array(SYMBOL,0) as source,"
-            "array(SYMBOL,0) as data_type,"
-            "array(STRING,0) as last_date,"
-            "array(TIMESTAMP,0) as updated_at)",
-            ["source", "data_type", "updated_at"],
-        ),
-        "sync_log_history": (
-            "table("
-            "array(SYMBOL,0) as source,"
-            "array(SYMBOL,0) as data_type,"
-            "array(STRING,0) as last_date,"
-            "array(STRING,0) as sync_date,"
-            "array(INT,0) as rows_synced,"
-            "array(SYMBOL,0) as status,"
-            "array(STRING,0) as error_message,"
-            "array(STRING,0) as params,"
-            "array(TIMESTAMP,0) as created_at)",
-            ["source", "created_at"],
-        ),
         "factor_metadata": (
             "table("
             "array(SYMBOL,0) as factor_id,"
@@ -164,20 +143,6 @@ class MetadataManager:
             "array(STRING,0) as list_status)",
             ["ts_code"],
         ),
-        "factor_run_log": (
-            "table("
-            "array(SYMBOL,0) as factor_id,"
-            "array(SYMBOL,0) as mode,"
-            "array(SYMBOL,0) as status,"
-            "array(STRING,0) as start_date,"
-            "array(STRING,0) as end_date,"
-            "array(INT,0) as rows_affected,"
-            "array(DOUBLE,0) as duration_seconds,"
-            "array(STRING,0) as error_message,"
-            "array(STRING,0) as run_id,"
-            "array(TIMESTAMP,0) as created_at)",
-            ["factor_id", "created_at"],
-        ),
         "index_metadata": (
             "table("
             "array(SYMBOL,0) as index_code,"
@@ -193,6 +158,7 @@ class MetadataManager:
             "table("
             "array(SYMBOL,0) as user_id,"
             "array(SYMBOL,0) as index_table,"
+            "array(STRING,0) as filter_config,"
             "array(TIMESTAMP,0) as created_at,"
             "array(TIMESTAMP,0) as updated_at)",
             ["user_id"],
