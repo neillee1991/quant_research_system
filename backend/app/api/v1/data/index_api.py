@@ -154,11 +154,10 @@ def _get_subscription_task_map() -> dict:
 @router.get("/data/index/available", response_model=IndexListResponse)
 async def list_available_indices(
     search: Optional[str] = Query(None, description="搜索关键词（指数名称或代码）"),
-    market: Optional[str] = Query(None, description="市场筛选：SSE/SZSE/CICC"),
-    publisher: Optional[str] = Query(None, description="发布机构筛选"),
+    filters: Optional[str] = Query(None, description="JSON格式筛选条件，如 {\"market\":\"SSE\"}"),
     page: int = Query(1, ge=1, description="页码"),
     limit: int = Query(20, ge=1, le=100, description="每页数量"),
-    show_subscribed_only: bool = Query(False, description="仅显示已订阅的指数")
+    show_subscribed_only: bool = Query(False, description="仅显示已订阅的指数"),
 ):
     """
     查询可订阅的指数列表
@@ -170,18 +169,25 @@ async def list_available_indices(
         conditions = []
         params = []
 
+        try:
+            allowed_columns = set(db_client.get_table_columns("sync_index_basic"))
+        except Exception:
+            allowed_columns = {"market", "publisher", "ts_code", "name", "list_date"}
+
         if search:
             conditions.append("(name LIKE %s OR ts_code LIKE %s)")
             search_pattern = f"%{search}%"
             params.extend([search_pattern, search_pattern])
 
-        if market:
-            conditions.append("market = %s")
-            params.append(market)
-
-        if publisher:
-            conditions.append("publisher = %s")
-            params.append(publisher)
+        if filters:
+            try:
+                filter_dict = json.loads(filters)
+                for field, value in filter_dict.items():
+                    if field in allowed_columns and value:
+                        conditions.append(f"{field} = %s")
+                        params.append(value)
+            except json.JSONDecodeError:
+                pass
 
         where_clause = " AND ".join(conditions) if conditions else "1=1"
 
