@@ -16,6 +16,8 @@ import {
   Alert,
   Steps,
   Divider,
+  Modal,
+  Switch,
 } from 'antd';
 import {
   SearchOutlined,
@@ -24,15 +26,17 @@ import {
   ArrowLeftOutlined,
   SaveOutlined,
   DatabaseOutlined,
+  DeleteOutlined,
 } from '@ant-design/icons';
 import { useMessage } from '../../hooks/useMessage';
 import { indexApi, dataApi } from '../../api';
-import type { IndexInfo, FilterOptions, UserPreference } from '../../types/indexSubscribe';
+import type { IndexInfo, FilterOptions, UserPreference, FilterFieldConfig } from '../../types/indexSubscribe';
 
 interface IndexSubscribeDrawerProps {
   visible: boolean;
   onClose: () => void;
   onSubscribeSuccess?: () => void;
+  onUnsubscribeSuccess?: () => void;
   onSubscribe?: (index: IndexInfo, config: any) => void;
 }
 
@@ -44,17 +48,17 @@ const marketMap: Record<string, string> = {
 
 // 指数权重表的默认 schema
 const DEFAULT_INDEX_WEIGHT_SCHEMA = {
-  index_code: { type: 'SYMBOL', nullable: false, comment: '指数代码' },
-  ts_code: { type: 'SYMBOL', nullable: false, comment: '股票代码' },
-  trade_date: { type: 'DATE', nullable: false, comment: '交易日期' },
-  con_code: { type: 'SYMBOL', nullable: true, comment: '成分股代码(原始)' },
-  weight: { type: 'DOUBLE', nullable: true, comment: '权重' },
+  index_code: { type: 'SYMBOL' },
+  con_code: { type: 'SYMBOL' },
+  trade_date: { type: 'DATE' },
+  weight: { type: 'DOUBLE' },
 };
 
 export const IndexSubscribeDrawer: React.FC<IndexSubscribeDrawerProps> = ({
   visible,
   onClose,
   onSubscribeSuccess,
+  onUnsubscribeSuccess,
   onSubscribe,
 }) => {
   const message = useMessage();
@@ -70,6 +74,9 @@ export const IndexSubscribeDrawer: React.FC<IndexSubscribeDrawerProps> = ({
   const [userPreference, setUserPreference] = useState<UserPreference | null>(null);
   const [selectedTable, setSelectedTable] = useState<string>('');
   const [availableTables, setAvailableTables] = useState<string[]>([]);
+  const [tableColumns, setTableColumns] = useState<string[]>([]);
+  const [filterConfig, setFilterConfig] = useState<FilterFieldConfig[]>([]);
+  const [loadingColumns, setLoadingColumns] = useState(false);
 
   // 阶段2: 指数列表
   const [indices, setIndices] = useState<IndexInfo[]>([]);
@@ -96,23 +103,23 @@ export const IndexSubscribeDrawer: React.FC<IndexSubscribeDrawerProps> = ({
   const generateDefaultConfig = (index: IndexInfo, tableName: string): any => {
     const tableSuffix = getTableSuffix(tableName);
     const indexCodeClean = index.ts_code.replace(/\./g, '_').toUpperCase();
+    const taskId = `sync_index_weight_${indexCodeClean}`;
 
     return {
-      task_id: `sync_index_weight_${indexCodeClean}`,
+      task_id: taskId,
       api_name: 'index_weight',
       description: `${index.name}成分股同步`,
-      table_name: `sync_index_weight_${tableSuffix}`,
+      table_name: taskId, // 表名与任务名相同
       sync_type: 'incremental',
       source: 'tushare',
       date_field: 'trade_date',
-      api_limit: 0,
+      api_limit: 5000,
       params_json: JSON.stringify({
         index_code: index.ts_code,
+        trade_date: '{date}',
+        fields: 'index_code,con_code,trade_date,weight',
       }),
-      column_mapping_json: JSON.stringify({
-        con_code: 'ts_code',
-      }),
-      primary_keys_json: JSON.stringify(['index_code', 'ts_code', 'trade_date']),
+      primary_keys_json: JSON.stringify(['index_code', 'con_code', 'trade_date']),
       schema_json: JSON.stringify(DEFAULT_INDEX_WEIGHT_SCHEMA),
       enabled: true,
       schedule: '',
@@ -135,6 +142,30 @@ export const IndexSubscribeDrawer: React.FC<IndexSubscribeDrawerProps> = ({
     }
   }, []);
 
+  // 加载表字段列表
+  const loadTableColumns = useCallback(async (tableName: string) => {
+    if (!tableName) return;
+    setLoadingColumns(true);
+    try {
+      const res = await dataApi.getTableInfo(tableName);
+      const cols: string[] = res.data.columns || [];
+      setTableColumns(cols);
+      setFilterConfig(prev => {
+        if (prev.length > 0) return prev;
+        return cols.map(col => ({
+          field: col,
+          label: col,
+          enabled: false,
+          default_value: null,
+        }));
+      });
+    } catch (e) {
+      console.error('Failed to load table columns:', e);
+    } finally {
+      setLoadingColumns(false);
+    }
+  }, []);
+
   // 加载用户偏好
   const loadUserPreference = useCallback(async () => {
     try {
@@ -143,6 +174,11 @@ export const IndexSubscribeDrawer: React.FC<IndexSubscribeDrawerProps> = ({
       setUserPreference(pref);
       if (pref?.index_basic_table) {
         setSelectedTable(pref.index_basic_table);
+        // 如果已有配置，直接进入指数列表阶段
+        setCurrentStep(1);
+      }
+      if (pref?.filter_config && pref.filter_config.length > 0) {
+        setFilterConfig(pref.filter_config);
       }
     } catch (error) {
       console.error('Failed to load user preference:', error);
@@ -158,7 +194,10 @@ export const IndexSubscribeDrawer: React.FC<IndexSubscribeDrawerProps> = ({
 
     setSavingPreference(true);
     try {
-      await indexApi.saveUserPreference({ index_basic_table: selectedTable });
+      await indexApi.saveUserPreference({
+        index_basic_table: selectedTable,
+        filter_config: filterConfig.length > 0 ? filterConfig : undefined,
+      });
       message.success('配置已保存');
       setCurrentStep(1);
     } catch (error: any) {
@@ -205,13 +244,29 @@ export const IndexSubscribeDrawer: React.FC<IndexSubscribeDrawerProps> = ({
     }
   }, [message]);
 
+  // 处理取消订阅
+  const handleUnsubscribeClick = (index: IndexInfo) => {
+    Modal.confirm({
+      title: '取消订阅',
+      content: `确定取消订阅指数 ${index.name}（${index.ts_code}）？相关同步任务及数据表将被删除，此操作不可撤销。`,
+      okText: '确认取消订阅',
+      okButtonProps: { danger: true },
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          await indexApi.unsubscribeIndex(index.ts_code);
+          message.success(`已取消订阅 ${index.name}`);
+          onUnsubscribeSuccess?.();
+          loadIndices(page, pageSize, searchText, selectedMarket);
+        } catch (error: any) {
+          message.error(`取消订阅失败: ${error.response?.data?.detail || error.message}`);
+        }
+      },
+    });
+  };
+
   // 处理订阅
   const handleSubscribeClick = async (index: IndexInfo) => {
-    if (index.is_subscribed) {
-      message.warning('该指数已订阅');
-      return;
-    }
-
     const defaultConfig = generateDefaultConfig(index, selectedTable);
 
     if (onSubscribe) {
@@ -250,7 +305,10 @@ export const IndexSubscribeDrawer: React.FC<IndexSubscribeDrawerProps> = ({
     if (visible) {
       loadAvailableTables();
       loadUserPreference();
-      resetState();
+      // 不重置currentStep，让loadUserPreference决定
+      setSearchText('');
+      setSelectedMarket(undefined);
+      setPage(1);
     }
   }, [visible, loadAvailableTables, loadUserPreference]);
 
@@ -261,6 +319,13 @@ export const IndexSubscribeDrawer: React.FC<IndexSubscribeDrawerProps> = ({
       loadIndices(page, pageSize, searchText, selectedMarket);
     }
   }, [visible, currentStep, loadFilterOptions, loadIndices, page, pageSize, searchText, selectedMarket]);
+
+  // selectedTable 变化时加载字段列表
+  useEffect(() => {
+    if (selectedTable) {
+      loadTableColumns(selectedTable);
+    }
+  }, [selectedTable, loadTableColumns]);
 
   const handleSearch = () => {
     setPage(1);
@@ -333,17 +398,27 @@ export const IndexSubscribeDrawer: React.FC<IndexSubscribeDrawerProps> = ({
       title: '操作',
       key: 'action',
       width: 120,
-      render: (_: any, record: IndexInfo) => (
-        <Button
-          type={record.is_subscribed ? 'default' : 'primary'}
-          size="small"
-          icon={record.is_subscribed ? <CheckOutlined /> : <PlusOutlined />}
-          disabled={record.is_subscribed}
-          onClick={() => handleSubscribeClick(record)}
-        >
-          {record.is_subscribed ? '已订阅' : '订阅'}
-        </Button>
-      ),
+      render: (_: any, record: IndexInfo) =>
+        record.is_subscribed ? (
+          <Button
+            type="default"
+            size="small"
+            danger
+            icon={<DeleteOutlined />}
+            onClick={() => handleUnsubscribeClick(record)}
+          >
+            取消订阅
+          </Button>
+        ) : (
+          <Button
+            type="primary"
+            size="small"
+            icon={<PlusOutlined />}
+            onClick={() => handleSubscribeClick(record)}
+          >
+            订阅
+          </Button>
+        ),
     },
   ];
 
@@ -378,6 +453,77 @@ export const IndexSubscribeDrawer: React.FC<IndexSubscribeDrawerProps> = ({
         <div style={{ color: 'var(--text-secondary)', fontSize: '12px', marginBottom: '24px' }}>
           提示：通常选择 sync_index_basic 或类似的表
         </div>
+
+        {tableColumns.length > 0 && (
+          <div style={{ marginBottom: '24px' }}>
+            <div style={{ marginBottom: '8px', fontSize: '14px', fontWeight: 500 }}>
+              筛选字段配置
+            </div>
+            <Table
+              size="small"
+              dataSource={filterConfig}
+              rowKey="field"
+              pagination={false}
+              loading={loadingColumns}
+              columns={[
+                {
+                  title: '字段名',
+                  dataIndex: 'field',
+                  width: 150,
+                },
+                {
+                  title: '显示标签',
+                  dataIndex: 'label',
+                  width: 150,
+                  render: (_: string, record: FilterFieldConfig, index: number) => (
+                    <Input
+                      size="small"
+                      value={record.label}
+                      onChange={e => {
+                        setFilterConfig(prev => prev.map((f, i) =>
+                          i === index ? { ...f, label: e.target.value } : f
+                        ));
+                      }}
+                    />
+                  ),
+                },
+                {
+                  title: '作为筛选项',
+                  dataIndex: 'enabled',
+                  width: 100,
+                  render: (_: boolean, record: FilterFieldConfig, index: number) => (
+                    <Switch
+                      size="small"
+                      checked={record.enabled}
+                      onChange={val => {
+                        setFilterConfig(prev => prev.map((f, i) =>
+                          i === index ? { ...f, enabled: val } : f
+                        ));
+                      }}
+                    />
+                  ),
+                },
+                {
+                  title: '默认值',
+                  dataIndex: 'default_value',
+                  render: (_: string | null, record: FilterFieldConfig, index: number) => (
+                    <Input
+                      size="small"
+                      placeholder="留空表示无默认值"
+                      value={record.default_value || ''}
+                      disabled={!record.enabled}
+                      onChange={e => {
+                        setFilterConfig(prev => prev.map((f, i) =>
+                          i === index ? { ...f, default_value: e.target.value || null } : f
+                        ));
+                      }}
+                    />
+                  ),
+                },
+              ]}
+            />
+          </div>
+        )}
 
         <Button
           type="primary"
