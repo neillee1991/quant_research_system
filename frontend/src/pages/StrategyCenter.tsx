@@ -327,7 +327,7 @@ const StrategyCenter: React.FC = () => {
                   value={tsCode}
                   onChange={(v) => setTsCode(v as string)}
                   style={{ width: 160 }}
-                  size="small"
+                  size="middle"
                   options={[
                     { label: '000001.SZ', value: '000001.SZ' },
                     { label: '600000.SH', value: '600000.SH' },
@@ -347,7 +347,7 @@ const StrategyCenter: React.FC = () => {
                   value={task}
                   onChange={(v) => setTask(v as 'full' | 'incremental')}
                   style={{ width: 180 }}
-                  size="small"
+                  size="middle"
                   options={[
                     { label: '完整流水线', value: 'full' },
                     { label: 'AutoML', value: 'automl' },
@@ -359,7 +359,7 @@ const StrategyCenter: React.FC = () => {
                 type="primary"
                 onClick={handleStartTraining}
                 loading={polling}
-                size="small"
+                size="middle"
                 style={{
                   background: 'var(--gradient-primary)',
                   border: 'none',

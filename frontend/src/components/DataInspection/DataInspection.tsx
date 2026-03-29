@@ -82,7 +82,7 @@ export const DataInspection: React.FC<DataInspectionProps> = ({ taskType, taskId
           percent={coveragePct}
           strokeColor={coveragePct >= 95 ? 'var(--color-gain)' : 'var(--color-loss)'}
           style={{ width: 200 }}
-          size="small"
+          size="middle"
         />
       ),
     },
@@ -94,7 +94,7 @@ export const DataInspection: React.FC<DataInspectionProps> = ({ taskType, taskId
       label: '数据完整性报告',
       children: (
         <div>
-          <Descriptions items={descItems} size="small" column={2} />
+          <Descriptions items={descItems} size="middle" column={2} />
           {(inspectionData?.missing_count ?? 0) > 0 && inspectionData?.missing_dates && (
             <div style={{ marginTop: 16 }}>
               <div style={{ marginBottom: 8, fontWeight: 600 }}>缺失的交易日：</div>

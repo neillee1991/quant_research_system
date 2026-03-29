@@ -33,7 +33,7 @@ const SignalNode: React.FC<NodeProps> = ({ id, data }) => {
   return (
     <Card
       title="Signal"
-      size="small"
+      size="middle"
       style={{ minWidth: 240, background: 'var(--bg-node-signal)', border: '1px solid var(--color-loss)' }}
       styles={{ header: { padding: '8px 12px' }, body: { padding: '8px 12px' } }}
     >
@@ -80,7 +80,7 @@ const SignalNode: React.FC<NodeProps> = ({ id, data }) => {
       <div style={{ marginTop: 8 }}>
         <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>Signal Column</div>
         <Input
-          size="small"
+          size="middle"
           defaultValue={data.signal_col || 'signal'}
           onChange={(e) => handleValueChange({ signal_col: e.target.value })}
         />

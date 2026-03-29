@@ -6,6 +6,13 @@ import React, { useMemo, useState, useEffect } from 'react';
 import {
   Card, Button, Select, InputNumber, Spin, Empty, Table, Tag, Checkbox, Collapse, Popconfirm,
 } from 'antd';
+import { BarChartOutlined, ApartmentOutlined } from '@ant-design/icons';
+import { useMessage } from '../../hooks/useMessage';
+import ReactECharts from 'echarts-for-react';
+import QuantDatePicker from '../../components/QuantDatePicker';
+import { useFactorAnalysis } from './hooks/useFactorAnalysis';
+import { productionApi } from '../../api';
+import FactorFlowDrawer from './FactorFlowDrawer';
 
 /** 统一日期格式化：YYYYMMDD 或 datetime 字符串 → YYYY-MM-DD */
 const formatDate = (d: string) => {
@@ -35,12 +42,6 @@ const useTradingDaySet = (startDate?: string, endDate?: string): Set<string> => 
   }, [startDate, endDate]);
   return tradingDaySet;
 };
-import { BarChartOutlined } from '@ant-design/icons';
-import { useMessage } from '../../hooks/useMessage';
-import ReactECharts from 'echarts-for-react';
-import QuantDatePicker from '../../components/QuantDatePicker';
-import { useFactorAnalysis } from './hooks/useFactorAnalysis';
-import { productionApi } from '../../api';
 
 /**
  * 分组分析子组件（有 groupby 时才显示）
@@ -612,6 +613,8 @@ const AnalysisPanel: React.FC = () => {
     deleteAnalysis,
   } = useFactorAnalysis();
 
+  const [flowDrawerOpen, setFlowDrawerOpen] = React.useState<boolean>(false);
+
   const historyColumns = [
     {
       title: '分析日期',
@@ -711,7 +714,7 @@ const AnalysisPanel: React.FC = () => {
       render: (_: any, r: any) => (
         <div style={{ display: 'flex', gap: 8 }}>
           <Button
-            size="small"
+            size="middle"
             onClick={async () => {
               try {
                 const res = await productionApi.getAlphalensAnalysisById(selectedFactor, r.id);
@@ -739,7 +742,7 @@ const AnalysisPanel: React.FC = () => {
             okText="确定"
             cancelText="取消"
           >
-            <Button size="small" danger>
+            <Button size="middle" danger>
               删除
             </Button>
           </Popconfirm>
@@ -828,7 +831,7 @@ const AnalysisPanel: React.FC = () => {
                       <Select
                         value={industryLevel}
                         onChange={(v) => setIndustryLevel(v as 'industry_l1' | 'industry_l2')}
-                        size="small"
+                        size="middle"
                         disabled={!neutralize || !neutralizeControls.includes('industry')}
                         style={{ width: 72 }}
                         options={[
@@ -856,7 +859,7 @@ const AnalysisPanel: React.FC = () => {
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, opacity: winsorize ? 1 : 0.4 }}>
               <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>下界:</span>
               <InputNumber
-                size="small"
+                size="middle"
                 disabled={!winsorize}
                 value={winsorizeLower}
                 onChange={(v) => setWinsorizeLower(v as number)}
@@ -867,7 +870,7 @@ const AnalysisPanel: React.FC = () => {
               />
               <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>上界:</span>
               <InputNumber
-                size="small"
+                size="middle"
                 disabled={!winsorize}
                 value={winsorizeUpper}
                 onChange={(v) => setWinsorizeUpper(v as number)}
@@ -913,7 +916,7 @@ const AnalysisPanel: React.FC = () => {
           <div style={{ width: 260 }}>
             <div style={labelStyle}>分析区间</div>
             <QuantDatePicker
-              size="small"
+              size="middle"
               value={[startDate, endDate]}
               onChange={(s, e) => { setStartDate(s); setEndDate(e); }}
               disableFuture={false}
@@ -939,6 +942,9 @@ const AnalysisPanel: React.FC = () => {
             {taskStatus === 'running' && <Tag color="blue">分析中</Tag>}
             {taskStatus === 'completed' && <Tag color="green">已完成</Tag>}
             {taskStatus === 'failed' && <Tag color="red">失败</Tag>}
+            <Button icon={<ApartmentOutlined />} onClick={() => setFlowDrawerOpen(true)}>
+              分布框架
+            </Button>
             <Button type="primary" icon={<BarChartOutlined />} loading={runLoading} onClick={runAnalysis}>
               运行分析
             </Button>
@@ -958,7 +964,7 @@ const AnalysisPanel: React.FC = () => {
               children: (
                 <>
                   <Table
-                    size="small"
+                    size="middle"
                     dataSource={analysisResult.diagnostics.pipeline_stats}
                     columns={[
                       { title: '步骤', dataIndex: 'step' },
@@ -1108,6 +1114,12 @@ const AnalysisPanel: React.FC = () => {
           </Spin>
         </Card>
       )}
+
+      <FactorFlowDrawer
+        open={flowDrawerOpen}
+        onClose={() => setFlowDrawerOpen(false)}
+        factorId={selectedFactor}
+      />
     </div>
   );
 };

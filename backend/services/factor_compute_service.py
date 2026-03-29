@@ -92,6 +92,7 @@ class FactorComputeService:
         preprocess: Optional[Dict[str, Any]] = None,
         preprocess_profile: Optional[str] = None,
         save_results: bool = True,
+        run_id: Optional[str] = None,
     ) -> ComputeResult:
         """执行因子计算
 
@@ -152,8 +153,27 @@ class FactorComputeService:
                 f"loading data from {data_start}"
             )
 
-            # 4. 创建运行记录
-            run_id = self._create_run_record(factor_id, calc_start, calc_end, compute_mode)
+            # 4. 创建运行记录（如果外部已传入 run_id，更新已有记录；否则新建）
+            if run_id:
+                try:
+                    self.db.execute("DELETE FROM factor_run_log WHERE run_id = %s", (run_id,))
+                    record = pl.DataFrame({
+                        "run_id": [run_id],
+                        "factor_id": [factor_id],
+                        "start_date": [calc_start],
+                        "end_date": [calc_end],
+                        "mode": [compute_mode],
+                        "status": ["running"],
+                        "rows": [0],
+                        "elapsed_seconds": [0.0],
+                        "message": [""],
+                        "created_at": [started_at],
+                    })
+                    self.db.append("factor_run_log", record)
+                except Exception as e:
+                    logger.warning(f"Failed to update run record {run_id}: {e}")
+            else:
+                run_id = self._create_run_record(factor_id, calc_start, calc_end, compute_mode)
 
             # 保存运行上下文用于后续更新
             run_context = {
@@ -357,6 +377,7 @@ class FactorComputeService:
         run_id = f"{factor_id}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
         try:
             now = datetime.now()
+            # 只包含迁移脚本中定义的基本字段
             record = pl.DataFrame({
                 "run_id": [run_id],
                 "factor_id": [factor_id],
@@ -368,7 +389,6 @@ class FactorComputeService:
                 "elapsed_seconds": [0.0],
                 "message": [""],
                 "created_at": [now],
-                "finished_at": [now]  # 临时值，后续会更新
             })
             self.db.append("factor_run_log", record)
         except Exception as e:
@@ -400,9 +420,9 @@ class FactorComputeService:
                 "status": [status],
                 "start_date": [run_context["calc_start"]],
                 "end_date": [run_context["calc_end"]],
-                "rows_affected": [rows],
-                "duration_seconds": [elapsed],
-                "error_message": [message or ""],
+                "rows": [rows],
+                "elapsed_seconds": [elapsed],
+                "message": [message or ""],
                 "run_id": [run_id],
                 "created_at": [started_at]
             })

@@ -1,5 +1,6 @@
 """因子计算执行 API 端点"""
 import io
+import json
 import sys
 import time
 import uuid
@@ -9,6 +10,7 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
+import polars as pl
 
 from store.dolphindb_client import db_client
 from services.factor_compute_service import FactorComputeService, DEFAULT_PREPROCESS as _DEFAULT_PREPROCESS
@@ -21,6 +23,7 @@ from app.core.utils import (
     safe_str_datetime,
     normalize_trade_date_pl,
 )
+from app.services.task_runner import TaskRunner, tracked_task
 
 router = APIRouter()
 factor_service = FactorComputeService(db_client)
@@ -37,12 +40,22 @@ def _format_run_record(record: Dict[str, Any]) -> Dict[str, Any]:
         if result.get(date_field):
             result[date_field] = DateUtils.format_date_for_display(result[date_field])
 
-    # 格式化时间戳
-    result["created_at"] = safe_str_datetime(result.get("created_at"))
-    result["finished_at"] = safe_str_datetime(result.get("finished_at"))
+    # 格式化时间戳（处理可能缺失的字段）
+    for ts_field in ["created_at", "finished_at"]:
+        if ts_field in result:
+            result[ts_field] = safe_str_datetime(result.get(ts_field))
+        else:
+            result[ts_field] = None
 
-    # 统一字段名
-    result = unify_record_fields(result)
+    # 统一字段名（映射数据库列名到API字段名）
+    # 支持两种列名，兼容不同版本的表结构
+    # 先尝试新列名，如果没有则尝试旧列名
+    result["rows"] = result.get("rows") or result.get("rows_affected")
+    result["elapsed_seconds"] = result.get("elapsed_seconds") or result.get("duration_seconds")
+    result["error_message"] = result.get("error_message") or result.get("message")
+
+    logger.debug(f"After mapping - rows: {result.get('rows')}, elapsed: {result.get('elapsed_seconds')}")
+
     return result
 
 
@@ -89,6 +102,7 @@ class FactorTestRequest(BaseModel):
 
 # ==================== API Endpoints ====================
 
+@tracked_task("factor", task_id_kwarg="factor_id")
 def _run_factor_background(
     factor_id: str,
     mode: str,
@@ -107,8 +121,10 @@ def _run_factor_background(
             start_date=start_date,
             end_date=end_date,
             preprocess=preprocess,
+            run_id=run_id,
         )
         logger.info(f"Factor {factor_id} computation completed: run_id={run_id}, success={result.success}, rows={result.rows}")
+        return result
     except Exception as e:
         logger.error(f"Factor {factor_id} computation failed: run_id={run_id}, error={e}")
 
@@ -120,10 +136,34 @@ async def run_production(req: ProductionRunRequest, background_tasks: Background
     立即返回 run_id，后台执行计算。使用 /production/status/{run_id} 查询状态。
     """
     try:
+        import polars as pl
         # 生成 run_id
         run_id = f"{req.factor_id}_{int(time.time() * 1000)}"
 
+        # 写入统一任务表
+        TaskRunner.start(run_id, "factor", req.factor_id, f"因子计算: {req.factor_id}",
+                         params=json.dumps({"mode": req.mode, "start_date": req.start_date, "end_date": req.end_date}))
+
         preprocess = req.preprocess.model_dump() if req.preprocess else None
+
+        # 立即写入 running 状态
+        try:
+            now = datetime.now()
+            record = pl.DataFrame({
+                "run_id": [run_id],
+                "factor_id": [req.factor_id],
+                "start_date": [req.start_date or req.target_date or ""],
+                "end_date": [req.end_date or req.target_date or ""],
+                "mode": [req.mode],
+                "status": ["running"],
+                "rows": [0],
+                "elapsed_seconds": [0.0],
+                "message": [""],
+                "created_at": [now],
+            })
+            db_client.append("factor_run_log", record)
+        except Exception as log_err:
+            logger.warning(f"Failed to write running status for factor {req.factor_id}: {log_err}")
 
         # 添加后台任务
         background_tasks.add_task(
@@ -142,7 +182,7 @@ async def run_production(req: ProductionRunRequest, background_tasks: Background
             "data": {
                 "run_id": run_id,
                 "factor_id": req.factor_id,
-                "status": "pending",
+                "status": "running",
                 "message": "Factor computation started in background"
             }
         }
@@ -164,7 +204,30 @@ async def batch_run_production(req: BatchRunRequest, background_tasks: Backgroun
         for fid in req.factor_ids:
             # 使用 UUID 替代 timestamp + sleep，避免冲突且无需延迟
             run_id = f"{fid}_{uuid.uuid4().hex[:12]}"
-            run_ids.append({"factor_id": fid, "run_id": run_id, "status": "pending"})
+            run_ids.append({"factor_id": fid, "run_id": run_id, "status": "running"})
+
+            # 写入统一任务表
+            TaskRunner.start(run_id, "factor", fid, f"因子计算: {fid}",
+                             params=json.dumps({"mode": req.mode, "start_date": req.start_date, "end_date": req.end_date}))
+
+            # 立即写入 running 状态
+            try:
+                now = datetime.now()
+                record = pl.DataFrame({
+                    "run_id": [run_id],
+                    "factor_id": [fid],
+                    "start_date": [req.start_date or ""],
+                    "end_date": [req.end_date or ""],
+                    "mode": [req.mode],
+                    "status": ["running"],
+                    "rows": [0],
+                    "elapsed_seconds": [0.0],
+                    "message": [""],
+                    "created_at": [now],
+                })
+                db_client.append("factor_run_log", record)
+            except Exception as log_err:
+                logger.warning(f"Failed to write running status for factor {fid}: {log_err}")
 
             # 每个因子独立后台任务
             background_tasks.add_task(
@@ -197,10 +260,9 @@ async def get_run_status(run_id: str):
     返回任务的执行状态、耗时、数据条数等信息。
     """
     try:
-        # 只查询需要的列，而不是 SELECT *
+        # 使用 SELECT * 来避免列名问题，然后在代码中处理
         df = db_client.query("""
-            SELECT id, factor_id, run_id, start_date, end_date, status,
-                   created_at, finished_at, rows_affected, duration_seconds, error_message
+            SELECT *
             FROM factor_run_log
             WHERE run_id = %s
             ORDER BY created_at DESC
@@ -249,10 +311,9 @@ async def get_production_history(
         where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
         params.append(limit)
 
-        # 只查询需要的列
+        # 使用 SELECT * 来避免列名问题，然后在代码中处理
         df = db_client.query(f"""
-            SELECT id, factor_id, run_id, start_date, end_date, status,
-                   created_at, finished_at, rows_affected, duration_seconds, error_message
+            SELECT *
             FROM factor_run_log
             {where}
             ORDER BY created_at DESC LIMIT %s
@@ -261,8 +322,12 @@ async def get_production_history(
         data = []
         if not df.is_empty():
             for row in df.to_dicts():
-                data.append(_format_run_record(row))
+                logger.debug(f"Raw record from DB: {row}")
+                formatted = _format_run_record(row)
+                logger.debug(f"Formatted record: {formatted}")
+                data.append(formatted)
 
+        logger.debug(f"Returning {len(data)} records")
         return {"status": "success", "data": data}
     except Exception as e:
         if "does not exist" in str(e):

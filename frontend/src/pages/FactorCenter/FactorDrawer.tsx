@@ -279,7 +279,7 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
       }
       open={open} onClose={onClose} width={780}
     >
-      <Tabs activeKey={activeTab} onChange={setActiveTab} size="small" items={[
+      <Tabs activeKey={activeTab} onChange={setActiveTab} size="middle" items={[
         {
           key: 'edit',
           label: <span><EditOutlined /> 编辑</span>,
@@ -294,23 +294,23 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
                       <div style={{ display: 'flex', gap: 16 }}>
                         <div style={{ flex: 1 }}>
                           <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>描述</div>
-                          <Input size="small" value={editDesc} onChange={e => setEditDesc(e.target.value)} />
+                          <Input size="middle" value={editDesc} onChange={e => setEditDesc(e.target.value)} />
                         </div>
                         <div style={{ flex: '0 0 140px' }}>
                           <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>分类</div>
-                          <Select size="small" style={{ width: '100%' }} value={editCategory} onChange={v => setEditCategory(v as string)}
+                          <Select size="middle" style={{ width: '100%' }} value={editCategory} onChange={v => setEditCategory(v as string)}
                             options={['momentum','value','technical','quality','custom'].map(v => ({ label: v, value: v }))} />
                         </div>
                         <div style={{ flex: '0 0 140px' }}>
                           <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>计算模式</div>
-                          <Select size="small" style={{ width: '100%' }} value={editComputeMode} onChange={v => setEditComputeMode(v as string)}
+                          <Select size="middle" style={{ width: '100%' }} value={editComputeMode} onChange={v => setEditComputeMode(v as string)}
                             options={[{ label: '增量', value: 'incremental' }, { label: '全量', value: 'full' }]} />
                         </div>
                       </div>
                       <div style={{ marginTop: 8 }}>
                         <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>数据依赖</div>
                         <Select
-                          size="small" mode="multiple" style={{ width: '100%' }} value={editDependsOn}
+                          size="middle" mode="multiple" style={{ width: '100%' }} value={editDependsOn}
                           onChange={(v) => setEditDependsOn(v as string[])}
                           options={availableTables.map(t => ({ label: t.label, value: t.value }))}
                           showSearch
@@ -320,7 +320,7 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
                       <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 12 }}>
                         <div style={{ flex: 1 }}>
                           <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>回溯天数</div>
-                          <InputNumber size="small" min={1} max={500} value={editLookbackDays} style={{ width: '100%' }}
+                          <InputNumber size="middle" min={1} max={500} value={editLookbackDays} style={{ width: '100%' }}
                             onChange={(v) => setEditLookbackDays((v as number) || 60)} />
                         </div>
                         <div style={{ paddingTop: 18 }}>
@@ -340,7 +340,7 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
                       <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
                         <div style={{ flex: '1 1 200px' }}>
                           <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>复权方式</div>
-                          <Select size="small" style={{ width: '100%' }} value={ppEdit.adjust_price}
+                          <Select size="middle" style={{ width: '100%' }} value={ppEdit.adjust_price}
                             onChange={(v) => setPpEdit(p => ({ ...p, adjust_price: v as PreprocessOptions['adjust_price'] }))}
                             options={[
                               { label: '前复权', value: 'forward' },
@@ -353,7 +353,7 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
                         </div>
                         <div style={{ flex: '1 1 200px' }}>
                           <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>新股排除天数</div>
-                          <InputNumber size="small" min={1} max={250} value={ppEdit.new_stock_days}
+                          <InputNumber size="middle" min={1} max={250} value={ppEdit.new_stock_days}
                             disabled={!ppEdit.filter_new_stock} style={{ width: '100%' }}
                             onChange={(v) => setPpEdit(p => ({ ...p, new_stock_days: (v as number) || 60 }))} />
                         </div>
@@ -400,8 +400,8 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
                         <div>
                           <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginBottom: 8 }}>
                             <div style={{ display: 'flex', gap: 8 }}>
-                              <Button size="small" icon={<CodeOutlined />} onClick={handleFormatCode}>格式化</Button>
-                              <Button size="small" type="primary" icon={<SaveOutlined />} disabled={!codeChanged}
+                              <Button size="middle" icon={<CodeOutlined />} onClick={handleFormatCode}>格式化</Button>
+                              <Button size="middle" type="primary" icon={<SaveOutlined />} disabled={!codeChanged}
                                 loading={codeSaving} onClick={handleSaveCode}>保存代码</Button>
                             </div>
                           </div>
@@ -439,17 +439,17 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
             <div>
               {factorId && <DataInspection taskType="factor" taskId={factorId} />}
               <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
-                <Input size="small" placeholder="股票代码" style={{ width: 120 }} allowClear
+                <Input size="middle" placeholder="股票代码" style={{ width: 120 }} allowClear
                   onChange={e => setDataFilter(f => ({ ...f, ts_code: e.target.value || undefined }))} />
-                <Input size="small" placeholder="起始日期 (yyyymmdd)" style={{ width: 160 }} allowClear
+                <Input size="middle" placeholder="起始日期 (yyyymmdd)" style={{ width: 160 }} allowClear
                   onChange={e => setDataFilter(f => ({ ...f, start_date: e.target.value || undefined }))} />
-                <Input size="small" placeholder="截止日期 (yyyymmdd)" style={{ width: 160 }} allowClear
+                <Input size="middle" placeholder="截止日期 (yyyymmdd)" style={{ width: 160 }} allowClear
                   onChange={e => setDataFilter(f => ({ ...f, end_date: e.target.value || undefined }))} />
-                <Button size="small" icon={<SearchOutlined />} onClick={loadData}>查询</Button>
+                <Button size="middle" icon={<SearchOutlined />} onClick={loadData}>查询</Button>
               </div>
               <Table dataSource={factorData} columns={dataColumns}
                 rowKey={(r: any) => `${r.ts_code}-${r.trade_date}`}
-                loading={dataLoading} size="small" pagination={{ pageSize: 20 }}
+                loading={dataLoading} size="middle" pagination={{ pageSize: 20 }}
                 locale={{ emptyText: <Empty description="暂无数据" /> }} />
             </div>
           ),
@@ -467,7 +467,7 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
                     style={{ width: 280 }}
                     onChange={(s, e) => { setFilterStartDate(s); setFilterEndDate(e); }}
                   />
-                  <Button size="small" icon={<SearchOutlined />} onClick={loadHistory}>筛选</Button>
+                  <Button size="middle" icon={<SearchOutlined />} onClick={loadHistory}>筛选</Button>
                   <span style={{ fontSize: 11, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
                     按任务完成日期筛选
                   </span>
@@ -475,7 +475,7 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
               </div>
               <Table dataSource={history} columns={logColumns}
                 rowKey={(r: any) => `${r.factor_id}-${r.created_at}`}
-                loading={historyLoading} size="small" pagination={{ pageSize: 15 }}
+                loading={historyLoading} size="middle" pagination={{ pageSize: 15 }}
                 locale={{ emptyText: <Empty description="暂无计算记录" /> }} />
             </div>
           ),

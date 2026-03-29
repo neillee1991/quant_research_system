@@ -53,7 +53,7 @@ function toYYYYMMDD(d: Dayjs | null): string {
 
 const QuantDatePicker: React.FC<QuantDatePickerProps> = (props) => {
   if (props.mode === 'single') {
-    const { value, onChange, disableFuture = false, size = 'small', style, placeholder } = props;
+    const { value, onChange, disableFuture = false, size = 'middle', style, placeholder } = props;
     return (
       <DatePicker
         size={size}
@@ -74,7 +74,7 @@ const QuantDatePicker: React.FC<QuantDatePickerProps> = (props) => {
     onChange,
     presets = true,
     disableFuture: df = true,
-    size = 'small',
+    size = 'middle',
     style,
     placeholder = ['开始日期', '结束日期'],
   } = props as RangeProps;

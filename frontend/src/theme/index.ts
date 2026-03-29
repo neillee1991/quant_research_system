@@ -17,7 +17,7 @@ export const darkTheme: ThemeConfig = {
     borderRadius: 4,
     fontSize: 12,
     fontFamily: "'SF Pro Display', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif",
-    controlHeight: 28,
+    controlHeight: 28, // 默认控件高度标准：28px (middle)，所有组件不指定 size 时走此默认值
     paddingXS: 6,
     paddingSM: 8,
     padding: 12,
@@ -50,7 +50,7 @@ export const lightTheme: ThemeConfig = {
     borderRadius: 4,
     fontSize: 12,
     fontFamily: "'SF Pro Display', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif",
-    controlHeight: 28,
+    controlHeight: 28, // 默认控件高度标准：28px (middle)，所有组件不指定 size 时走此默认值
     paddingXS: 6,
     paddingSM: 8,
     padding: 12,

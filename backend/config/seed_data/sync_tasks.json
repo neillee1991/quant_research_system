@@ -274,5 +274,54 @@
       "out_date": {"type": "DATE"},
       "is_new": {"type": "STRING"}
     }
+  },
+  {
+    "task_id": "sync_index_basic",
+    "api_name": "index_basic",
+    "description": "指数基础信息列表",
+    "sync_type": "full",
+    "date_field": "",
+    "table_name": "sync_index_basic",
+    "params": {
+      "market": "",
+      "publisher": "",
+      "fields": "ts_code,name,market,publisher,list_date,weight_rule,desc,exp_date"
+    },
+    "primary_keys": ["ts_code"],
+    "api_limit": 5000,
+    "schema": {
+      "ts_code": {"type": "SYMBOL"},
+      "name": {"type": "STRING"},
+      "market": {"type": "SYMBOL"},
+      "publisher": {"type": "STRING"},
+      "list_date": {"type": "DATE"},
+      "weight_rule": {"type": "STRING"},
+      "desc": {"type": "STRING"},
+      "exp_date": {"type": "DATE"},
+      "updated_at": {"type": "TIMESTAMP"}
+    }
+  },
+  {
+    "task_id": "sync_index_weight_template",
+    "api_name": "index_weight",
+    "description": "指数成分股权重（模板，订阅时动态生成实际任务）",
+    "sync_type": "incremental",
+    "date_field": "trade_date",
+    "table_name": "sync_index_weight",
+    "params": {
+      "index_code": "$$INDEX_CODE$$",
+      "trade_date": "{date}",
+      "fields": "index_code,con_code,trade_date,weight"
+    },
+    "primary_keys": ["index_code", "ts_code", "trade_date"],
+    "api_limit": 5000,
+    "column_mapping": {"con_code": "ts_code"},
+    "schema": {
+      "index_code": {"type": "SYMBOL"},
+      "ts_code": {"type": "SYMBOL"},
+      "trade_date": {"type": "DATE"},
+      "weight": {"type": "DOUBLE"}
+    },
+    "_is_template": true
   }
 ]

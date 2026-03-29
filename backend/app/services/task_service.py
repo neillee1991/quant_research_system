@@ -4,6 +4,7 @@
 """
 import json
 from typing import TypeVar, Generic, Type, List, Optional, Dict, Any
+import polars as pl
 
 from app.models.base_task import BaseTaskConfig, SyncTaskConfig, ETLTaskConfig, FactorConfig
 from store.dolphindb_client import db_client
@@ -114,7 +115,14 @@ class TaskService(Generic[T]):
         # Schema 验证（仅对 sync 和 etl 任务）
         if self.task_type in ["sync", "etl"]:
             schema_json = config_data.get("schema_json")
-            primary_keys = config_data.get("primary_keys", [])
+            primary_keys_raw = config_data.get("primary_keys_json") or config_data.get("primary_keys", [])
+            if isinstance(primary_keys_raw, str):
+                try:
+                    primary_keys = json.loads(primary_keys_raw)
+                except json.JSONDecodeError:
+                    primary_keys = []
+            else:
+                primary_keys = primary_keys_raw
             table_name = config_data.get("table_name")
 
             if schema_json:
@@ -154,7 +162,7 @@ class TaskService(Generic[T]):
         config_dict = task.model_dump(exclude_none=True)
 
         # 使用 upsert 插入数据
-        db_client.upsert(self.table_name, config_dict)
+        db_client.upsert(self.table_name, pl.DataFrame([config_dict]), [self.id_field])
 
         logger.info(f"Created {self.task_type} task {task_id}")
 
@@ -264,7 +272,7 @@ class TaskService(Generic[T]):
         config_dict = updated_task.model_dump(exclude_none=True)
 
         # 使用 upsert 更新数据
-        db_client.upsert(self.table_name, config_dict)
+        db_client.upsert(self.table_name, pl.DataFrame([config_dict]), [self.id_field])
 
         logger.info(f"Updated {self.task_type} task {task_id}")
 
@@ -276,16 +284,18 @@ class TaskService(Generic[T]):
         task_id: str,
         changed_by: str = "api",
         change_reason: str = "Delete task",
-        drop_table: bool = False
+        drop_table: bool = False,
+        hard_delete: bool = False
     ) -> bool:
         """
-        删除任务（软删除，设置 enabled=false）
+        删除任务
 
         Args:
             task_id: 任务ID
             changed_by: 修改人
             change_reason: 修改原因
             drop_table: 是否同时删除物理表（危险操作，默认 False）
+            hard_delete: 是否硬删除（真正从数据库删除记录，默认 False）
 
         Returns:
             是否成功删除
@@ -325,14 +335,19 @@ class TaskService(Generic[T]):
                     logger.error(f"Failed to drop table {table_name}: {e}")
                     raise ValueError(f"Failed to drop table {table_name}: {e}")
 
-        # 软删除：设置 enabled=false
-        config_dict = existing.model_dump(exclude_none=True)
-        config_dict["enabled"] = False
+        if hard_delete:
+            # 硬删除：真正从数据库删除记录
+            db_client.execute(f"DELETE FROM {self.table_name} WHERE {self.id_field} = %s", params=(task_id,))
+            logger.info(f"Deleted (hard) {self.task_type} task {task_id}")
+        else:
+            # 软删除：设置 enabled=false
+            config_dict = existing.model_dump(exclude_none=True)
+            config_dict["enabled"] = False
 
-        # 使用 upsert 更新数据
-        db_client.upsert(self.table_name, config_dict)
+            # 使用 upsert 更新数据
+            db_client.upsert(self.table_name, pl.DataFrame([config_dict]), [self.id_field])
 
-        logger.info(f"Deleted (soft) {self.task_type} task {task_id}")
+            logger.info(f"Deleted (soft) {self.task_type} task {task_id}")
         return True
 
     def inspect_data(self, task_id: str) -> Dict[str, Any]:

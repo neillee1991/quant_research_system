@@ -205,6 +205,70 @@ export const productionApi = {
     api.get('/analysis/trading-days', { params: { start, end } }),
 };
 
+export const stockPoolApi = {
+  // Pool CRUD
+  listPools: (params?: { pool_type?: string; status?: string; page?: number; limit?: number }) =>
+    api.get('/stock-pool/pools', { params }),
+  getPool: (poolId: string) =>
+    api.get(`/stock-pool/pools/${poolId}`),
+  createPool: (data: any) =>
+    api.post('/stock-pool/pools', data),
+  updatePool: (poolId: string, data: any) =>
+    api.put(`/stock-pool/pools/${poolId}`, data),
+  setPoolStatus: (poolId: string, status: string, reason?: string) =>
+    api.post(`/stock-pool/pools/${poolId}/status`, { status, reason }),
+  archivePool: (poolId: string) =>
+    api.delete(`/stock-pool/pools/${poolId}`),
+
+  // Index subscription (legacy - keep for compatibility)
+  listAvailableIndexes: (params?: { search?: string; market?: string; publisher?: string; page?: number; limit?: number }) =>
+    api.get('/stock-pool/index/available', { params }),
+  getIndexFilterOptions: () =>
+    api.get('/stock-pool/index/filter-options'),
+  subscribeIndex: (data: { index_code: string; pool_name?: string; auto_sync?: boolean }) =>
+    api.post('/stock-pool/pools/index-subscribe', data),
+
+  // Sync & constituents (legacy - keep for compatibility)
+  syncPool: (poolId: string, tradeDate?: string) =>
+    longRunningApi.post(`/stock-pool/pools/${poolId}/sync`, { trade_date: tradeDate }),
+  getConstituents: (poolId: string, tradeDate?: string) =>
+    api.get(`/stock-pool/pools/${poolId}/constituents`, { params: { trade_date: tradeDate } }),
+};
+
+// Data API - 指数订阅管理
+export const indexApi = {
+  // 获取可订阅的指数列表
+  listAvailableIndices: (params?: {
+    search?: string;
+    market?: string;
+    publisher?: string;
+    page?: number;
+    limit?: number;
+    show_subscribed_only?: boolean;
+  }) =>
+    api.get('/data/index/available', { params }),
+
+  // 获取筛选选项
+  getFilterOptions: () =>
+    api.get('/data/index/filter-options'),
+
+  // 订阅指数
+  subscribeIndex: (data: { index_code: string }) =>
+    api.post('/data/index/subscribe', data),
+
+  // 取消订阅指数
+  unsubscribeIndex: (indexCode: string) =>
+    api.delete(`/data/index/subscribe/${indexCode}`),
+
+  // 获取用户偏好配置
+  getUserPreference: () =>
+    api.get('/data/index/preference'),
+
+  // 保存用户偏好配置
+  saveUserPreference: (data: { index_basic_table: string }) =>
+    api.post('/data/index/preference', data),
+};
+
 // Flow 配置管理
 export interface TaskConfig {
   id: string;
@@ -238,6 +302,55 @@ export const flowApi = {
   delete: (name: string) => api.delete(`/flows/${name}`),
   run: (name: string, targetDate?: string) =>
     longRunningApi.post(`/flows/${name}/run`, null, { params: { target_date: targetDate } }),
+};
+
+// 任务监控 API
+export interface RunningTask {
+  run_id: string;
+  task_id: string;
+  task_type: 'factor' | 'sync' | 'etl' | 'analysis';
+  task_name: string;
+  status: 'running' | 'success' | 'failed' | string;
+  started_at?: string;
+  finished_at?: string | null;
+  elapsed_sec?: number | null;
+  rows?: number | null;
+  error?: string | null;
+  params?: string;
+}
+
+export interface TaskRun {
+  run_id: string;
+  task_type: 'factor' | 'sync' | 'etl' | 'analysis';
+  task_id: string;
+  task_name: string;
+  status: 'running' | 'success' | 'failed';
+  started_at: string;
+  finished_at: string | null;
+  elapsed_sec: number | null;
+  rows: number | null;
+  error: string | null;
+  params: string;
+}
+
+export interface RunningTasksResponse {
+  tasks: RunningTask[];
+  total: number;
+}
+
+export interface TaskHistoryResponse {
+  tasks: TaskRun[];
+  total: number;
+}
+
+export const taskMonitorApi = {
+  getRunningTasks: () => api.get<RunningTasksResponse>('/tasks/running'),
+  getTaskHistory: (limit = 50) =>
+    api.get<TaskHistoryResponse>('/tasks/history', { params: { limit } }),
+  cleanupStale: (timeoutMinutes = 0) =>
+    api.post('/tasks/cleanup', null, { params: { timeout_minutes: timeoutMinutes } }),
+  getTaskStatus: (taskType: string, runId: string) =>
+    api.get(`/tasks/${taskType}/status/${runId}`),
 };
 
 export default api;

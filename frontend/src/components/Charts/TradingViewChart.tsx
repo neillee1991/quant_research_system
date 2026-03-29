@@ -581,7 +581,7 @@ const TradingViewChart: React.FC<TradingViewChartProps> = ({ data, buyPoints = [
     label: (
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', minWidth: 200 }}>
         <span>{indicators.includes(key) ? `✓ ${name}` : name}</span>
-        <Button size="small" icon={<SettingOutlined />} onClick={(e) => { e.stopPropagation(); handleOpenSettings(key); }} style={{ marginLeft: 8 }} />
+        <Button size="middle" icon={<SettingOutlined />} onClick={(e) => { e.stopPropagation(); handleOpenSettings(key); }} style={{ marginLeft: 8 }} />
       </div>
     ),
     onClick: () => setIndicators((prev) => prev.includes(key) ? prev.filter(i => i !== key) : [...prev, key]),
@@ -597,20 +597,20 @@ const TradingViewChart: React.FC<TradingViewChartProps> = ({ data, buyPoints = [
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <div style={{ display: 'flex', gap: 4 }}>
-            <Tooltip title="蜡烛图"><Button size="small" type={chartType === 'candlestick' ? 'primary' : 'text'} icon={<BarChartOutlined />} style={{ height: '24px' }} onClick={() => setChartType('candlestick')} /></Tooltip>
-            <Tooltip title="折线图"><Button size="small" type={chartType === 'line' ? 'primary' : 'text'} icon={<LineChartOutlined />} style={{ height: '24px' }} onClick={() => setChartType('line')} /></Tooltip>
-            <Tooltip title="面积图"><Button size="small" type={chartType === 'area' ? 'primary' : 'text'} icon={<FundOutlined />} style={{ height: '24px' }} onClick={() => setChartType('area')} /></Tooltip>
+            <Tooltip title="蜡烛图"><Button size="middle" type={chartType === 'candlestick' ? 'primary' : 'text'} icon={<BarChartOutlined />} style={{ height: '24px' }} onClick={() => setChartType('candlestick')} /></Tooltip>
+            <Tooltip title="折线图"><Button size="middle" type={chartType === 'line' ? 'primary' : 'text'} icon={<LineChartOutlined />} style={{ height: '24px' }} onClick={() => setChartType('line')} /></Tooltip>
+            <Tooltip title="面积图"><Button size="middle" type={chartType === 'area' ? 'primary' : 'text'} icon={<FundOutlined />} style={{ height: '24px' }} onClick={() => setChartType('area')} /></Tooltip>
           </div>
           <div style={{ width: '1px', height: '20px', background: 'var(--border-color)' }} />
           <Dropdown menu={{ items: indicatorMenuItems }} placement="bottomLeft">
-            <Button size="small" style={{ height: '24px', fontSize: '12px' }}>指标</Button>
+            <Button size="middle" style={{ height: '24px', fontSize: '12px' }}>指标</Button>
           </Dropdown>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <Tooltip title="放大"><Button size="small" type="text" icon={<PlusOutlined />} onClick={handleZoomIn} style={{ height: '24px' }} /></Tooltip>
-          <Tooltip title="缩小"><Button size="small" type="text" icon={<MinusOutlined />} onClick={handleZoomOut} style={{ height: '24px' }} /></Tooltip>
-          <Tooltip title="重置"><Button size="small" type="text" onClick={handleResetZoom} style={{ height: '24px', fontSize: '12px' }}>重置</Button></Tooltip>
-          <Tooltip title="截图"><Button size="small" type="text" icon={<CameraOutlined />} onClick={handleScreenshot} style={{ height: '24px' }} /></Tooltip>
+          <Tooltip title="放大"><Button size="middle" type="text" icon={<PlusOutlined />} onClick={handleZoomIn} style={{ height: '24px' }} /></Tooltip>
+          <Tooltip title="缩小"><Button size="middle" type="text" icon={<MinusOutlined />} onClick={handleZoomOut} style={{ height: '24px' }} /></Tooltip>
+          <Tooltip title="重置"><Button size="middle" type="text" onClick={handleResetZoom} style={{ height: '24px', fontSize: '12px' }}>重置</Button></Tooltip>
+          <Tooltip title="截图"><Button size="middle" type="text" icon={<CameraOutlined />} onClick={handleScreenshot} style={{ height: '24px' }} /></Tooltip>
         </div>
       </div>
 
@@ -629,14 +629,14 @@ const TradingViewChart: React.FC<TradingViewChartProps> = ({ data, buyPoints = [
             { tool: 'text' as const, title: '文本', icon: <FontSizeOutlined /> },
           ]).map(({ tool, title, icon }) => (
             <Tooltip key={tool} title={title} placement="right">
-              <Button size="small" type={drawingMode && drawingTool === tool ? 'primary' : 'text'} icon={icon}
+              <Button size="middle" type={drawingMode && drawingTool === tool ? 'primary' : 'text'} icon={icon}
                 style={{ width: '32px', height: '32px' }}
                 onClick={() => { setDrawingMode(!drawingMode || drawingTool !== tool); setDrawingTool(tool); setDrawingStart(null); }} />
             </Tooltip>
           ))}
           <div style={{ height: '1px', background: 'var(--border-color)', margin: '4px 0' }} />
-          <Tooltip title="撤销" placement="right"><Button size="small" type="text" icon={<UndoOutlined />} style={{ width: '32px', height: '32px' }} onClick={handleUndoLine} disabled={lines.length === 0} /></Tooltip>
-          <Tooltip title="清除所有" placement="right"><Button size="small" type="text" icon={<DeleteOutlined />} style={{ width: '32px', height: '32px', color: lines.length > 0 ? 'var(--color-loss)' : undefined }} onClick={handleClearLines} disabled={lines.length === 0} /></Tooltip>
+          <Tooltip title="撤销" placement="right"><Button size="middle" type="text" icon={<UndoOutlined />} style={{ width: '32px', height: '32px' }} onClick={handleUndoLine} disabled={lines.length === 0} /></Tooltip>
+          <Tooltip title="清除所有" placement="right"><Button size="middle" type="text" icon={<DeleteOutlined />} style={{ width: '32px', height: '32px', color: lines.length > 0 ? 'var(--color-loss)' : undefined }} onClick={handleClearLines} disabled={lines.length === 0} /></Tooltip>
         </div>
       </div>
       {/* OHLC + Indicator Widget Bar */}

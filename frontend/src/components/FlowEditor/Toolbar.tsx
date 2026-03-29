@@ -41,14 +41,14 @@ const Toolbar: React.FC<Props> = ({ onAddNode }) => {
   return (
     <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--border-color)', background: 'var(--bg-secondary)' }}>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-        <Tooltip title="Add data source node"><Button size="small" onClick={addDataInput}>+ Data Input</Button></Tooltip>
-        <Tooltip title="SMA operator"><Button size="small" onClick={() => addOperator('sma')}>+ SMA</Button></Tooltip>
-        <Tooltip title="EMA operator"><Button size="small" onClick={() => addOperator('ema')}>+ EMA</Button></Tooltip>
-        <Tooltip title="RSI operator"><Button size="small" onClick={() => addOperator('rsi')}>+ RSI</Button></Tooltip>
-        <Tooltip title="MACD operator"><Button size="small" onClick={() => addOperator('macd')}>+ MACD</Button></Tooltip>
-        <Tooltip title="Bollinger Bands"><Button size="small" onClick={() => addOperator('bollinger')}>+ Bollinger</Button></Tooltip>
-        <Tooltip title="Signal node"><Button size="small" onClick={addSignal}>+ Signal</Button></Tooltip>
-        <Tooltip title="Backtest output"><Button size="small" onClick={addOutput}>+ Output</Button></Tooltip>
+        <Tooltip title="Add data source node"><Button size="middle" onClick={addDataInput}>+ Data Input</Button></Tooltip>
+        <Tooltip title="SMA operator"><Button size="middle" onClick={() => addOperator('sma')}>+ SMA</Button></Tooltip>
+        <Tooltip title="EMA operator"><Button size="middle" onClick={() => addOperator('ema')}>+ EMA</Button></Tooltip>
+        <Tooltip title="RSI operator"><Button size="middle" onClick={() => addOperator('rsi')}>+ RSI</Button></Tooltip>
+        <Tooltip title="MACD operator"><Button size="middle" onClick={() => addOperator('macd')}>+ MACD</Button></Tooltip>
+        <Tooltip title="Bollinger Bands"><Button size="middle" onClick={() => addOperator('bollinger')}>+ Bollinger</Button></Tooltip>
+        <Tooltip title="Signal node"><Button size="middle" onClick={addSignal}>+ Signal</Button></Tooltip>
+        <Tooltip title="Backtest output"><Button size="middle" onClick={addOutput}>+ Output</Button></Tooltip>
       </div>
     </div>
   );

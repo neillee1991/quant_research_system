@@ -118,7 +118,7 @@ const MarketCenter: React.FC = () => {
           columns={dailyColumns}
           rowKey="trade_date"
           loading={loading}
-          size="small"
+          size="middle"
           pagination={{ pageSize: 20 }}
           scroll={{ x: 800 }}
           style={{}}

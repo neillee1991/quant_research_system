@@ -38,6 +38,7 @@ class SeedDataManager:
         self.seed_etl_task_config()
         self.seed_factor_data_config()
         self.seed_factor_metadata()
+        self.seed_user_sync_preference()
         logger.info("Seed data initialization completed")
 
     def seed_sync_task_config(self) -> None:
@@ -194,3 +195,28 @@ class SeedDataManager:
 
         self.db_client.upsert("factor_metadata", seed_df, ["factor_id"])
         logger.info(f"已写入 {len(factors)} 条默认因子定义")
+
+    def seed_user_sync_preference(self) -> None:
+        """
+        如果 user_sync_preference 表为空，则写入默认用户同步偏好配置
+        仅在首次启动时生效，后续可通过 API 修改
+        """
+        try:
+            count = self.db_client.query("SELECT count(*) as cnt FROM user_sync_preference")
+            if not count.is_empty() and count["cnt"][0] > 0:
+                logger.info("user_sync_preference 已有数据，跳过 seed")
+                return
+        except Exception:
+            pass
+
+        now = datetime.now()
+        default_preference = {
+            "user_id": "default",
+            "index_table": "sync_index_basic",
+            "created_at": now,
+            "updated_at": now,
+        }
+
+        seed_df = pl.DataFrame([default_preference])
+        self.db_client.upsert("user_sync_preference", seed_df, ["user_id"])
+        logger.info("已写入默认用户同步偏好配置")

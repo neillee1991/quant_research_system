@@ -60,26 +60,59 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
       loadTaskConfig();
       loadSyncHistory();
       loadTaskStatus();
-    } else if (visible && isNew && !task) {
-      // 新建任务的默认配置
-      const defaultConfig = {
-        task_id: 'sync_',
-        description: '',
-        api_name: '',
-        table_name: 'sync_',
-        sync_type: 'incremental',
-        source: 'tushare',
-        date_field: '',
-        api_limit: 0,
-        primary_keys: [],
-        params: {},
-        schema: {},
-        enabled: true,
-        schedule: '',
-        cron_expression: '',
-      };
-      setConfig(defaultConfig);
-      setJsonText(JSON.stringify(defaultConfig, null, 2));
+    } else if (visible && isNew) {
+      // 检查是否有预设配置（从指数订阅传递来的）
+      let initialConfig;
+      if (task) {
+        // 使用预设配置
+        initialConfig = { ...task };
+        // 解析 JSON 字段
+        if (initialConfig.params_json && typeof initialConfig.params_json === 'string') {
+          try {
+            initialConfig.params = JSON.parse(initialConfig.params_json);
+          } catch (e) {
+            initialConfig.params = {};
+          }
+        }
+        if (initialConfig.schema_json && typeof initialConfig.schema_json === 'string') {
+          try {
+            initialConfig.schema = JSON.parse(initialConfig.schema_json);
+          } catch (e) {
+            initialConfig.schema = {};
+          }
+        }
+        if (initialConfig.primary_keys_json && typeof initialConfig.primary_keys_json === 'string') {
+          try {
+            initialConfig.primary_keys = JSON.parse(initialConfig.primary_keys_json);
+          } catch (e) {
+            initialConfig.primary_keys = [];
+          }
+        }
+        // 如果没有 params/schema，设置空对象
+        if (!initialConfig.params) initialConfig.params = {};
+        if (!initialConfig.schema) initialConfig.schema = {};
+        if (!initialConfig.primary_keys) initialConfig.primary_keys = [];
+      } else {
+        // 新建任务的默认配置
+        initialConfig = {
+          task_id: 'sync_',
+          description: '',
+          api_name: '',
+          table_name: 'sync_',
+          sync_type: 'incremental',
+          source: 'tushare',
+          date_field: '',
+          api_limit: 0,
+          primary_keys: [],
+          params: {},
+          schema: {},
+          enabled: true,
+          schedule: '',
+          cron_expression: '',
+        };
+      }
+      setConfig(initialConfig);
+      setJsonText(JSON.stringify(initialConfig, null, 2));
       setSyncHistory([]);
       setTaskStatus(null);
     }
@@ -421,7 +454,7 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
 
         {/* 标签页内容 */}
         <div style={{ flex: 1, overflow: 'auto', padding: '16px 24px' }}>
-          <Tabs activeKey={activeTab} onChange={setActiveTab} size="small" items={[
+          <Tabs activeKey={activeTab} onChange={setActiveTab} size="middle" items={[
             {
               key: 'visual',
               label: '可视化编辑',
@@ -434,7 +467,7 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
                       任务ID
                     </div>
                     <Input
-                      size="small"
+                      size="middle"
                       prefix="sync_"
                       value={(config.task_id || '').replace(/^sync_/, '')}
                       onChange={(e) => updateConfig('task_id', `sync_${e.target.value}`)}
@@ -447,7 +480,7 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
                       API名称
                     </div>
                     <Input
-                      size="small"
+                      size="middle"
                       value={config.api_name || ''}
                       onChange={(e) => updateConfig('api_name', e.target.value)}
                     />
@@ -457,7 +490,7 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
                       描述
                     </div>
                     <Input
-                      size="small"
+                      size="middle"
                       value={config.description || ''}
                       onChange={(e) => updateConfig('description', e.target.value)}
                     />
@@ -467,7 +500,7 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
                       数据表
                     </div>
                     <Input
-                      size="small"
+                      size="middle"
                       prefix="sync_"
                       value={(config.table_name || '').replace(/^sync_/, '')}
                       onChange={(e) => updateConfig('table_name', `sync_${e.target.value}`)}
@@ -478,7 +511,7 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
                       同步类型
                     </div>
                     <Select
-                      size="small"
+                      size="middle"
                       value={config.sync_type}
                       onChange={(v) => updateConfig('sync_type', v)}
                       style={{ width: '100%' }}
@@ -493,7 +526,7 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
                       来源
                     </div>
                     <Input
-                      size="small"
+                      size="middle"
                       value={config.source || 'tushare'}
                       onChange={(e) => updateConfig('source', e.target.value)}
                     />
@@ -503,7 +536,7 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
                       日期字段
                     </div>
                     <Input
-                      size="small"
+                      size="middle"
                       value={config.date_field || ''}
                       onChange={(e) => updateConfig('date_field', e.target.value)}
                     />
@@ -513,7 +546,7 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
                       API限制
                     </div>
                     <Input
-                      size="small"
+                      size="middle"
                       type="number"
                       value={config.api_limit || ''}
                       onChange={(e) => updateConfig('api_limit', parseInt(e.target.value) || 0)}
@@ -524,7 +557,7 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
                       主键（逗号分隔）
                     </div>
                     <Input
-                      size="small"
+                      size="middle"
                       value={config.primary_keys?.join(', ') || ''}
                       onChange={(e) =>
                         updateConfig(
@@ -554,7 +587,7 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
                               {key}
                             </div>
                             <Input
-                              size="small"
+                              size="middle"
                               value={String(value)}
                               onChange={(e) => updateParamsField(key, e.target.value)}
                             />
@@ -582,7 +615,7 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
                           comment: props?.comment || '',
                         }))}
                         rowKey="name"
-                        size="small"
+                        size="middle"
                         pagination={false}
                         columns={[
                           {
@@ -592,7 +625,7 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
                             width: 140,
                             render: (v: string) => (
                               <Input
-                                size="small"
+                                size="middle"
                                 value={v}
                                 onChange={(e) => {
                                   const val = e.target.value;
@@ -615,7 +648,7 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
                             width: 130,
                             render: (v: string, r: any) => (
                               <Select
-                                size="small"
+                                size="middle"
                                 value={v}
                                 onChange={(val) => updateSchemaField(r.name, 'type', val)}
                                 style={{ width: 120 }}
@@ -643,7 +676,7 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
                             key: 'comment',
                             render: (v: string, r: any) => (
                               <Input
-                                size="small"
+                                size="middle"
                                 value={v}
                                 onChange={(e) => updateSchemaField(r.name, 'comment', e.target.value)}
                                 style={{ fontSize: '12px' }}
@@ -659,7 +692,7 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
                                 danger
                                 type="text"
                                 icon={<DeleteOutlined />}
-                                size="small"
+                                size="middle"
                                 onClick={() => handleDeleteSchemaField(r.name)}
                               />
                             ),
@@ -668,7 +701,7 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
                       />
                       <Button
                         icon={<PlusOutlined />}
-                        size="small"
+                        size="middle"
                         onClick={handleAddSchemaField}
                         style={{ marginTop: 8 }}
                       >
@@ -686,7 +719,7 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
               children: (
               <div style={{ paddingTop: 8 }}>
                 <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
-                  <Button size="small" icon={<CodeOutlined />} onClick={handleFormatJson}>
+                  <Button size="middle" icon={<CodeOutlined />} onClick={handleFormatJson}>
                     格式化
                   </Button>
                 </div>
@@ -761,7 +794,7 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
                           key: '1',
                           label: '数据完整性报告',
                           children: (<>
-                            <Descriptions size="small" items={[
+                            <Descriptions size="middle" items={[
                               { key: 'table', label: '表名', children: inspectionData.table_name },
                               { key: 'field', label: '日期字段', children: inspectionData.date_field },
                               { key: 'min', label: '最早日期', children: inspectionData.min_date },
@@ -774,7 +807,7 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
                                   percent={inspectionData.coverage_percent || 0}
                                   strokeColor={inspectionData.coverage_percent >= 95 ? 'var(--color-gain)' : 'var(--color-loss)'}
                                   style={{ width: 200, marginLeft: 8 }}
-                                  size="small"
+                                  size="middle"
                                 />
                               )},
                             ]} />
@@ -811,7 +844,7 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
                   <Table
                     dataSource={syncHistory}
                     rowKey={(record: any) => `${record.sync_date}-${record.created_at}`}
-                    size="small"
+                    size="middle"
                     pagination={{ pageSize: 10 }}
                     locale={{ emptyText: <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-secondary)' }}>暂无调度记录</div> }}
                     columns={[

@@ -490,6 +490,15 @@ class SyncTaskExecutor(ISyncTaskExecutor):
                 return False
 
             rows_count = len(df)
+            # 列重命名（如 con_code → ts_code）
+            col_mapping = task.get("column_mapping") or task.get("column_mapping_json")
+            if isinstance(col_mapping, str):
+                try:
+                    col_mapping = json.loads(col_mapping)
+                except Exception:
+                    col_mapping = None
+            if col_mapping:
+                df = df.rename({k: v for k, v in col_mapping.items() if k in df.columns})
             # 全量同步：清空整个表再写入
             self.repository.upsert(table_name, df, primary_keys, is_full_sync=True)
             self.log_manager.update_sync_log(task_id, DateUtils.today(), rows_count, params=params_str)
@@ -557,6 +566,15 @@ class SyncTaskExecutor(ISyncTaskExecutor):
                 df = self._fetch_with_pagination(task_id, api_name, params, api_limit)
 
                 if df is not None and not df.is_empty():
+                    # 列重命名（如 con_code → ts_code）
+                    col_mapping = task.get("column_mapping") or task.get("column_mapping_json")
+                    if isinstance(col_mapping, str):
+                        try:
+                            col_mapping = json.loads(col_mapping)
+                        except Exception:
+                            col_mapping = None
+                    if col_mapping:
+                        df = df.rename({k: v for k, v in col_mapping.items() if k in df.columns})
                     # 增量同步：只清空当前 trade_date 的数据再写入
                     self.repository.upsert(
                         task["table_name"],

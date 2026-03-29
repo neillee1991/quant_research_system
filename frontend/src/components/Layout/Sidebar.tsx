@@ -14,7 +14,6 @@ const menuItems = [
   { key: '/market', label: '行情', icon: <FundOutlined /> },
   { key: '/', label: '数据', icon: <DatabaseOutlined /> },
   { key: '/factor', label: '因子', icon: <ExperimentOutlined /> },
-  { key: '/index-pool', label: '股票池', icon: <AppstoreOutlined /> },
   { key: '/strategy', label: '策略', icon: <LineChartOutlined /> },
   { key: '/scheduler', label: '调度', icon: <ScheduleOutlined /> },
 ];

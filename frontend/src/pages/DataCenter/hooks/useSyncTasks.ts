@@ -33,6 +33,10 @@ export const useSyncTasks = () => {
     }
   }, []);
 
+  const setBatchTaskStatuses = useCallback((statuses: Record<string, TaskStatus>) => {
+    setTaskStatuses(statuses);
+  }, []);
+
   const loadTaskScheduleInfo = useCallback(async (taskId: string) => {
     try {
       const res = await dataApi.getTaskScheduleInfo(taskId);
@@ -135,6 +139,34 @@ export const useSyncTasks = () => {
 
   const deleteTask = useCallback(async (taskId: string, dropTable = true) => {
     try {
+      // 检查是否是指数同步任务（task_id 以 sync_index_weight_ 开头）
+      if (taskId.startsWith('sync_index_weight_')) {
+        // 从任务ID中提取指数代码
+        // task_id 格式: sync_index_weight_{sanitized_index_code}
+        // 但我们需要原始的 index_code，需要从任务配置中获取
+        try {
+          const configRes = await dataApi.getTaskConfig(taskId);
+          const config = configRes.data?.config;
+          const indexCode = config?.params?.index_code;
+
+          if (indexCode) {
+            // 先调用 API 删除指数订阅
+            try {
+              const { indexApi } = await import('../../../api');
+              await indexApi.unsubscribeIndex(indexCode);
+              message.success(`指数 ${indexCode} 已取消订阅`);
+            } catch (unsubError: any) {
+              console.warn('Failed to unsubscribe index, continuing with task deletion:', unsubError);
+              // 即使取消订阅失败，也继续删除任务
+            }
+          }
+        } catch (configError) {
+          console.warn('Failed to get task config, deleting task directly:', configError);
+          // 即使获取配置失败，也继续删除任务
+        }
+      }
+
+      // 删除同步任务
       await dataApi.deleteTask(taskId, dropTable);
       message.success(`同步任务 ${taskId} 已删除`);
       await loadSyncTasks();
@@ -202,6 +234,7 @@ export const useSyncTasks = () => {
     setSelectedTaskIds,
     loadSyncTasks,
     loadTaskStatus,
+    setBatchTaskStatuses,
     loadTaskScheduleInfo,
     loadSyncLogs,
     syncTask,

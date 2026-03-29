@@ -253,6 +253,21 @@ async def get_factor_logs(factor_id: str, limit: int = 20):
             return {"status": "success", "data": []}
 
         logs = logs_df.to_dicts()
+        logger.debug(f"Raw logs from DB: {logs}")
+
+        # 统一字段名（映射数据库列名到API字段名）
+        # 支持两种列名，兼容不同版本的表结构
+        # 先尝试新列名，如果没有则尝试旧列名
+        for log in logs:
+            log["rows"] = log.get("rows") or log.get("rows_affected")
+            log["elapsed_seconds"] = log.get("elapsed_seconds") or log.get("duration_seconds")
+            log["error_message"] = log.get("error_message") or log.get("message")
+            # 确保时间戳字段存在
+            for ts_field in ["created_at", "finished_at"]:
+                if ts_field not in log:
+                    log[ts_field] = None
+
+        logger.debug(f"Processed logs: {logs}")
         return {"status": "success", "data": logs}
     except Exception as e:
         logger.error(f"Failed to get factor logs: {e}")

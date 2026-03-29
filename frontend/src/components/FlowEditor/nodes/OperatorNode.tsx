@@ -14,7 +14,7 @@ const OperatorNode: React.FC<NodeProps> = ({ id, data }) => {
   return (
     <Card
       title={<><Tag color="blue">{data.op?.toUpperCase()}</Tag> Operator</>}
-      size="small"
+      size="middle"
       style={{ minWidth: 180, background: 'var(--bg-node-operator)', border: '1px solid var(--color-accent)' }}
       styles={{ header: { padding: '8px 12px' }, body: { padding: '8px 12px' } }}
     >
@@ -22,7 +22,7 @@ const OperatorNode: React.FC<NodeProps> = ({ id, data }) => {
       <div style={{ marginBottom: 8 }}>
         <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>Window</div>
         <InputNumber
-          size="small"
+          size="middle"
           defaultValue={data.window || 20}
           min={1}
           max={200}

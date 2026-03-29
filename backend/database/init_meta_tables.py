@@ -18,6 +18,11 @@ def main():
         db_client.ensure_meta_tables()
         print("✓ 元数据表创建成功")
 
+        # 初始化股票池表（新增）
+        from database.init_stock_pool_tables import init_stock_pool_tables
+        init_stock_pool_tables()
+        print("✓ 股票池模块表创建成功")
+
         # 写入默认同步任务配置
         db_client.seed_sync_task_config()
         print("✓ 同步任务配置种子数据已写入")

@@ -75,7 +75,7 @@ export const DataTable: React.FC<DataTableProps> = ({
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <Button
             danger
-            size="small"
+            size="middle"
             type="text"
             onClick={() => onTruncateTable(record.table_name)}
           >
@@ -113,7 +113,7 @@ export const DataTable: React.FC<DataTableProps> = ({
           <Button
             icon={<LinkOutlined />}
             onClick={() => window.open('http://localhost:8848', '_blank')}
-            size="small"
+            size="middle"
             type="text"
           >
             DolphinDB 后台
@@ -138,7 +138,7 @@ export const DataTable: React.FC<DataTableProps> = ({
                 icon={<PlayCircleOutlined />}
                 onClick={onExecuteQuery}
                 loading={queryLoading}
-                size="small"
+                size="middle"
               >
                 执行查询
               </Button>
@@ -183,7 +183,7 @@ export const DataTable: React.FC<DataTableProps> = ({
                 dataSource={queryResult}
                 columns={queryResultColumns}
                 rowKey={(record: any) => JSON.stringify(record).slice(0, 100)}
-                size="small"
+                size="middle"
                 pagination={{ pageSize: 50 }}
                 scroll={{ x: 'max-content', y: 500 }}
               />
@@ -201,7 +201,7 @@ export const DataTable: React.FC<DataTableProps> = ({
           </span>
         }
         extra={
-          <Button icon={<ReloadOutlined />} onClick={onRefreshTables} size="small">
+          <Button icon={<ReloadOutlined />} onClick={onRefreshTables} size="middle">
             刷新
           </Button>
         }
@@ -210,7 +210,7 @@ export const DataTable: React.FC<DataTableProps> = ({
           dataSource={tables}
           columns={tableColumns}
           rowKey="table_name"
-          size="small"
+          size="middle"
           pagination={false}
           scroll={{ x: 'max-content' }}
         />

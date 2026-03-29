@@ -29,6 +29,7 @@ interface SyncPanelProps {
   onSelectedTaskIdsChange: (ids: string[]) => void;
   onRefreshStatus: () => void;
   onNewTask: () => void;
+  onNewIndexSubscribe: () => void;
   onBatchSync: () => void;
   onSyncTask: (taskId: string) => void;
   onDeleteTask: (taskId: string) => void;
@@ -46,6 +47,7 @@ export const SyncPanel: React.FC<SyncPanelProps> = ({
   onSelectedTaskIdsChange,
   onRefreshStatus,
   onNewTask,
+  onNewIndexSubscribe,
   onBatchSync,
   onSyncTask,
   onDeleteTask,
@@ -335,13 +337,16 @@ export const SyncPanel: React.FC<SyncPanelProps> = ({
                 type="primary"
                 icon={<SyncOutlined />}
                 onClick={onBatchSync}
-               
+
               >
                 批量同步 ({selectedTaskIds.length})
               </Button>
             )}
             <Button icon={<ReloadOutlined />} onClick={onRefreshStatus}>
               刷新
+            </Button>
+            <Button onClick={onNewIndexSubscribe}>
+              新增指数同步
             </Button>
             <Button onClick={onNewTask}>
               新建任务

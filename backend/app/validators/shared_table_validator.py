@@ -78,14 +78,21 @@ class SharedTableValidator:
         if not sharing_tasks:
             return result
 
-        # 获取现有任务的 schema 和主键配置
+        # 获取现有任务的 schema 和主键配置（仅 sync_task_config 有 schema_json）
         conflicts = []
         for config_table in self.config_tables:
             try:
-                tasks_df = db_client.query(
-                    f"SELECT task_id, schema, primary_keys FROM {config_table} WHERE table_name = %s",
-                    (table_name,)
-                )
+                if config_table == "etl_task_config":
+                    # ETL 任务无 schema_json，只比较主键
+                    tasks_df = db_client.query(
+                        f"SELECT task_id, primary_keys_json FROM {config_table} WHERE table_name = %s",
+                        (table_name,)
+                    )
+                else:
+                    tasks_df = db_client.query(
+                        f"SELECT task_id, schema_json, primary_keys_json FROM {config_table} WHERE table_name = %s",
+                        (table_name,)
+                    )
 
                 if tasks_df.is_empty():
                     continue
@@ -95,8 +102,13 @@ class SharedTableValidator:
                     if exclude_task_id and task_id == exclude_task_id:
                         continue
 
-                    existing_schema = row.get("schema")
-                    existing_primary_keys = row.get("primary_keys")
+                    existing_schema_raw = row.get("schema_json")
+                    existing_primary_keys_raw = row.get("primary_keys_json")
+
+                    # 反序列化 JSON 字段
+                    import json
+                    existing_schema = json.loads(existing_schema_raw) if isinstance(existing_schema_raw, str) else existing_schema_raw
+                    existing_primary_keys = json.loads(existing_primary_keys_raw) if isinstance(existing_primary_keys_raw, str) else existing_primary_keys_raw
 
                     # 比较 schema
                     if existing_schema and schema:
@@ -148,13 +160,13 @@ class SharedTableValidator:
                 if config_table == exclude_config_table and exclude_task_id:
                     # 在排除的配置表中，排除指定的任务ID
                     tasks_df = db_client.query(
-                        f"SELECT task_id FROM {config_table} WHERE table_name = %s AND task_id != %s",
+                        f"SELECT task_id FROM {config_table} WHERE table_name = %s AND task_id != %s AND enabled = true",
                         (table_name, exclude_task_id)
                     )
                 else:
                     # 在其他配置表中，查询所有使用该表的任务
                     tasks_df = db_client.query(
-                        f"SELECT task_id FROM {config_table} WHERE table_name = %s",
+                        f"SELECT task_id FROM {config_table} WHERE table_name = %s AND enabled = true",
                         (table_name,)
                     )
 

@@ -14,7 +14,7 @@ const BacktestOutputNode: React.FC<NodeProps> = ({ id, data }) => {
   return (
     <Card
       title="Backtest Output"
-      size="small"
+      size="middle"
       style={{ minWidth: 200, background: 'var(--bg-node-output)', border: '1px solid var(--color-warning)' }}
       styles={{ header: { padding: '8px 12px' }, body: { padding: '8px 12px' } }}
     >
@@ -22,7 +22,7 @@ const BacktestOutputNode: React.FC<NodeProps> = ({ id, data }) => {
       <div style={{ marginBottom: 8 }}>
         <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>Initial Capital</div>
         <InputNumber
-          size="small"
+          size="middle"
           defaultValue={data.config?.initial_capital || 1000000}
           style={{ width: '100%' }}
           onChange={(v) => handleConfigChange('initial_capital', v)}
@@ -31,7 +31,7 @@ const BacktestOutputNode: React.FC<NodeProps> = ({ id, data }) => {
       <div>
         <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>Commission (%)</div>
         <InputNumber
-          size="small"
+          size="middle"
           defaultValue={(data.config?.commission_rate || 0.0003) * 100}
           step={0.01}
           style={{ width: '100%' }}

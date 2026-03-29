@@ -1,8 +1,9 @@
 import React from 'react';
-import { Breadcrumb, Button, Tooltip } from 'antd';
+import { Breadcrumb, Button, Tooltip, Space } from 'antd';
 import { SunOutlined, MoonOutlined } from '@ant-design/icons';
 import { useLocation } from 'react-router-dom';
 import { useThemeStore } from '../../store';
+import TaskMonitor from './TaskMonitor';
 
 const routeNameMap: Record<string, string> = {
   '/': '数据中心',
@@ -44,14 +45,17 @@ const TopBar: React.FC = () => {
           { title: currentName() },
         ]}
       />
-      <Tooltip title={mode === 'dark' ? '切换亮色模式' : '切换暗色模式'}>
-        <Button
-          type="text"
-          icon={mode === 'dark' ? <SunOutlined /> : <MoonOutlined />}
-          onClick={toggle}
-          style={{ color: 'var(--text-primary)' }}
-        />
-      </Tooltip>
+      <Space size="small">
+        <TaskMonitor />
+        <Tooltip title={mode === 'dark' ? '切换亮色模式' : '切换暗色模式'}>
+          <Button
+            type="text"
+            icon={mode === 'dark' ? <SunOutlined /> : <MoonOutlined />}
+            onClick={toggle}
+            style={{ color: 'var(--text-primary)' }}
+          />
+        </Tooltip>
+      </Space>
     </div>
   );
 };

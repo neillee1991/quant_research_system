@@ -19,6 +19,7 @@ from app.core.utils import (
     load_json_from_file,
     parse_json_fields,
 )
+from app.services.task_runner import TaskRunner, tracked_task
 
 router = APIRouter()
 analyzer = FactorAnalyzer(db_client)
@@ -203,7 +204,8 @@ def _save_analysis_result(
         traceback.print_exc()
 
 
-def _run_analysis_background(task_id: str, req: AnalysisRequest):
+@tracked_task("analysis", task_id_kwarg="factor_id")
+def _run_analysis_background(task_id: str, req: AnalysisRequest, run_id: str = None, factor_id: str = None):
     """后台执行分析，更新 task_status"""
     try:
         _update_task_status(task_id, "running")
@@ -242,8 +244,11 @@ async def submit_analysis(req: AnalysisRequest, background_tasks: BackgroundTask
     """提交因子分析任务（异步）。立即返回 task_id，后台执行分析。"""
     # 使用 UUID 作为任务 ID，避免冲突
     task_id = str(uuid.uuid4())
+    run_id = f"analysis_{task_id[:12]}"
+    TaskRunner.start(run_id, "analysis", req.factor_id, f"因子分析: {req.factor_id}",
+                     params=json.dumps({"start_date": req.start_date, "end_date": req.end_date, "periods": req.periods}))
     _create_pending_task(task_id, req)
-    background_tasks.add_task(_run_analysis_background, task_id=task_id, req=req)
+    background_tasks.add_task(_run_analysis_background, task_id=task_id, req=req, run_id=run_id, factor_id=req.factor_id)
     return {
         "status": "success",
         "data": {"task_id": task_id, "factor_id": req.factor_id, "status": "pending"}

@@ -52,10 +52,15 @@ export interface FactorRunRecord {
   start_date?: string;
   end_date?: string;
   status: 'success' | 'failed' | 'running';
-  rows_computed?: number;
+  rows?: number;
+  elapsed_seconds?: number;
   error_message?: string;
   preprocess?: PreprocessOptions | string;
   created_at: string;
+  finished_at?: string;
+  rows_affected?: number;
+  duration_seconds?: number;
+  rows_computed?: number;
   completed_at?: string;
 }
 

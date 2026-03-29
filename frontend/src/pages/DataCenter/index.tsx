@@ -23,6 +23,7 @@ import {
 } from './Modals';
 import { SyncTaskDrawer } from './SyncTaskDrawer';
 import { ETLTaskDrawer } from './ETLTaskDrawer';
+import { IndexSubscribeDrawer } from './IndexSubscribeDrawer';
 import type { SyncTask, ETLTask } from '@/types';
 
 const DataCenter: React.FC = () => {
@@ -73,6 +74,10 @@ const DataCenter: React.FC = () => {
   const [etlDrawerTask, setEtlDrawerTask] = useState<ETLTask | null>(null);
   const [etlDrawerIsNew, setEtlDrawerIsNew] = useState(false);
 
+  // 指数订阅抽屉状态
+  const [indexSubscribeDrawerVisible, setIndexSubscribeDrawerVisible] = useState(false);
+  const [pendingSyncTask, setPendingSyncTask] = useState<any>(null);
+
   // 初始化数据加载
   useEffect(() => {
     loadInitialData();
@@ -88,11 +93,13 @@ const DataCenter: React.FC = () => {
         syncTasksHook.loadSyncLogs(),
       ]);
 
-      // 批量填充状态和调度信息
+      // 直接使用批量状态数据，而不是逐个加载
       const batchData: Record<string, any> = statusBatchRes.data?.data || {};
       if (Object.keys(batchData).length > 0) {
+        // 直接设置批量状态数据
+        syncTasksHook.setBatchTaskStatuses(batchData);
+        // 只需要加载调度信息
         for (const taskId of Object.keys(batchData)) {
-          await syncTasksHook.loadTaskStatus(taskId);
           await syncTasksHook.loadTaskScheduleInfo(taskId);
         }
       }
@@ -149,6 +156,26 @@ const DataCenter: React.FC = () => {
 
   const handleNewTask = () => {
     setTaskDrawerTask(null);
+    setTaskDrawerIsNew(true);
+    setTaskDrawerVisible(true);
+  };
+
+  const handleNewIndexSubscribe = () => {
+    setIndexSubscribeDrawerVisible(true);
+  };
+
+  const handleIndexSubscribeSuccess = () => {
+    // 刷新同步任务列表
+    syncTasksHook.loadSyncTasks();
+  };
+
+  const handleIndexSubscribe = (index: any, config: any) => {
+    // 关闭指数订阅抽屉
+    setIndexSubscribeDrawerVisible(false);
+    // 设置待创建的任务配置
+    setPendingSyncTask(config);
+    // 打开同步任务抽屉
+    setTaskDrawerTask(config);
     setTaskDrawerIsNew(true);
     setTaskDrawerVisible(true);
   };
@@ -238,6 +265,7 @@ const DataCenter: React.FC = () => {
 
   // 任务配置保存处理
   const handleSaveTask = async () => {
+    setPendingSyncTask(null);
     await syncTasksHook.loadSyncTasks();
     await loadInitialData();
   };
@@ -310,13 +338,21 @@ const DataCenter: React.FC = () => {
                 selectedTaskIds={syncTasksHook.selectedTaskIds}
                 scheduleInfo={syncTasksHook.scheduleInfo}
                 onSelectedTaskIdsChange={syncTasksHook.setSelectedTaskIds}
-                onRefreshStatus={() => {
-                  syncTasksHook.syncTasks.forEach((task) =>
-                    syncTasksHook.loadTaskStatus(task.task_id)
-                  );
-                  message.success('任务状态已刷新');
+                onRefreshStatus={async () => {
+                  try {
+                    const res = await dataApi.getTaskStatusBatch();
+                    const batchData: Record<string, any> = res.data?.data || {};
+                    if (Object.keys(batchData).length > 0) {
+                      syncTasksHook.setBatchTaskStatuses(batchData);
+                    }
+                    message.success('任务状态已刷新');
+                  } catch (error) {
+                    console.error('Failed to refresh status:', error);
+                    message.error('刷新任务状态失败');
+                  }
                 }}
                 onNewTask={handleNewTask}
+                onNewIndexSubscribe={handleNewIndexSubscribe}
                 onBatchSync={handleBatchSync}
                 onSyncTask={handleSyncTask}
                 onDeleteTask={handleDeleteTask}
@@ -441,6 +477,14 @@ const DataCenter: React.FC = () => {
         isNew={etlDrawerIsNew}
         onClose={() => setEtlDrawerVisible(false)}
         onSave={handleSaveEtlTask}
+      />
+
+      {/* 指数订阅抽屉 */}
+      <IndexSubscribeDrawer
+        visible={indexSubscribeDrawerVisible}
+        onClose={() => setIndexSubscribeDrawerVisible(false)}
+        onSubscribeSuccess={handleIndexSubscribeSuccess}
+        onSubscribe={handleIndexSubscribe}
       />
     </div>
   );

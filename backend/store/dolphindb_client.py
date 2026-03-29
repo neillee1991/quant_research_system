@@ -77,6 +77,17 @@ class DolphinDBClient(_NewDolphinDBClient):
         except Exception as e:
             logger.error(f"seed_factor_metadata failed: {e}")
 
+    def seed_user_sync_preference(self) -> None:
+        """种子数据：用户同步偏好配置"""
+        try:
+            from infrastructure.seed import SeedDataLoader, SeedDataManager
+
+            loader = SeedDataLoader()
+            manager = SeedDataManager(db_client=self, loader=loader)
+            manager.seed_user_sync_preference()
+        except Exception as e:
+            logger.error(f"seed_user_sync_preference failed: {e}")
+
 
 # 单例实例（延迟初始化）
 _db_client_instance: Optional["DolphinDBClient"] = None

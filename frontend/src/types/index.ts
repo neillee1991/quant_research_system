@@ -7,6 +7,8 @@ export * from './factor';
 export * from './data';
 export * from './strategy';
 export * from './task';
+export * from './stockPool';
+export * from './indexSubscribe';
 
 // Re-export commonly used types for convenience
 export type { PreprocessOptions, DataFieldMapping } from './factor';

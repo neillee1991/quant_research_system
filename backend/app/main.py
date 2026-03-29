@@ -35,6 +35,15 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Seed 数据失败: {e}", exc_info=True)
 
+    # 清理僵尸任务：重启后所有 running 记录必然已中断
+    try:
+        from app.services.task_runner import TaskRunner
+        cleaned = TaskRunner.cleanup_stale(reason="server restart")
+        if cleaned > 0:
+            logger.info(f"Cleaned up {cleaned} stale running tasks on startup")
+    except Exception as e:
+        logger.warning(f"Failed to cleanup stale tasks: {e}")
+
     yield
     logger.info("Shutting down application...")
 

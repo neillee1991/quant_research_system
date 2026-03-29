@@ -14,14 +14,14 @@ const DataInputNode: React.FC<NodeProps> = ({ id, data }) => {
   return (
     <Card
       title="Data Input"
-      size="small"
+      size="middle"
       style={{ minWidth: 200, background: 'var(--bg-node-data)', border: '1px solid var(--color-gain)' }}
       styles={{ header: { padding: '8px 12px' }, body: { padding: '8px 12px' } }}
     >
       <div style={{ marginBottom: 8 }}>
         <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>Stock Code</div>
         <Input
-          size="small"
+          size="middle"
           defaultValue={data.ts_code}
           placeholder="000001.SZ"
           onChange={(e) => handleChange('ts_code', e.target.value)}
@@ -30,7 +30,7 @@ const DataInputNode: React.FC<NodeProps> = ({ id, data }) => {
       <div style={{ marginBottom: 8 }}>
         <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>Start Date</div>
         <Input
-          size="small"
+          size="middle"
           defaultValue={data.start}
           placeholder="20200101"
           onChange={(e) => handleChange('start', e.target.value)}
@@ -39,7 +39,7 @@ const DataInputNode: React.FC<NodeProps> = ({ id, data }) => {
       <div>
         <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>End Date</div>
         <Input
-          size="small"
+          size="middle"
           defaultValue={data.end}
           placeholder="20241231"
           onChange={(e) => handleChange('end', e.target.value)}

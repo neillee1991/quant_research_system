@@ -189,6 +189,29 @@ class MetadataManager:
             "array(TIMESTAMP,0) as updated_at)",
             ["index_code"],
         ),
+        "user_sync_preference": (
+            "table("
+            "array(SYMBOL,0) as user_id,"
+            "array(SYMBOL,0) as index_table,"
+            "array(TIMESTAMP,0) as created_at,"
+            "array(TIMESTAMP,0) as updated_at)",
+            ["user_id"],
+        ),
+        "task_runs": (
+            "table("
+            "array(SYMBOL,0) as run_id,"
+            "array(SYMBOL,0) as task_type,"
+            "array(SYMBOL,0) as task_id,"
+            "array(STRING,0) as task_name,"
+            "array(SYMBOL,0) as status,"
+            "array(TIMESTAMP,0) as started_at,"
+            "array(TIMESTAMP,0) as finished_at,"
+            "array(DOUBLE,0) as elapsed_sec,"
+            "array(INT,0) as rows,"
+            "array(STRING,0) as error,"
+            "array(STRING,0) as params)",
+            ["run_id"],
+        ),
     }
 
     def __init__(self, connection, data_operations):

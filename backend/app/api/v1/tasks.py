@@ -118,6 +118,85 @@ def _get_service(task_type: str) -> TaskService:
 
 # ==================== API 端点 ====================
 
+class RunningTaskResponse(BaseModel):
+    """正在运行的任务响应"""
+    tasks: list[Dict[str, Any]]
+    total: int
+
+
+@router.get("/tasks/running", response_model=RunningTaskResponse)
+def get_running_tasks():
+    """获取所有正在运行的任务（查询统一 task_runs 表）"""
+    try:
+        from store.dolphindb_client import db_client
+
+        try:
+            df = db_client.query("""
+                SELECT * FROM task_runs
+                WHERE status = 'running'
+                ORDER BY started_at DESC
+            """)
+            tasks = []
+            if not df.is_empty():
+                for row in df.to_dicts():
+                    for field in ["started_at", "finished_at"]:
+                        if field in row and row[field]:
+                            row[field] = str(row[field])
+                    tasks.append(row)
+        except Exception as e:
+            logger.warning(f"task_runs not available, falling back: {e}")
+            tasks = []
+
+        return RunningTaskResponse(tasks=tasks, total=len(tasks))
+
+    except Exception as e:
+        logger.error(f"Failed to get running tasks: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/tasks/history")
+def get_task_history(limit: int = Query(default=50, ge=1, le=200)):
+    """获取最近完成/失败的任务历史（查询统一 task_runs 表）"""
+    try:
+        from store.dolphindb_client import db_client
+
+        try:
+            df = db_client.query(f"""
+                SELECT * FROM task_runs
+                WHERE status IN ('success', 'failed')
+                ORDER BY finished_at DESC
+                LIMIT {limit}
+            """)
+            tasks = []
+            if not df.is_empty():
+                for row in df.to_dicts():
+                    for field in ["started_at", "finished_at"]:
+                        if field in row and row[field]:
+                            row[field] = str(row[field])
+                    tasks.append(row)
+        except Exception as e:
+            logger.warning(f"task_runs not available: {e}")
+            tasks = []
+
+        return RunningTaskResponse(tasks=tasks, total=len(tasks))
+
+    except Exception as e:
+        logger.error(f"Failed to get task history: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/tasks/cleanup")
+def cleanup_stale_tasks(timeout_minutes: int = Query(default=0, ge=0, description="超时分钟数，0=清理所有running")):
+    """清理僵尸任务（将长时间 running 的记录标记为 failed）"""
+    try:
+        from app.services.task_runner import TaskRunner
+        cleaned = TaskRunner.cleanup_stale(timeout_minutes=timeout_minutes, reason=f"manual cleanup (timeout={timeout_minutes}min)")
+        return {"status": "success", "data": {"cleaned": cleaned}}
+    except Exception as e:
+        logger.error(f"Failed to cleanup stale tasks: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/tasks/{task_type}", response_model=TaskListResponse)
 def list_tasks(
     task_type: str = Path(..., description="任务类型: sync, etl, factor"),
@@ -448,10 +527,20 @@ async def get_task_status(
 
         record = df.to_dicts()[0]
 
-        # 格式化时间戳
+        # 统一字段名（映射数据库列名到API字段名）
+        # 支持两种列名，兼容不同版本的表结构
+        # 先尝试新列名，如果没有则尝试旧列名
+        if task_type == "factor":
+            record["rows"] = record.get("rows") or record.get("rows_affected")
+            record["elapsed_seconds"] = record.get("elapsed_seconds") or record.get("duration_seconds")
+            record["error_message"] = record.get("error_message") or record.get("message")
+
+        # 格式化时间戳（处理可能缺失的字段）
         for field in ["created_at", "updated_at", "finished_at"]:
             if field in record and record[field]:
                 record[field] = str(record[field])
+            elif field not in record:
+                record[field] = None
 
         return {"status": "success", "data": record}
 

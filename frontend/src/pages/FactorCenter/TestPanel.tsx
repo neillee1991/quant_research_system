@@ -122,7 +122,7 @@ const TestPanel: React.FC<TestPanelProps> = ({ code, dependsOn, preprocess, look
           onChange={(s, e) => setDateRange([s, e])}
         />
         <Button
-          size="small"
+          size="middle"
           type="primary"
           icon={<WarningOutlined />}
           loading={testing}
@@ -253,7 +253,7 @@ const TestPanel: React.FC<TestPanelProps> = ({ code, dependsOn, preprocess, look
 
           <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
             <Select
-              size="small"
+              size="middle"
               allowClear
               placeholder="筛选股票"
               style={{ width: 160 }}
@@ -263,7 +263,7 @@ const TestPanel: React.FC<TestPanelProps> = ({ code, dependsOn, preprocess, look
               options={testResult.stocks?.map((s: string) => ({ label: s, value: s })) || []}
             />
             <Select
-              size="small"
+              size="middle"
               allowClear
               placeholder="筛选日期"
               style={{ width: 140 }}
@@ -281,7 +281,7 @@ const TestPanel: React.FC<TestPanelProps> = ({ code, dependsOn, preprocess, look
             dataSource={filteredPreview}
             columns={resultColumns}
             rowKey={(r: any) => `${r?.ts_code}-${r?.trade_date}`}
-            size="small"
+            size="middle"
             pagination={{ pageSize: 10 }}
             scroll={{ y: 240 }}
           />

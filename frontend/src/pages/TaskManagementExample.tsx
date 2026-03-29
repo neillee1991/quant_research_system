@@ -217,7 +217,7 @@ const TaskManagementExample: React.FC = () => {
                 idField="task_id"
                 extraActions={(task) => (
                   <Button
-                    size="small"
+                    size="middle"
                     onClick={() => {
                       Modal.info({
                         title: '任务详情',

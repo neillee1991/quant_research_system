@@ -127,7 +127,7 @@ export function TaskList<T extends BaseTaskConfig>({
             <Tooltip title="编辑">
               <Button
                 icon={<EditOutlined />}
-                size="small"
+                size="middle"
                 onClick={() => onEdit(record)}
               />
             </Tooltip>
@@ -141,7 +141,7 @@ export function TaskList<T extends BaseTaskConfig>({
             <Tooltip title="删除">
               <Button
                 icon={<DeleteOutlined />}
-                size="small"
+                size="middle"
                 danger
               />
             </Tooltip>
