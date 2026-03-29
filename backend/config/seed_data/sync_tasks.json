@@ -313,12 +313,11 @@
       "trade_date": "{date}",
       "fields": "index_code,con_code,trade_date,weight"
     },
-    "primary_keys": ["index_code", "ts_code", "trade_date"],
+    "primary_keys": ["index_code", "con_code", "trade_date"],
     "api_limit": 5000,
-    "column_mapping": {"con_code": "ts_code"},
     "schema": {
       "index_code": {"type": "SYMBOL"},
-      "ts_code": {"type": "SYMBOL"},
+      "con_code": {"type": "SYMBOL"},
       "trade_date": {"type": "DATE"},
       "weight": {"type": "DOUBLE"}
     },

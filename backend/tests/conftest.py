@@ -35,7 +35,7 @@ def mock_table_manager():
     """Mock 表管理器"""
     manager = Mock()
     manager._resolve_db_path = Mock(return_value="dfs://quant_ts")
-    manager._META_TABLES = ["sync_log", "factor_metadata", "sync_task_config"]
+    manager._META_TABLES = ["factor_metadata", "sync_task_config"]
     manager._TSDB_TABLES = ["daily_data", "factor_values"]
     manager.create_table = Mock()
     manager.table_exists = Mock(return_value=True)
@@ -50,8 +50,6 @@ def mock_data_operations():
     data_ops.execute = Mock()
     data_ops.upsert = Mock()
     data_ops.bulk_copy = Mock()
-    data_ops.get_last_sync_date = Mock(return_value=None)
-    data_ops.update_sync_log = Mock()
     return data_ops
 
 

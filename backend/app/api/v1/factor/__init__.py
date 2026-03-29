@@ -1,4 +1,4 @@
-"""生产系统 API 路由聚合
+"""因子系统 API 路由聚合
 
 将原 production.py 拆分为功能模块：
 - factor_analysis.py: 因子分析端点

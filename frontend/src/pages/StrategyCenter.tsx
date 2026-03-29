@@ -5,6 +5,8 @@ import FlowEditor from '../components/FlowEditor';
 import EquityCurveChart from '../components/Charts/EquityCurveChart';
 import { useBacktestStore } from '../store';
 import { mlApi } from '../api';
+import { useTaskLogs } from '../hooks/useTaskLogs';
+import { TaskLogTable } from '../components/TaskLogTable';
 import type { MLJobStatus, MLWeights, EquityPoint, BacktestMetrics } from '../types';
 
 const StrategyCenter: React.FC = () => {
@@ -21,6 +23,12 @@ const StrategyCenter: React.FC = () => {
   const [status, setStatus] = useState<MLJobStatus | null>(null);
   const [weights, setWeights] = useState<MLWeights>({});
   const [polling, setPolling] = useState<boolean>(false);
+
+  const { logs: backtestLogs, loading: backtestLogsLoading, loadLogs: loadBacktestLogs } = useTaskLogs('backtest', undefined, 50);
+
+  useEffect(() => {
+    loadBacktestLogs();
+  }, [loadBacktestLogs]);
 
   useEffect(() => {
     mlApi.getWeights().then((r) => {
@@ -495,6 +503,11 @@ const StrategyCenter: React.FC = () => {
           </div>
           </>
           )
+        },
+        {
+          key: 'history',
+          label: '回测历史',
+          children: <TaskLogTable logs={backtestLogs} loading={backtestLogsLoading} taskIdLabel="策略名称" />,
         },
       ]} />
     </div>

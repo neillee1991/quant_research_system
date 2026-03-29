@@ -49,7 +49,7 @@ class IndexPoolCSVUploadRequest(BaseModel):
 
 # ==================== Data Config Endpoints ====================
 
-@router.get("/production/data-config")
+@router.get("/factor/data-config")
 async def get_data_config():
     """获取所有字段映射配置"""
     cached = api_cache.get("production:data-config")
@@ -65,7 +65,7 @@ async def get_data_config():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.put("/production/data-config")
+@router.put("/factor/data-config")
 async def update_data_config(req: DataConfigUpdateRequest):
     """批量更新字段映射配置"""
     try:
@@ -85,7 +85,7 @@ async def update_data_config(req: DataConfigUpdateRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/production/data-config/resolved")
+@router.get("/factor/data-config/resolved")
 async def get_resolved_data_config():
     """返回简化的 field_key → source_label + values 字典，供前端注解显示
 
@@ -132,7 +132,7 @@ async def get_resolved_data_config():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/production/available-tables")
+@router.get("/factor/available-tables")
 async def get_available_tables():
     """获取所有可用的数据表（sync任务表 + ETL任务表 + 因子表）"""
     cached = api_cache.get("production:available-tables")
@@ -193,7 +193,7 @@ async def get_available_tables():
 
 # ==================== Index Pool Endpoints ====================
 
-@router.post("/index-pool/batch-upload")
+@router.post("/factor/index-pool/batch-upload")
 async def batch_upload_index_pool(req: IndexPoolBatchUploadRequest):
     """批量上传指数成分股（JSON 格式）
 
@@ -275,7 +275,7 @@ async def batch_upload_index_pool(req: IndexPoolBatchUploadRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/index-pool/csv-upload")
+@router.post("/factor/index-pool/csv-upload")
 async def csv_upload_index_pool(req: IndexPoolCSVUploadRequest):
     """CSV 上传指数成分股
 
@@ -320,7 +320,7 @@ async def csv_upload_index_pool(req: IndexPoolCSVUploadRequest):
         raise HTTPException(status_code=500, detail=f"CSV 解析失败: {str(e)}")
 
 
-@router.get("/index-pool/list")
+@router.get("/factor/index-pool/list")
 async def list_index_pools():
     """列出所有指数股票池"""
     try:
@@ -349,7 +349,7 @@ async def list_index_pools():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/index-pool/template")
+@router.get("/factor/index-pool/template")
 async def get_index_pool_template():
     """获取指数成分股上传模板（CSV 格式）"""
     template = "trade_date,ts_code,weight\n20240101,000001.SZ,0.05\n20240101,000002.SZ,0.03\n"
@@ -362,7 +362,7 @@ async def get_index_pool_template():
     }
 
 
-@router.get("/index-pool/{index_code}")
+@router.get("/factor/index-pool/{index_code}")
 async def get_index_pool_detail(index_code: str, trade_date: Optional[str] = None):
     """获取指定指数的成分股详情
 
@@ -424,7 +424,7 @@ async def get_index_pool_detail(index_code: str, trade_date: Optional[str] = Non
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.delete("/index-pool/{index_code}")
+@router.delete("/factor/index-pool/{index_code}")
 async def delete_index_pool(index_code: str):
     """删除指定指数及其所有成分股数据"""
     try:
@@ -457,7 +457,7 @@ class DataFrameSchemaRequest(BaseModel):
     depends_on: List[str]
 
 
-@router.post("/production/dataframe-schema")
+@router.post("/factor/dataframe-schema")
 async def get_dataframe_schema(req: DataFrameSchemaRequest):
     """根据依赖的数据源，返回预期的 DataFrame schema（列名和类型）
 

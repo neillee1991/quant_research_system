@@ -89,6 +89,7 @@ class SQLAdapter:
         将裸表名包装为 loadTable("db_path", "table_name")
 
         识别规则:
+        - UPDATE 后的裸表名
         - FROM/JOIN 后的裸表名
         - 不包含 loadTable、database 等关键字的表名
 
@@ -102,10 +103,21 @@ class SQLAdapter:
         if "loadTable" in sql or "database" in sql:
             return sql
 
-        # 匹配 FROM/JOIN 后的裸表名
-        pattern = r"\b(FROM|JOIN)\s+([a-zA-Z_][a-zA-Z0-9_]*)\b"
+        # 匹配 UPDATE 后的裸表名
+        update_pattern = r"\b(UPDATE)\s+([a-zA-Z_][a-zA-Z0-9_]*)\b"
 
-        def replace_table(match):
+        def replace_update_table(match):
+            keyword = match.group(1)
+            table_name = match.group(2)
+            return f'{keyword} loadTable("{self._db_path}", "{table_name}")'
+
+        # 先处理 UPDATE 语句
+        sql = re.sub(update_pattern, replace_update_table, sql, flags=re.IGNORECASE)
+
+        # 匹配 FROM/JOIN 后的裸表名
+        from_pattern = r"\b(FROM|JOIN)\s+([a-zA-Z_][a-zA-Z0-9_]*)\b"
+
+        def replace_from_table(match):
             keyword = match.group(1)
             table_name = match.group(2)
             # 跳过子查询别名和常见 SQL 关键字
@@ -113,7 +125,7 @@ class SQLAdapter:
                 return match.group(0)
             return f'{keyword} loadTable("{self._db_path}", "{table_name}")'
 
-        return re.sub(pattern, replace_table, sql, flags=re.IGNORECASE)
+        return re.sub(from_pattern, replace_from_table, sql, flags=re.IGNORECASE)
 
     def build_sql(self, sql: str, params: Optional[tuple] = None) -> str:
         """

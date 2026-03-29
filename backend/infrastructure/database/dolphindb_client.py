@@ -188,16 +188,6 @@ class DolphinDBClient:
         """批量写入数据"""
         return self._data_operations.bulk_copy(table_name, df, columns, known_columns)
 
-    def get_last_sync_date(self, source: str, data_type: str) -> Optional[str]:
-        """获取最后同步日期"""
-        return self._data_operations.get_last_sync_date(source, data_type)
-
-    def update_sync_log(
-        self, source: str, data_type: str, last_date: str
-    ) -> None:
-        """更新同步日志"""
-        return self._data_operations.update_sync_log(source, data_type, last_date)
-
     def _prepare_upload_df(self, *args, **kwargs):
         """向后兼容：准备上传 DataFrame"""
         return self._data_operations._prepare_upload_df(*args, **kwargs)

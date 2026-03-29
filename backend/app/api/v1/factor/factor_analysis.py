@@ -230,6 +230,7 @@ def _run_analysis_background(task_id: str, req: AnalysisRequest, run_id: str = N
             _update_task_status(task_id, "failed", error="分析返回空结果")
         else:
             _save_analysis_result(task_id, req.factor_id, results)
+            return {"extra": {"result": {"type": "table", "table": "factor_analysis_extended"}}}
     except Exception as e:
         logger.error(f"Background analysis failed for task {task_id}: {e}")
         import traceback
@@ -239,7 +240,7 @@ def _run_analysis_background(task_id: str, req: AnalysisRequest, run_id: str = N
 
 # ==================== API Endpoints ====================
 
-@router.post("/analysis/alphalens", response_model=dict)
+@router.post("/factor/analysis/alphalens", response_model=dict)
 async def submit_analysis(req: AnalysisRequest, background_tasks: BackgroundTasks):
     """提交因子分析任务（异步）。立即返回 task_id，后台执行分析。"""
     # 使用 UUID 作为任务 ID，避免冲突
@@ -255,7 +256,7 @@ async def submit_analysis(req: AnalysisRequest, background_tasks: BackgroundTask
     }
 
 
-@router.get("/analysis/alphalens/status/{task_id}")
+@router.get("/factor/analysis/status/{task_id}")
 async def get_analysis_status(task_id: str):
     """查询分析任务状态"""
     status = analyzer.get_task_status(task_id)
@@ -264,7 +265,7 @@ async def get_analysis_status(task_id: str):
     return {"status": "success", "data": status}
 
 
-@router.get("/analysis/alphalens/{factor_id}/latest")
+@router.get("/factor/analysis/{factor_id}/latest")
 async def get_latest_alphalens_analysis(factor_id: str):
     """获取指定因子的最新 Alphalens 分析结果（完整详情）"""
     try:
@@ -294,7 +295,7 @@ async def get_latest_alphalens_analysis(factor_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/analysis/alphalens/{factor_id}/detail/{analysis_id}")
+@router.get("/factor/analysis/{factor_id}/detail/{analysis_id}")
 async def get_alphalens_analysis_by_id(factor_id: str, analysis_id: str):
     """按 id 获取指定 Alphalens 分析结果（完整详情）"""
     try:
@@ -320,7 +321,7 @@ async def get_alphalens_analysis_by_id(factor_id: str, analysis_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/analysis/alphalens/{factor_id}/history")
+@router.get("/factor/analysis/{factor_id}/history")
 async def get_alphalens_analysis_history(
     factor_id: str,
     limit: int = 20,
@@ -397,7 +398,7 @@ async def get_alphalens_analysis_history(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.delete("/analysis/alphalens/{factor_id}/detail/{analysis_id}")
+@router.delete("/factor/analysis/{factor_id}/detail/{analysis_id}")
 async def delete_alphalens_analysis_by_id(factor_id: str, analysis_id: str):
     """删除指定的 Alphalens 分析结果"""
     try:
@@ -439,7 +440,7 @@ async def delete_alphalens_analysis_by_id(factor_id: str, analysis_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/analysis/trading-days")
+@router.get("/factor/analysis/trading-days")
 async def get_trading_days(start: str, end: str):
     """获取指定范围内的交易日列表（YYYYMMDD 格式）"""
     from app.core.utils import TradingCalendar

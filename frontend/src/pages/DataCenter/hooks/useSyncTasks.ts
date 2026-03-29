@@ -4,12 +4,11 @@
 import { useState, useCallback } from 'react';
 import { message } from 'antd';
 import { dataApi } from '../../../api';
-import type { SyncTask, TaskStatus, SyncLog, ScheduleInfo } from '../../../types';
+import type { SyncTask, TaskStatus, ScheduleInfo } from '../../../types';
 
 export const useSyncTasks = () => {
   const [syncTasks, setSyncTasks] = useState<SyncTask[]>([]);
   const [taskStatuses, setTaskStatuses] = useState<Record<string, TaskStatus>>({});
-  const [syncLogs, setSyncLogs] = useState<SyncLog[]>([]);
   const [syncingTasks, setSyncingTasks] = useState<Set<string>>(new Set());
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
   const [scheduleInfo, setScheduleInfo] = useState<Record<string, ScheduleInfo>>({});
@@ -17,7 +16,22 @@ export const useSyncTasks = () => {
   const loadSyncTasks = useCallback(async () => {
     try {
       const res = await dataApi.listSyncTasks();
-      setSyncTasks(res.data.tasks || []);
+      const tasks = res.data.tasks || [];
+      setSyncTasks(tasks);
+
+      // 加载所有任务状态
+      const statuses: Record<string, TaskStatus> = {};
+      for (const task of tasks) {
+        try {
+          const statusRes = await dataApi.getSyncTaskStatus(task.task_id);
+          if (statusRes.data?.data) {
+            statuses[task.task_id] = statusRes.data.data;
+          }
+        } catch (err) {
+          console.error(`Failed to load status for ${task.task_id}:`, err);
+        }
+      }
+      setTaskStatuses(statuses);
     } catch (error) {
       console.error('Failed to load sync tasks:', error);
       message.error('加载同步任务失败');
@@ -26,8 +40,10 @@ export const useSyncTasks = () => {
 
   const loadTaskStatus = useCallback(async (taskId: string) => {
     try {
-      const res = await dataApi.getTaskStatus(taskId);
-      setTaskStatuses((prev) => ({ ...prev, [taskId]: res.data }));
+      const res = await dataApi.getSyncTaskStatus(taskId);
+      if (res.data?.data) {
+        setTaskStatuses((prev) => ({ ...prev, [taskId]: res.data.data }));
+      }
     } catch (error) {
       console.error(`Failed to load status for ${taskId}:`, error);
     }
@@ -46,20 +62,6 @@ export const useSyncTasks = () => {
     }
   }, []);
 
-  const loadSyncLogs = useCallback(async (
-    source?: string,
-    dataType?: string,
-    startDate?: string,
-    endDate?: string
-  ) => {
-    try {
-      const res = await dataApi.getSyncStatus(source, dataType, startDate, endDate);
-      setSyncLogs(res.data.logs || []);
-    } catch (error) {
-      console.error('Failed to load sync logs:', error);
-    }
-  }, []);
-
   const syncTask = useCallback(async (
     taskId: string,
     targetDate?: string,
@@ -72,7 +74,6 @@ export const useSyncTasks = () => {
       message.success(`任务 ${taskId} 同步已启动`);
       setTimeout(() => {
         loadTaskStatus(taskId);
-        loadSyncLogs();
       }, 2000);
     } catch (error: any) {
       message.error(`任务 ${taskId} 同步失败: ${error.response?.data?.detail || error.message}`);
@@ -84,7 +85,7 @@ export const useSyncTasks = () => {
         return newSet;
       });
     }
-  }, [loadTaskStatus, loadSyncLogs]);
+  }, [loadTaskStatus]);
 
   const batchSyncTasks = useCallback(async (
     taskIds: string[],
@@ -130,43 +131,14 @@ export const useSyncTasks = () => {
           return newSet;
         });
       });
-      loadSyncLogs();
       setSelectedTaskIds([]);
     }, 2000);
 
     return true;
-  }, [syncTasks, loadTaskStatus, loadSyncLogs]);
+  }, [syncTasks, loadTaskStatus]);
 
   const deleteTask = useCallback(async (taskId: string, dropTable = true) => {
     try {
-      // 检查是否是指数同步任务（task_id 以 sync_index_weight_ 开头）
-      if (taskId.startsWith('sync_index_weight_')) {
-        // 从任务ID中提取指数代码
-        // task_id 格式: sync_index_weight_{sanitized_index_code}
-        // 但我们需要原始的 index_code，需要从任务配置中获取
-        try {
-          const configRes = await dataApi.getTaskConfig(taskId);
-          const config = configRes.data?.config;
-          const indexCode = config?.params?.index_code;
-
-          if (indexCode) {
-            // 先调用 API 删除指数订阅
-            try {
-              const { indexApi } = await import('../../../api');
-              await indexApi.unsubscribeIndex(indexCode);
-              message.success(`指数 ${indexCode} 已取消订阅`);
-            } catch (unsubError: any) {
-              console.warn('Failed to unsubscribe index, continuing with task deletion:', unsubError);
-              // 即使取消订阅失败，也继续删除任务
-            }
-          }
-        } catch (configError) {
-          console.warn('Failed to get task config, deleting task directly:', configError);
-          // 即使获取配置失败，也继续删除任务
-        }
-      }
-
-      // 删除同步任务
       await dataApi.deleteTask(taskId, dropTable);
       message.success(`同步任务 ${taskId} 已删除`);
       await loadSyncTasks();
@@ -227,7 +199,6 @@ export const useSyncTasks = () => {
   return {
     syncTasks,
     taskStatuses,
-    syncLogs,
     syncingTasks,
     selectedTaskIds,
     scheduleInfo,
@@ -236,7 +207,6 @@ export const useSyncTasks = () => {
     loadTaskStatus,
     setBatchTaskStatuses,
     loadTaskScheduleInfo,
-    loadSyncLogs,
     syncTask,
     batchSyncTasks,
     deleteTask,

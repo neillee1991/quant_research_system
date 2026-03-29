@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import ReactFlow, {
   Background,
   Controls,
@@ -10,7 +10,7 @@ import ReactFlow, {
   useEdgesState,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
-import { Button } from 'antd';
+import { Button, Input, Space } from 'antd';
 import { useMessage } from '../../hooks/useMessage';
 import { useFlowStore } from '../../store';
 import DataInputNode from './nodes/DataInputNode';
@@ -18,7 +18,7 @@ import OperatorNode from './nodes/OperatorNode';
 import SignalNode from './nodes/SignalNode';
 import BacktestOutputNode from './nodes/BacktestOutputNode';
 import Toolbar from './Toolbar';
-import { strategyApi } from '../../api';
+import { strategyApi, taskMonitorApi } from '../../api';
 import { useBacktestStore } from '../../store';
 
 const nodeTypes = {
@@ -34,6 +34,9 @@ const FlowEditor: React.FC = () => {
   const [localEdges, setLocalEdges, onEdgesChange] = useEdgesState(edges);
   const { setResult, setLoading } = useBacktestStore();
   const message = useMessage();
+  const [backtestName, setBacktestName] = useState<string>('backtest');
+  const [asyncPolling, setAsyncPolling] = useState<boolean>(false);
+  const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     setNodes(localNodes);
@@ -64,6 +67,51 @@ const FlowEditor: React.FC = () => {
       setLoading(false);
     }
   };
+
+  const handleRunBacktestAsync = async () => {
+    const graph = {
+      nodes: localNodes.map((n) => ({ id: n.id, type: n.type, data: n.data })),
+      edges: localEdges.map((e) => ({ source: e.source, target: e.target })),
+    };
+    try {
+      const res = await strategyApi.backtestAsync(backtestName, graph);
+      const runId: string = res.data.run_id;
+      setAsyncPolling(true);
+      setLoading(true);
+      message.info(`异步回测已启动: ${runId}`);
+
+      const poll = async () => {
+        try {
+          const statusRes = await taskMonitorApi.getTaskStatus('backtest', runId);
+          const status: string = statusRes.data?.status;
+          if (status === 'success') {
+            setAsyncPolling(false);
+            const resultRes = await strategyApi.getBacktestResult(runId);
+            setResult(resultRes.data);
+            setLoading(false);
+            message.success('异步回测完成');
+          } else if (status === 'failed') {
+            setAsyncPolling(false);
+            setLoading(false);
+            message.error(statusRes.data?.error || '异步回测失败');
+          } else {
+            pollRef.current = setTimeout(poll, 3000);
+          }
+        } catch {
+          pollRef.current = setTimeout(poll, 3000);
+        }
+      };
+      poll();
+    } catch (e: any) {
+      message.error(e?.response?.data?.detail || '启动异步回测失败');
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) clearTimeout(pollRef.current);
+    };
+  }, []);
 
   return (
     <div style={{
@@ -109,19 +157,36 @@ const FlowEditor: React.FC = () => {
         background: 'var(--bg-card)',
         borderTop: '1px solid var(--border-color)'
       }}>
-        <Button
-          type="primary"
-          onClick={handleRunBacktest}
-          style={{
-            background: 'var(--gradient-primary)',
-            border: 'none',
-            fontWeight: 500,
-            boxShadow: 'var(--shadow-sm)',
-            transition: 'all 200ms ease'
-          }}
-        >
-          运行回测
-        </Button>
+        <Space>
+          <Input
+            value={backtestName}
+            onChange={(e) => setBacktestName(e.target.value)}
+            placeholder="回测名称"
+            style={{ width: 160 }}
+            size="middle"
+          />
+          <Button
+            onClick={handleRunBacktestAsync}
+            loading={asyncPolling}
+            size="middle"
+            style={{ fontWeight: 500 }}
+          >
+            异步回测
+          </Button>
+          <Button
+            type="primary"
+            onClick={handleRunBacktest}
+            style={{
+              background: 'var(--gradient-primary)',
+              border: 'none',
+              fontWeight: 500,
+              boxShadow: 'var(--shadow-sm)',
+              transition: 'all 200ms ease'
+            }}
+          >
+            运行回测
+          </Button>
+        </Space>
       </div>
     </div>
   );

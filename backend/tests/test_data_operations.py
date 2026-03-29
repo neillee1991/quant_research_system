@@ -35,7 +35,7 @@ class TestDataOperationsBasics:
         """创建 mock 表管理器"""
         manager = Mock()
         manager._resolve_db_path = Mock(return_value="dfs://quant_ts")
-        manager._META_TABLES = ["sync_log", "factor_metadata"]
+        manager._META_TABLES = ["factor_metadata", "sync_task_config"]
         return manager
 
     @pytest.fixture
@@ -243,7 +243,7 @@ class TestUpsertOperations:
     def mock_table_manager(self):
         manager = Mock()
         manager._resolve_db_path = Mock(return_value="dfs://quant_ts")
-        manager._META_TABLES = ["sync_log"]
+        manager._META_TABLES = ["factor_metadata"]
         return manager
 
     @pytest.fixture
@@ -275,14 +275,14 @@ class TestUpsertOperations:
 
     def test_upsert_meta_table(self, data_ops, mock_connection, mock_table_manager):
         """测试维度表 upsert (delete + insert)"""
-        mock_table_manager._META_TABLES = ["sync_log"]
+        mock_table_manager._META_TABLES = ["factor_metadata"]
         df = pl.DataFrame({
-            "source": ["tushare"],
-            "data_type": ["daily"]
+            "factor_id": ["momentum"],
+            "description": ["test"]
         })
 
-        with patch.object(data_ops, '_prepare_upload_df', return_value=(["source", "data_type"], "tmp_var")):
-            data_ops.upsert("sync_log", df, ["source", "data_type"])
+        with patch.object(data_ops, '_prepare_upload_df', return_value=(["factor_id", "description"], "tmp_var")):
+            data_ops.upsert("factor_metadata", df, ["factor_id"])
 
             # 应该调用 delete + insert
             assert mock_connection.session.run.called
@@ -330,62 +330,6 @@ class TestBulkCopyOperations:
             data_ops.bulk_copy("test_table", df)
 
             assert data_ops._conn.session.run.called
-
-
-class TestSyncLogOperations:
-    """同步日志操作测试"""
-
-    @pytest.fixture
-    def mock_connection(self):
-        conn = Mock()
-        conn.session = MagicMock()
-        conn.lock = MagicMock()
-        conn._ensure_connected = Mock()
-        return conn
-
-    @pytest.fixture
-    def mock_sql_adapter(self):
-        adapter = Mock()
-        adapter.build_sql = Mock(side_effect=lambda sql, params: sql)
-        return adapter
-
-    @pytest.fixture
-    def mock_table_manager(self):
-        return Mock()
-
-    @pytest.fixture
-    def data_ops(self, mock_connection, mock_sql_adapter, mock_table_manager):
-        return DataOperations(mock_connection, mock_sql_adapter, mock_table_manager)
-
-    def test_get_last_sync_date_exists(self, data_ops, mock_connection):
-        """测试获取最后同步日期"""
-        mock_connection.session.run.return_value = pd.DataFrame({
-            "last_date": ["20240101"]
-        })
-
-        result = data_ops.get_last_sync_date("tushare", "daily")
-
-        assert result == "20240101"
-
-    def test_get_last_sync_date_not_exists(self, data_ops, mock_connection):
-        """测试获取不存在的同步日期"""
-        mock_connection.session.run.return_value = pd.DataFrame()
-
-        result = data_ops.get_last_sync_date("tushare", "daily")
-
-        assert result is None
-
-    def test_update_sync_log(self, data_ops):
-        """测试更新同步日志"""
-        with patch.object(data_ops, 'upsert') as mock_upsert:
-            data_ops.update_sync_log("tushare", "daily", "20240101")
-
-            mock_upsert.assert_called_once()
-            args = mock_upsert.call_args
-            df = args[0][1]
-            assert "source" in df.columns
-            assert "data_type" in df.columns
-            assert "last_date" in df.columns
 
 
 class TestPrepareUploadDF:

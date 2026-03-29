@@ -67,7 +67,7 @@ def verify_tables():
     key_tables = [
         'sync_daily_data', 'sync_daily_basic', 'sync_adj_factor',
         'sync_index_daily', 'sync_moneyflow', 'factor_values',
-        'sync_stock_basic', 'sync_log', 'sync_log_history',
+        'sync_stock_basic',
         'factor_metadata', 'factor_analysis',
     ]
 

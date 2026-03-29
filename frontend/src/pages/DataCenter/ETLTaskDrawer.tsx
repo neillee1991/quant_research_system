@@ -19,7 +19,7 @@ import { CodeOutlined } from '@ant-design/icons';
 import { useMessage } from '../../hooks/useMessage';
 import Editor from '@monaco-editor/react';
 import QuantDatePicker from '../../components/QuantDatePicker';
-import { dataApi } from '../../api';
+import { dataApi, taskMonitorApi } from '../../api';
 import { useThemeStore } from '../../store';
 import type { ETLTask } from '../../types';
 import { DataInspection } from '../../components/DataInspection';
@@ -153,8 +153,21 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
   const loadEtlLogs = async () => {
     if (!task) return;
     try {
-      const res = await dataApi.getEtlLogs(task.task_id, undefined, undefined, 50);
-      setEtlLogs(res.data.logs || []);
+      // 使用统一的 taskMonitorApi 获取任务历史
+      const res = await taskMonitorApi.getTaskHistory(50, 'etl', task.task_id);
+      // 转换格式以兼容现有代码
+      const logs = (res.data.tasks || []).map(taskRun => ({
+        source: 'etl',
+        data_type: taskRun.task_id,
+        last_date: taskRun.params ? JSON.parse(taskRun.params).date || '' : '',
+        sync_date: taskRun.params ? JSON.parse(taskRun.params).date || '' : '',
+        rows_synced: taskRun.rows || 0,
+        status: taskRun.status,
+        error_message: taskRun.error || '',
+        params: taskRun.params || '',
+        created_at: taskRun.started_at || ''
+      }));
+      setEtlLogs(logs);
     } catch (error) {
       console.error('Failed to load ETL logs:', error);
       setEtlLogs([]);

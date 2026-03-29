@@ -175,7 +175,19 @@ class MetadataManager:
             "array(DOUBLE,0) as elapsed_sec,"
             "array(INT,0) as rows,"
             "array(STRING,0) as error,"
-            "array(STRING,0) as params)",
+            "array(STRING,0) as params,"
+            "array(STRING,0) as extra)",
+            ["run_id"],
+        ),
+        "backtest_results": (
+            "table("
+            "array(SYMBOL,0) as run_id,"
+            "array(SYMBOL,0) as task_id,"
+            "array(STRING,0) as task_name,"
+            "array(STRING,0) as metrics_json,"
+            "array(STRING,0) as equity_curve_json,"
+            "array(STRING,0) as trades_json,"
+            "array(TIMESTAMP,0) as created_at)",
             ["run_id"],
         ),
     }

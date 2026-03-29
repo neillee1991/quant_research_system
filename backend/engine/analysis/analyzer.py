@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 
 from app.core.logger import logger
 from engine.analysis.alphalens_adapter import AlphalensAdapter
-from engine.production.data_config import DataConfigLoader
+from engine.factor.data_config import DataConfigLoader
 
 
 def _compress_json(data: Any) -> str:

@@ -23,7 +23,7 @@ import {
 import { CodeOutlined, PlusOutlined, DeleteOutlined, SearchOutlined } from '@ant-design/icons';
 import { useMessage } from '../../hooks/useMessage';
 import Editor from '@monaco-editor/react';
-import { dataApi } from '../../api';
+import { dataApi, taskMonitorApi } from '../../api';
 import { useThemeStore } from '../../store';
 import type { SyncTask } from '../../types';
 
@@ -165,9 +165,21 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
   const loadSyncHistory = async () => {
     if (!task) return;
     try {
-      // 使用 data_type 参数来过滤任务ID
-      const res = await dataApi.getSyncStatus(undefined, task.task_id, undefined, undefined, 50);
-      setSyncHistory(res.data.logs || []);
+      // 使用统一的 taskMonitorApi 获取任务历史
+      const res = await taskMonitorApi.getTaskHistory(50, 'sync', task.task_id);
+      // 转换格式以兼容现有代码
+      const history = (res.data.tasks || []).map(task => ({
+        source: 'tushare_config',
+        data_type: task.task_id,
+        last_date: task.params ? JSON.parse(task.params).start_date || '' : '',
+        sync_date: task.params ? JSON.parse(task.params).start_date || '' : '',
+        rows_synced: task.rows || 0,
+        status: task.status,
+        error_message: task.error || '',
+        params: task.params || '',
+        created_at: task.started_at || ''
+      }));
+      setSyncHistory(history);
     } catch (error) {
       console.error('Failed to load sync history:', error);
       setSyncHistory([]);
@@ -175,13 +187,8 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
   };
 
   const loadTaskStatus = async () => {
-    if (!task) return;
-    try {
-      const res = await dataApi.getTaskStatus(task.task_id);
-      setTaskStatus(res.data);
-    } catch (error) {
-      console.error('Failed to load task status:', error);
-    }
+    // 不再需要单独加载任务状态，统一使用 taskMonitorApi
+    return;
   };
 
   const handleInspectData = async () => {

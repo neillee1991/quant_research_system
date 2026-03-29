@@ -3,6 +3,7 @@
 所有异步任务（sync/etl/factor/analysis）通过此服务写入 task_runs 表，
 前端监控只需查询一张表。原有日志表保留不动（双写）。
 """
+import json
 import time
 from datetime import datetime
 from functools import wraps
@@ -24,7 +25,7 @@ class TaskRunner:
         task_name: str,
         params: str = "",
     ) -> None:
-        """写入 task_runs，status=running"""
+        """写入 task_runs，status=running（upsert 防止重复记录）"""
         try:
             from store.dolphindb_client import db_client
 
@@ -40,15 +41,16 @@ class TaskRunner:
                 "rows": [0],
                 "error": [""],
                 "params": [params],
+                "extra": [""],
             }).with_columns([
                 pl.col("finished_at").cast(pl.Datetime),
             ])
-            db_client.append("task_runs", record)
+            db_client.upsert("task_runs", record, key_columns=["run_id"])
         except Exception as e:
             logger.warning(f"TaskRunner.start failed for {run_id}: {e}")
 
     @staticmethod
-    def finish(run_id: str, rows: int = 0, elapsed_sec: float = 0.0) -> None:
+    def finish(run_id: str, rows: int = 0, elapsed_sec: float = 0.0, extra: str = "") -> None:
         """更新 task_runs：status=success"""
         try:
             from store.dolphindb_client import db_client
@@ -72,6 +74,7 @@ class TaskRunner:
                 "rows": [int(rows)],
                 "error": [r.get("error") or ""],
                 "params": [r.get("params") or ""],
+                "extra": [extra if extra else (r.get("extra") or "")],
             }).with_columns([
                 pl.col("started_at").cast(pl.Datetime),
                 pl.col("finished_at").cast(pl.Datetime),
@@ -105,6 +108,7 @@ class TaskRunner:
                 "rows": [0],
                 "error": [str(error)[:500]],
                 "params": [r.get("params") or ""],
+                "extra": [r.get("extra") or ""],
             }).with_columns([
                 pl.col("started_at").cast(pl.Datetime),
                 pl.col("finished_at").cast(pl.Datetime),
@@ -157,6 +161,7 @@ class TaskRunner:
                     "rows": [row.get("rows") or 0],
                     "error": [f"Task interrupted: {reason}"],
                     "params": [row.get("params") or ""],
+                    "extra": [row.get("extra") or ""],
                 }).with_columns([
                     pl.col("started_at").cast(pl.Datetime),
                     pl.col("finished_at").cast(pl.Datetime),
@@ -189,12 +194,24 @@ def tracked_task(task_type: str, task_id_kwarg: str = "task_id") -> Callable:
                 result = func(*args, **kwargs)
                 elapsed = time.time() - t0
                 rows = 0
+                extra = ""
                 if isinstance(result, dict):
                     rows = result.get("rows", 0) or 0
+                    extra_val = result.get("extra")
+                    if isinstance(extra_val, dict):
+                        extra = json.dumps(extra_val)
+                    elif isinstance(extra_val, str):
+                        extra = extra_val
                 elif hasattr(result, "rows"):
                     rows = result.rows or 0
+                    if hasattr(result, "extra"):
+                        extra_val = result.extra
+                        if isinstance(extra_val, dict):
+                            extra = json.dumps(extra_val)
+                        elif isinstance(extra_val, str):
+                            extra = extra_val
                 if run_id:
-                    TaskRunner.finish(run_id, rows=rows, elapsed_sec=elapsed)
+                    TaskRunner.finish(run_id, rows=rows, elapsed_sec=elapsed, extra=extra)
                 return result
             except Exception as e:
                 elapsed = time.time() - t0

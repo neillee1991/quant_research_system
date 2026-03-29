@@ -49,6 +49,7 @@ export const dataApi = {
   syncAllTasks: (targetDate?: string) =>
     longRunningApi.post('/data/sync/all', null, { params: { target_date: targetDate } }),
   getTaskConfig: (taskId: string) => api.get(`/data/sync/task/${taskId}/config`),
+  getSyncTaskStatus: (taskId: string) => api.get(`/data/sync/task/${taskId}/status`),
   updateTaskConfig: (taskId: string, config: any) => api.put(`/data/sync/task/${taskId}/config`, config),
   createTask: (config: any) => api.post('/data/sync/tasks', config),
   createSyncTask: (config: any) => api.post('/data/sync/tasks', config),
@@ -310,7 +311,7 @@ export const flowApi = {
 export interface RunningTask {
   run_id: string;
   task_id: string;
-  task_type: 'factor' | 'sync' | 'etl' | 'analysis';
+  task_type: 'factor' | 'sync' | 'etl' | 'analysis' | 'backtest';
   task_name: string;
   status: 'running' | 'success' | 'failed' | string;
   started_at?: string;
@@ -323,7 +324,7 @@ export interface RunningTask {
 
 export interface TaskRun {
   run_id: string;
-  task_type: 'factor' | 'sync' | 'etl' | 'analysis';
+  task_type: 'factor' | 'sync' | 'etl' | 'analysis' | 'backtest';
   task_id: string;
   task_name: string;
   status: 'running' | 'success' | 'failed';
@@ -333,6 +334,7 @@ export interface TaskRun {
   rows: number | null;
   error: string | null;
   params: string;
+  extra?: string | null;
 }
 
 export interface RunningTasksResponse {

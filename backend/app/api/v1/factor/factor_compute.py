@@ -13,8 +13,8 @@ from typing import Optional, List, Dict, Any
 import polars as pl
 
 from store.dolphindb_client import db_client
-from services.factor_compute_service import FactorComputeService, DEFAULT_PREPROCESS as _DEFAULT_PREPROCESS
-from engine.production.registry import FactorDefinition, StorageConfig
+from app.services.factor_compute_service import FactorComputeService, DEFAULT_PREPROCESS as _DEFAULT_PREPROCESS
+from engine.factor.registry import FactorDefinition, StorageConfig
 from app.core.logger import logger
 from app.core.utils import (
     DateUtils,
@@ -27,36 +27,6 @@ from app.services.task_runner import TaskRunner, tracked_task
 
 router = APIRouter()
 factor_service = FactorComputeService(db_client)
-
-
-# ==================== Helper Functions ====================
-
-def _format_run_record(record: Dict[str, Any]) -> Dict[str, Any]:
-    """格式化 factor_run_log 记录（统一日期格式、字段名）"""
-    result = dict(record)
-
-    # 格式化日期字段
-    for date_field in ["start_date", "end_date"]:
-        if result.get(date_field):
-            result[date_field] = DateUtils.format_date_for_display(result[date_field])
-
-    # 格式化时间戳（处理可能缺失的字段）
-    for ts_field in ["created_at", "finished_at"]:
-        if ts_field in result:
-            result[ts_field] = safe_str_datetime(result.get(ts_field))
-        else:
-            result[ts_field] = None
-
-    # 统一字段名（映射数据库列名到API字段名）
-    # 支持两种列名，兼容不同版本的表结构
-    # 先尝试新列名，如果没有则尝试旧列名
-    result["rows"] = result.get("rows") or result.get("rows_affected")
-    result["elapsed_seconds"] = result.get("elapsed_seconds") or result.get("duration_seconds")
-    result["error_message"] = result.get("error_message") or result.get("message")
-
-    logger.debug(f"After mapping - rows: {result.get('rows')}, elapsed: {result.get('elapsed_seconds')}")
-
-    return result
 
 
 # ==================== Pydantic Models ====================
@@ -129,7 +99,7 @@ def _run_factor_background(
         logger.error(f"Factor {factor_id} computation failed: run_id={run_id}, error={e}")
 
 
-@router.post("/production/run")
+@router.post("/factor/run")
 async def run_production(req: ProductionRunRequest, background_tasks: BackgroundTasks):
     """运行生产任务（异步）
 
@@ -145,25 +115,6 @@ async def run_production(req: ProductionRunRequest, background_tasks: Background
                          params=json.dumps({"mode": req.mode, "start_date": req.start_date, "end_date": req.end_date}))
 
         preprocess = req.preprocess.model_dump() if req.preprocess else None
-
-        # 立即写入 running 状态
-        try:
-            now = datetime.now()
-            record = pl.DataFrame({
-                "run_id": [run_id],
-                "factor_id": [req.factor_id],
-                "start_date": [req.start_date or req.target_date or ""],
-                "end_date": [req.end_date or req.target_date or ""],
-                "mode": [req.mode],
-                "status": ["running"],
-                "rows": [0],
-                "elapsed_seconds": [0.0],
-                "message": [""],
-                "created_at": [now],
-            })
-            db_client.append("factor_run_log", record)
-        except Exception as log_err:
-            logger.warning(f"Failed to write running status for factor {req.factor_id}: {log_err}")
 
         # 添加后台任务
         background_tasks.add_task(
@@ -191,7 +142,7 @@ async def run_production(req: ProductionRunRequest, background_tasks: Background
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/production/batch-run")
+@router.post("/factor/batch-run")
 async def batch_run_production(req: BatchRunRequest, background_tasks: BackgroundTasks):
     """批量计算因子（异步）
 
@@ -209,25 +160,6 @@ async def batch_run_production(req: BatchRunRequest, background_tasks: Backgroun
             # 写入统一任务表
             TaskRunner.start(run_id, "factor", fid, f"因子计算: {fid}",
                              params=json.dumps({"mode": req.mode, "start_date": req.start_date, "end_date": req.end_date}))
-
-            # 立即写入 running 状态
-            try:
-                now = datetime.now()
-                record = pl.DataFrame({
-                    "run_id": [run_id],
-                    "factor_id": [fid],
-                    "start_date": [req.start_date or ""],
-                    "end_date": [req.end_date or ""],
-                    "mode": [req.mode],
-                    "status": ["running"],
-                    "rows": [0],
-                    "elapsed_seconds": [0.0],
-                    "message": [""],
-                    "created_at": [now],
-                })
-                db_client.append("factor_run_log", record)
-            except Exception as log_err:
-                logger.warning(f"Failed to write running status for factor {fid}: {log_err}")
 
             # 每个因子独立后台任务
             background_tasks.add_task(
@@ -253,19 +185,14 @@ async def batch_run_production(req: BatchRunRequest, background_tasks: Backgroun
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/production/status/{run_id}")
+@router.get("/factor/status/{run_id}")
 async def get_run_status(run_id: str):
-    """查询因子计算任务状态
-
-    返回任务的执行状态、耗时、数据条数等信息。
-    """
+    """查询因子计算任务状态（使用统一 task_runs 表）"""
     try:
-        # 使用 SELECT * 来避免列名问题，然后在代码中处理
         df = db_client.query("""
-            SELECT *
-            FROM factor_run_log
+            SELECT * FROM task_runs
             WHERE run_id = %s
-            ORDER BY created_at DESC
+            ORDER BY started_at DESC
             LIMIT 1
         """, (run_id,))
 
@@ -276,7 +203,11 @@ async def get_run_status(run_id: str):
             )
 
         record = df.to_dicts()[0]
-        record = _format_run_record(record)
+
+        # 格式化时间戳
+        for field in ["created_at", "updated_at", "started_at", "finished_at"]:
+            if field in record and record[field]:
+                record[field] = str(record[field])
 
         return {"status": "success", "data": record}
     except HTTPException:
@@ -286,48 +217,52 @@ async def get_run_status(run_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/production/history")
+@router.get("/factor/history")
 async def get_production_history(
     factor_id: Optional[str] = None,
     limit: int = 20,
     start_date: Optional[str] = Query(None, description="开始日期 YYYYMMDD"),
     end_date: Optional[str] = Query(None, description="结束日期 YYYYMMDD")
 ):
-    """获取生产运行历史"""
+    """获取生产运行历史（使用统一 task_runs 表）"""
     try:
-        conditions = []
+        from store.dolphindb_client import db_client
+
+        where_conditions = ["task_type = 'factor'"]
         params = []
+
         if factor_id:
-            conditions.append("factor_id = %s")
+            where_conditions.append("task_id = %s")
             params.append(factor_id)
+
         if start_date:
             if not DateUtils.validate_yyyymmdd(start_date):
                 raise HTTPException(status_code=400, detail="start_date must be YYYYMMDD")
-            conditions.append(f"date(created_at) >= {start_date[:4]}.{start_date[4:6]}.{start_date[6:8]}")
+            where_conditions.append(f"date(started_at) >= {start_date[:4]}.{start_date[4:6]}.{start_date[6:8]}")
+
         if end_date:
             if not DateUtils.validate_yyyymmdd(end_date):
                 raise HTTPException(status_code=400, detail="end_date must be YYYYMMDD")
-            conditions.append(f"date(created_at) <= {end_date[:4]}.{end_date[4:6]}.{end_date[6:8]}")
-        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+            where_conditions.append(f"date(started_at) <= {end_date[:4]}.{end_date[4:6]}.{end_date[6:8]}")
+
+        where_clause = " AND ".join(where_conditions) if where_conditions else "1=1"
         params.append(limit)
 
-        # 使用 SELECT * 来避免列名问题，然后在代码中处理
         df = db_client.query(f"""
-            SELECT *
-            FROM factor_run_log
-            {where}
-            ORDER BY created_at DESC LIMIT %s
+            SELECT * FROM task_runs
+            WHERE {where_clause}
+            ORDER BY started_at DESC LIMIT %s
         """, tuple(params))
 
         data = []
         if not df.is_empty():
             for row in df.to_dicts():
-                logger.debug(f"Raw record from DB: {row}")
-                formatted = _format_run_record(row)
-                logger.debug(f"Formatted record: {formatted}")
-                data.append(formatted)
+                # 格式化时间戳
+                for field in ["created_at", "updated_at", "started_at", "finished_at"]:
+                    if field in row and row[field]:
+                        row[field] = str(row[field])
+                data.append(row)
 
-        logger.debug(f"Returning {len(data)} records")
         return {"status": "success", "data": data}
     except Exception as e:
         if "does not exist" in str(e):
@@ -335,7 +270,7 @@ async def get_production_history(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/production/factors/test")
+@router.post("/factor/factors/test")
 async def test_factor_code(req: FactorTestRequest):
     """编译并测试因子代码，返回计算结果预览
 
@@ -390,7 +325,7 @@ async def test_factor_code(req: FactorTestRequest):
             return args[0]
         return decorator
 
-    mock_registry = types.ModuleType("engine.production.registry")
+    mock_registry = types.ModuleType("engine.factor.registry")
     mock_registry.factor = mock_factor_decorator
 
     namespace = {
@@ -408,8 +343,8 @@ async def test_factor_code(req: FactorTestRequest):
         "print": lambda *a, **kw: stdout_capture.write(" ".join(str(x) for x in a) + kw.get("end", "\n")),
     }
 
-    original_module = sys.modules.get("engine.production.registry")
-    sys.modules["engine.production.registry"] = mock_registry
+    original_module = sys.modules.get("engine.factor.registry")
+    sys.modules["engine.factor.registry"] = mock_registry
 
     log("exec", "执行代码...")
     t0 = time.time()
@@ -419,9 +354,9 @@ async def test_factor_code(req: FactorTestRequest):
         return make_error("exec", f"代码执行错误:\n{traceback.format_exc()}")
     finally:
         if original_module is not None:
-            sys.modules["engine.production.registry"] = original_module
+            sys.modules["engine.factor.registry"] = original_module
         else:
-            sys.modules.pop("engine.production.registry", None)
+            sys.modules.pop("engine.factor.registry", None)
 
     exec_stdout = stdout_capture.getvalue()
     if exec_stdout.strip():

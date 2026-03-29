@@ -7,8 +7,8 @@ from unittest.mock import Mock, MagicMock, patch
 from datetime import datetime
 import polars as pl
 
-from services.factor_compute_service import FactorComputeService, ComputeResult, DEFAULT_LOOKBACK_DAYS
-from engine.production.registry import FactorDefinition
+from app.services.factor_compute_service import FactorComputeService, ComputeResult, DEFAULT_LOOKBACK_DAYS
+from engine.factor.registry import FactorDefinition
 
 
 class TestFactorComputeServiceBasics:
@@ -27,10 +27,10 @@ class TestFactorComputeServiceBasics:
     @pytest.fixture
     def service(self, mock_db_client):
         """创建服务实例"""
-        with patch('services.factor_compute_service.TradingCalendar'):
-            with patch('services.factor_compute_service.DataConfigLoader'):
-                with patch('services.factor_compute_service.get_preprocess_loader'):
-                    with patch('services.factor_compute_service.PipelineFactory'):
+        with patch('app.services.factor_compute_service.TradingCalendar'):
+            with patch('app.services.factor_compute_service.DataConfigLoader'):
+                with patch('app.services.factor_compute_service.get_preprocess_loader'):
+                    with patch('app.services.factor_compute_service.PipelineFactory'):
                         service = FactorComputeService(mock_db_client)
                         return service
 
@@ -43,13 +43,13 @@ class TestFactorComputeServiceBasics:
 
     def test_register_config_tables(self, mock_db_client):
         """测试注册配置表"""
-        with patch('services.factor_compute_service.TradingCalendar'):
-            with patch('services.factor_compute_service.DataConfigLoader') as mock_loader:
+        with patch('app.services.factor_compute_service.TradingCalendar'):
+            with patch('app.services.factor_compute_service.DataConfigLoader') as mock_loader:
                 mock_loader.return_value.load.return_value = {
                     "daily": {"table_name": "sync_daily_data"}
                 }
-                with patch('services.factor_compute_service.get_preprocess_loader'):
-                    with patch('services.factor_compute_service.PipelineFactory'):
+                with patch('app.services.factor_compute_service.get_preprocess_loader'):
+                    with patch('app.services.factor_compute_service.PipelineFactory'):
                         service = FactorComputeService(mock_db_client)
 
                         # 验证注册了表
@@ -86,16 +86,16 @@ class TestComputeFactorFlow:
 
     @pytest.fixture
     def service(self, mock_db_client):
-        with patch('services.factor_compute_service.TradingCalendar'):
-            with patch('services.factor_compute_service.DataConfigLoader'):
-                with patch('services.factor_compute_service.get_preprocess_loader'):
-                    with patch('services.factor_compute_service.PipelineFactory'):
+        with patch('app.services.factor_compute_service.TradingCalendar'):
+            with patch('app.services.factor_compute_service.DataConfigLoader'):
+                with patch('app.services.factor_compute_service.get_preprocess_loader'):
+                    with patch('app.services.factor_compute_service.PipelineFactory'):
                         return FactorComputeService(mock_db_client)
 
     def test_compute_factor_not_found(self, service):
         """测试因子不存在"""
-        with patch('services.factor_compute_service.discover_factors'):
-            with patch('services.factor_compute_service.get_factor', return_value=None):
+        with patch('app.services.factor_compute_service.discover_factors'):
+            with patch('app.services.factor_compute_service.get_factor', return_value=None):
                 result = service.compute_factor("nonexistent_factor")
 
                 assert result.success is False
@@ -103,8 +103,8 @@ class TestComputeFactorFlow:
 
     def test_compute_factor_success(self, service, mock_db_client, mock_factor_definition):
         """测试因子计算成功"""
-        with patch('services.factor_compute_service.discover_factors'):
-            with patch('services.factor_compute_service.get_factor', return_value=mock_factor_definition):
+        with patch('app.services.factor_compute_service.discover_factors'):
+            with patch('app.services.factor_compute_service.get_factor', return_value=mock_factor_definition):
                 with patch.object(service, '_resolve_dates', return_value=("20240101", "20240101", "20231201")):
                     with patch.object(service, '_resolve_preprocess_options', return_value={}):
                         with patch.object(service.pipeline_factory, 'create_pipeline') as mock_pipeline:
@@ -122,8 +122,8 @@ class TestComputeFactorFlow:
 
     def test_compute_factor_with_target_date(self, service, mock_factor_definition):
         """测试指定目标日期计算"""
-        with patch('services.factor_compute_service.discover_factors'):
-            with patch('services.factor_compute_service.get_factor', return_value=mock_factor_definition):
+        with patch('app.services.factor_compute_service.discover_factors'):
+            with patch('app.services.factor_compute_service.get_factor', return_value=mock_factor_definition):
                 with patch.object(service, '_resolve_dates', return_value=("20240101", "20240101", "20231201")):
                     with patch.object(service, '_resolve_preprocess_options', return_value={}):
                         with patch.object(service.pipeline_factory, 'create_pipeline') as mock_pipeline:
@@ -139,8 +139,8 @@ class TestComputeFactorFlow:
 
     def test_compute_factor_with_date_range(self, service, mock_factor_definition):
         """测试日期范围计算"""
-        with patch('services.factor_compute_service.discover_factors'):
-            with patch('services.factor_compute_service.get_factor', return_value=mock_factor_definition):
+        with patch('app.services.factor_compute_service.discover_factors'):
+            with patch('app.services.factor_compute_service.get_factor', return_value=mock_factor_definition):
                 with patch.object(service, '_resolve_dates', return_value=("20240101", "20240131", "20231201")):
                     with patch.object(service, '_resolve_preprocess_options', return_value={}):
                         with patch.object(service.pipeline_factory, 'create_pipeline') as mock_pipeline:
@@ -168,10 +168,10 @@ class TestDateResolution:
         db = Mock()
         db._ALL_TABLES = []
         db.query = Mock(return_value=pl.DataFrame())
-        with patch('services.factor_compute_service.TradingCalendar'):
-            with patch('services.factor_compute_service.DataConfigLoader'):
-                with patch('services.factor_compute_service.get_preprocess_loader'):
-                    with patch('services.factor_compute_service.PipelineFactory'):
+        with patch('app.services.factor_compute_service.TradingCalendar'):
+            with patch('app.services.factor_compute_service.DataConfigLoader'):
+                with patch('app.services.factor_compute_service.get_preprocess_loader'):
+                    with patch('app.services.factor_compute_service.PipelineFactory'):
                         return FactorComputeService(db)
 
     @pytest.fixture
@@ -233,14 +233,14 @@ class TestPreprocessOptions:
         db = Mock()
         db._ALL_TABLES = []
         db.query = Mock(return_value=pl.DataFrame())
-        with patch('services.factor_compute_service.TradingCalendar'):
-            with patch('services.factor_compute_service.DataConfigLoader'):
-                with patch('services.factor_compute_service.get_preprocess_loader') as mock_loader:
+        with patch('app.services.factor_compute_service.TradingCalendar'):
+            with patch('app.services.factor_compute_service.DataConfigLoader'):
+                with patch('app.services.factor_compute_service.get_preprocess_loader') as mock_loader:
                     mock_loader.return_value.get_profile.return_value = {
                         "adjust_price": "forward",
                         "filter_st": True
                     }
-                    with patch('services.factor_compute_service.PipelineFactory'):
+                    with patch('app.services.factor_compute_service.PipelineFactory'):
                         return FactorComputeService(db)
 
     @pytest.fixture
@@ -288,10 +288,10 @@ class TestResultSaving:
         db = Mock()
         db._ALL_TABLES = []
         db.upsert = Mock()
-        with patch('services.factor_compute_service.TradingCalendar'):
-            with patch('services.factor_compute_service.DataConfigLoader'):
-                with patch('services.factor_compute_service.get_preprocess_loader'):
-                    with patch('services.factor_compute_service.PipelineFactory'):
+        with patch('app.services.factor_compute_service.TradingCalendar'):
+            with patch('app.services.factor_compute_service.DataConfigLoader'):
+                with patch('app.services.factor_compute_service.get_preprocess_loader'):
+                    with patch('app.services.factor_compute_service.PipelineFactory'):
                         return FactorComputeService(db)
 
     def test_save_results(self, service):
@@ -325,10 +325,10 @@ class TestRunRecordManagement:
         db = Mock()
         db._ALL_TABLES = []
         db.upsert = Mock()
-        with patch('services.factor_compute_service.TradingCalendar'):
-            with patch('services.factor_compute_service.DataConfigLoader'):
-                with patch('services.factor_compute_service.get_preprocess_loader'):
-                    with patch('services.factor_compute_service.PipelineFactory'):
+        with patch('app.services.factor_compute_service.TradingCalendar'):
+            with patch('app.services.factor_compute_service.DataConfigLoader'):
+                with patch('app.services.factor_compute_service.get_preprocess_loader'):
+                    with patch('app.services.factor_compute_service.PipelineFactory'):
                         return FactorComputeService(db)
 
     def test_create_run_record(self, service):
@@ -366,10 +366,10 @@ class TestMetadataUpdate:
         db = Mock()
         db._ALL_TABLES = []
         db.upsert = Mock()
-        with patch('services.factor_compute_service.TradingCalendar'):
-            with patch('services.factor_compute_service.DataConfigLoader'):
-                with patch('services.factor_compute_service.get_preprocess_loader'):
-                    with patch('services.factor_compute_service.PipelineFactory'):
+        with patch('app.services.factor_compute_service.TradingCalendar'):
+            with patch('app.services.factor_compute_service.DataConfigLoader'):
+                with patch('app.services.factor_compute_service.get_preprocess_loader'):
+                    with patch('app.services.factor_compute_service.PipelineFactory'):
                         return FactorComputeService(db)
 
     @pytest.fixture
@@ -391,16 +391,16 @@ class TestErrorHandling:
         db = Mock()
         db._ALL_TABLES = []
         db.query = Mock(return_value=pl.DataFrame())
-        with patch('services.factor_compute_service.TradingCalendar'):
-            with patch('services.factor_compute_service.DataConfigLoader'):
-                with patch('services.factor_compute_service.get_preprocess_loader'):
-                    with patch('services.factor_compute_service.PipelineFactory'):
+        with patch('app.services.factor_compute_service.TradingCalendar'):
+            with patch('app.services.factor_compute_service.DataConfigLoader'):
+                with patch('app.services.factor_compute_service.get_preprocess_loader'):
+                    with patch('app.services.factor_compute_service.PipelineFactory'):
                         return FactorComputeService(db)
 
     def test_compute_factor_exception_handling(self, service):
         """测试计算异常处理"""
-        with patch('services.factor_compute_service.discover_factors'):
-            with patch('services.factor_compute_service.get_factor', side_effect=Exception("Test error")):
+        with patch('app.services.factor_compute_service.discover_factors'):
+            with patch('app.services.factor_compute_service.get_factor', side_effect=Exception("Test error")):
                 result = service.compute_factor("test_factor")
 
                 assert result.success is False
@@ -413,8 +413,8 @@ class TestErrorHandling:
         mock_definition.depends_on = ["daily"]
         mock_definition.lookback_days = 20
 
-        with patch('services.factor_compute_service.discover_factors'):
-            with patch('services.factor_compute_service.get_factor', return_value=mock_definition):
+        with patch('app.services.factor_compute_service.discover_factors'):
+            with patch('app.services.factor_compute_service.get_factor', return_value=mock_definition):
                 with patch.object(service, '_resolve_dates', return_value=("20240101", "20240101", "20231201")):
                     with patch.object(service, '_resolve_preprocess_options', return_value={}):
                         with patch.object(service.pipeline_factory, 'create_pipeline') as mock_pipeline:

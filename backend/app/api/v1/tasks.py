@@ -6,8 +6,10 @@ from typing import Dict, Any, Optional
 from fastapi import APIRouter, HTTPException, Query, Path, BackgroundTasks
 from pydantic import BaseModel, Field
 import time
+import json
 
 from app.services.task_service import sync_service, etl_service, factor_service, TaskService
+from app.services.task_runner import TaskRunner, tracked_task
 from app.core.logger import logger
 
 router = APIRouter()
@@ -124,18 +126,40 @@ class RunningTaskResponse(BaseModel):
     total: int
 
 
+class TaskHistoryResponse(BaseModel):
+    """历史任务响应"""
+    tasks: list[Dict[str, Any]]
+    total: int
+
+
 @router.get("/tasks/running", response_model=RunningTaskResponse)
-def get_running_tasks():
+def get_running_tasks(
+    task_type: Optional[str] = Query(default=None, description="按任务类型过滤 (sync/etl/factor)"),
+    task_id: Optional[str] = Query(default=None, description="按任务ID过滤")
+):
     """获取所有正在运行的任务（查询统一 task_runs 表）"""
     try:
         from store.dolphindb_client import db_client
 
         try:
-            df = db_client.query("""
+            where_conditions = ["status = 'running'"]
+            params = []
+
+            if task_type:
+                where_conditions.append("task_type = %s")
+                params.append(task_type)
+
+            if task_id:
+                where_conditions.append("task_id = %s")
+                params.append(task_id)
+
+            where_clause = " AND ".join(where_conditions) if where_conditions else "1=1"
+
+            df = db_client.query(f"""
                 SELECT * FROM task_runs
-                WHERE status = 'running'
+                WHERE {where_clause}
                 ORDER BY started_at DESC
-            """)
+            """, tuple(params) if params else None)
             tasks = []
             if not df.is_empty():
                 for row in df.to_dicts():
@@ -154,19 +178,36 @@ def get_running_tasks():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/tasks/history")
-def get_task_history(limit: int = Query(default=50, ge=1, le=200)):
+@router.get("/tasks/history", response_model=TaskHistoryResponse)
+def get_task_history(
+    limit: int = Query(default=50, ge=1, le=200),
+    task_type: Optional[str] = Query(default=None, description="按任务类型过滤 (sync/etl/factor)"),
+    task_id: Optional[str] = Query(default=None, description="按任务ID过滤")
+):
     """获取最近完成/失败的任务历史（查询统一 task_runs 表）"""
     try:
         from store.dolphindb_client import db_client
 
         try:
+            where_conditions = ["status IN ('success', 'failed')"]
+            params = []
+
+            if task_type:
+                where_conditions.append("task_type = %s")
+                params.append(task_type)
+
+            if task_id:
+                where_conditions.append("task_id = %s")
+                params.append(task_id)
+
+            where_clause = " AND ".join(where_conditions) if where_conditions else "1=1"
+
             df = db_client.query(f"""
                 SELECT * FROM task_runs
-                WHERE status IN ('success', 'failed')
+                WHERE {where_clause}
                 ORDER BY finished_at DESC
                 LIMIT {limit}
-            """)
+            """, tuple(params) if params else None)
             tasks = []
             if not df.is_empty():
                 for row in df.to_dicts():
@@ -178,7 +219,7 @@ def get_task_history(limit: int = Query(default=50, ge=1, le=200)):
             logger.warning(f"task_runs not available: {e}")
             tasks = []
 
-        return RunningTaskResponse(tasks=tasks, total=len(tasks))
+        return TaskHistoryResponse(tasks=tasks, total=len(tasks))
 
     except Exception as e:
         logger.error(f"Failed to get task history: {e}")
@@ -194,6 +235,38 @@ def cleanup_stale_tasks(timeout_minutes: int = Query(default=0, ge=0, descriptio
         return {"status": "success", "data": {"cleaned": cleaned}}
     except Exception as e:
         logger.error(f"Failed to cleanup stale tasks: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/tasks/version", response_model=VersionResponse)
+def get_config_version():
+    """获取配置版本号（基于最新更新时间的时间戳）"""
+    try:
+        from store.dolphindb_client import db_client
+
+        # 查询所有配置表的最新更新时间
+        tables = ["sync_task_config", "etl_task_config", "factor_metadata"]
+        max_timestamp = 0
+
+        for table in tables:
+            try:
+                sql = f"SELECT max(updated_at) as max_time FROM {table}"
+                df = db_client.query(sql)
+                if not df.is_empty():
+                    max_time = df["max_time"][0]
+                    if max_time:
+                        timestamp = int(max_time.timestamp() * 1000)
+                        max_timestamp = max(max_timestamp, timestamp)
+            except Exception as e:
+                logger.warning(f"Failed to get version from {table}: {e}")
+
+        return VersionResponse(
+            version=max_timestamp,
+            message=f"Configuration version: {max_timestamp}"
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to get config version: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -217,6 +290,47 @@ def list_tasks(
         raise
     except Exception as e:
         logger.error(f"Failed to list {task_type} tasks: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/tasks/{task_type}/status/{run_id}")
+async def get_task_status(
+    task_type: str = Path(..., description="任务类型: sync, etl, factor"),
+    run_id: str = Path(..., description="运行ID")
+):
+    """查询任务执行状态（查询统一 task_runs 表）"""
+    try:
+        from store.dolphindb_client import db_client
+
+        # 从统一 task_runs 表查询
+        df = db_client.query("""
+            SELECT * FROM task_runs
+            WHERE run_id = %s
+            ORDER BY started_at DESC
+            LIMIT 1
+        """, (run_id,))
+
+        if df.is_empty():
+            raise HTTPException(
+                status_code=404,
+                detail=f"Task status not found for run_id: {run_id}"
+            )
+
+        record = df.to_dicts()[0]
+
+        # 格式化时间戳（处理可能缺失的字段）
+        for field in ["created_at", "updated_at", "started_at", "finished_at"]:
+            if field in record and record[field]:
+                record[field] = str(record[field])
+            elif field not in record:
+                record[field] = None
+
+        return {"status": "success", "data": record}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get task status: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -358,6 +472,7 @@ def delete_task(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@tracked_task("sync", task_id_kwarg="task_id")
 def _execute_sync_task_background(task_id: str, start_date: Optional[str], end_date: Optional[str], run_id: str):
     """后台执行同步任务"""
     try:
@@ -372,6 +487,7 @@ def _execute_sync_task_background(task_id: str, start_date: Optional[str], end_d
         logger.error(f"Sync task {task_id} failed: run_id={run_id}, error={e}")
 
 
+@tracked_task("etl", task_id_kwarg="task_id")
 def _execute_etl_task_background(task_id: str, start_date: Optional[str], end_date: Optional[str], run_id: str):
     """后台执行 ETL 任务"""
     try:
@@ -386,10 +502,11 @@ def _execute_etl_task_background(task_id: str, start_date: Optional[str], end_da
         logger.error(f"ETL task {task_id} failed: run_id={run_id}, error={e}")
 
 
+@tracked_task("factor", task_id_kwarg="task_id")
 def _execute_factor_task_background(task_id: str, start_date: Optional[str], end_date: Optional[str], run_id: str):
     """后台执行因子任务"""
     try:
-        from services.factor_compute_service import FactorComputeService
+        from app.services.factor_compute_service import FactorComputeService
         from store.dolphindb_client import db_client
         service = FactorComputeService(db_client)
         compute_result = service.compute_factor(
@@ -427,6 +544,15 @@ async def execute_task(
 
         # 生成 run_id
         run_id = f"{task_id}_{int(time.time() * 1000)}"
+
+        # Write to task_runs table
+        TaskRunner.start(
+            run_id,
+            task_type,
+            task_id,
+            f"{task_type.upper()} 任务: {task_id}",
+            params=json.dumps(request.params if request else {})
+        )
 
         # 根据任务类型添加后台任务
         if task_type == "sync":
@@ -475,112 +601,6 @@ async def execute_task(
             status_code=500,
             detail=f"Task execution failed: {str(e)}"
         )
-
-
-@router.get("/tasks/{task_type}/status/{run_id}")
-async def get_task_status(
-    task_type: str = Path(..., description="任务类型: sync, etl, factor"),
-    run_id: str = Path(..., description="运行ID")
-):
-    """查询任务执行状态
-
-    根据任务类型查询对应的日志表。
-    """
-    try:
-        from store.dolphindb_client import db_client
-
-        if task_type == "sync":
-            # 查询 sync_log_history
-            df = db_client.query("""
-                SELECT * FROM sync_log_history
-                WHERE data_type = %s
-                ORDER BY created_at DESC
-                LIMIT 1
-            """, (run_id.split('_')[0],))  # 从 run_id 提取 task_id
-
-        elif task_type == "etl":
-            # 查询 sync_log_history (source='etl')
-            df = db_client.query("""
-                SELECT * FROM sync_log_history
-                WHERE source = 'etl' AND data_type = %s
-                ORDER BY created_at DESC
-                LIMIT 1
-            """, (run_id.split('_')[0],))
-
-        elif task_type == "factor":
-            # 查询 factor_run_log
-            df = db_client.query("""
-                SELECT * FROM factor_run_log
-                WHERE run_id = %s
-                ORDER BY created_at DESC
-                LIMIT 1
-            """, (run_id,))
-
-        else:
-            raise HTTPException(status_code=400, detail=f"Invalid task_type: {task_type}")
-
-        if df.is_empty():
-            raise HTTPException(
-                status_code=404,
-                detail=f"Task status not found for run_id: {run_id}"
-            )
-
-        record = df.to_dicts()[0]
-
-        # 统一字段名（映射数据库列名到API字段名）
-        # 支持两种列名，兼容不同版本的表结构
-        # 先尝试新列名，如果没有则尝试旧列名
-        if task_type == "factor":
-            record["rows"] = record.get("rows") or record.get("rows_affected")
-            record["elapsed_seconds"] = record.get("elapsed_seconds") or record.get("duration_seconds")
-            record["error_message"] = record.get("error_message") or record.get("message")
-
-        # 格式化时间戳（处理可能缺失的字段）
-        for field in ["created_at", "updated_at", "finished_at"]:
-            if field in record and record[field]:
-                record[field] = str(record[field])
-            elif field not in record:
-                record[field] = None
-
-        return {"status": "success", "data": record}
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to get task status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/tasks/version", response_model=VersionResponse)
-def get_config_version():
-    """获取配置版本号（基于最新更新时间的时间戳）"""
-    try:
-        from store.dolphindb_client import db_client
-
-        # 查询所有配置表的最新更新时间
-        tables = ["sync_task_config", "etl_task_config", "factor_metadata"]
-        max_timestamp = 0
-
-        for table in tables:
-            try:
-                sql = f"SELECT max(updated_at) as max_time FROM {table}"
-                df = db_client.query(sql)
-                if not df.is_empty():
-                    max_time = df["max_time"][0]
-                    if max_time:
-                        timestamp = int(max_time.timestamp() * 1000)
-                        max_timestamp = max(max_timestamp, timestamp)
-            except Exception as e:
-                logger.warning(f"Failed to get version from {table}: {e}")
-
-        return VersionResponse(
-            version=max_timestamp,
-            message=f"Configuration version: {max_timestamp}"
-        )
-
-    except Exception as e:
-        logger.error(f"Failed to get config version: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/tasks/{task_type}/{task_id}/inspect", response_model=DataInspectionResponse)

@@ -14,8 +14,8 @@ from dataclasses import dataclass
 
 from app.core.logger import logger
 from app.core.utils import DateUtils, TradingCalendar
-from engine.production.registry import get_factor, discover_factors, FactorDefinition
-from engine.production.data_config import DataConfigLoader
+from engine.factor.registry import get_factor, discover_factors, FactorDefinition
+from engine.factor.data_config import DataConfigLoader
 # Removed: preprocess_config.yaml is no longer used
 from infrastructure.processor.pipeline import ProcessContext
 from infrastructure.processor.pipeline_factory import PipelineFactory
@@ -153,28 +153,6 @@ class FactorComputeService:
                 f"loading data from {data_start}"
             )
 
-            # 4. 创建运行记录（如果外部已传入 run_id，更新已有记录；否则新建）
-            if run_id:
-                try:
-                    self.db.execute("DELETE FROM factor_run_log WHERE run_id = %s", (run_id,))
-                    record = pl.DataFrame({
-                        "run_id": [run_id],
-                        "factor_id": [factor_id],
-                        "start_date": [calc_start],
-                        "end_date": [calc_end],
-                        "mode": [compute_mode],
-                        "status": ["running"],
-                        "rows": [0],
-                        "elapsed_seconds": [0.0],
-                        "message": [""],
-                        "created_at": [started_at],
-                    })
-                    self.db.append("factor_run_log", record)
-                except Exception as e:
-                    logger.warning(f"Failed to update run record {run_id}: {e}")
-            else:
-                run_id = self._create_run_record(factor_id, calc_start, calc_end, compute_mode)
-
             # 保存运行上下文用于后续更新
             run_context = {
                 "factor_id": factor_id,
@@ -213,10 +191,6 @@ class FactorComputeService:
             if save_results and rows > 0:
                 self._update_metadata(factor_id, definition, calc_end, rows)
 
-            # 10. 完成运行记录
-            elapsed = (datetime.now() - started_at).total_seconds()
-            self._finish_run_record(run_id, "success", rows, started_at, run_context)
-
             logger.info(f"Factor {factor_id} completed: {rows} rows in {elapsed:.1f}s")
 
             return ComputeResult(
@@ -232,10 +206,6 @@ class FactorComputeService:
         except Exception as e:
             elapsed = (datetime.now() - started_at).total_seconds()
             logger.error(f"Factor {factor_id} failed: {e}", exc_info=True)
-
-            # 更新运行记录为失败
-            if 'run_id' in locals() and 'run_context' in locals():
-                self._finish_run_record(run_id, "failed", 0, started_at, run_context, str(e))
 
             return ComputeResult(
                 success=False,
@@ -369,67 +339,6 @@ class FactorComputeService:
         except Exception as e:
             logger.debug(f"Failed to get last computed date: {e}")
         return None
-
-    def _create_run_record(
-        self, factor_id: str, calc_start: str, calc_end: str, mode: str
-    ) -> str:
-        """创建运行记录"""
-        run_id = f"{factor_id}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
-        try:
-            now = datetime.now()
-            # 只包含迁移脚本中定义的基本字段
-            record = pl.DataFrame({
-                "run_id": [run_id],
-                "factor_id": [factor_id],
-                "start_date": [calc_start],
-                "end_date": [calc_end],
-                "mode": [mode],
-                "status": ["running"],
-                "rows": [0],
-                "elapsed_seconds": [0.0],
-                "message": [""],
-                "created_at": [now],
-            })
-            self.db.append("factor_run_log", record)
-        except Exception as e:
-            logger.warning(f"Failed to create run record: {e}")
-        return run_id
-
-    def _finish_run_record(
-        self,
-        run_id: str,
-        status: str,
-        rows: int,
-        started_at: datetime,
-        run_context: Dict[str, Any],
-        message: Optional[str] = None
-    ):
-        """完成运行记录"""
-        try:
-            elapsed = (datetime.now() - started_at).total_seconds()
-            # 先删除旧记录
-            self.db.execute(
-                "DELETE FROM factor_run_log WHERE run_id = %s", (run_id,)
-            )
-
-            # 插入完整记录
-            now = datetime.now()
-            record = pl.DataFrame({
-                "factor_id": [run_context["factor_id"]],
-                "mode": [run_context["compute_mode"]],
-                "status": [status],
-                "start_date": [run_context["calc_start"]],
-                "end_date": [run_context["calc_end"]],
-                "rows": [rows],
-                "elapsed_seconds": [elapsed],
-                "message": [message or ""],
-                "run_id": [run_id],
-                "created_at": [started_at]
-            })
-            self.db.append("factor_run_log", record)
-            logger.info(f"Finished run record: {run_id}, status={status}, rows={rows}, elapsed={elapsed:.1f}s")
-        except Exception as e:
-            logger.warning(f"Failed to finish run record: {e}", exc_info=True)
 
     def _update_metadata(
         self, factor_id: str, definition: FactorDefinition, last_date: str, rows: int

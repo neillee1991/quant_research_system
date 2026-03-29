@@ -16,8 +16,8 @@ from infrastructure.processor.processors import (
     QualityCheckerProcessor,
 )
 from infrastructure.processor.pipeline_factory import PipelineFactory
-from services.factor_compute_service import FactorComputeService, ComputeResult
-from engine.production.registry import FactorDefinition, StorageConfig
+from app.services.factor_compute_service import FactorComputeService, ComputeResult
+from engine.factor.registry import FactorDefinition, StorageConfig
 
 
 class TestPipelineCore:
@@ -292,8 +292,8 @@ class TestPipelineFactory:
 class TestFactorComputeService:
     """测试 FactorComputeService"""
 
-    @patch('services.factor_compute_service.get_factor')
-    @patch('services.factor_compute_service.discover_factors')
+    @patch('app.services.factor_compute_service.get_factor')
+    @patch('app.services.factor_compute_service.discover_factors')
     def test_compute_factor_success(self, mock_discover, mock_get_factor):
         """测试因子计算成功"""
         # 模拟因子定义
@@ -318,11 +318,11 @@ class TestFactorComputeService:
         db_client.upsert = Mock(return_value=100)
 
         # 模拟 TradingCalendar
-        with patch('services.factor_compute_service.TradingCalendar') as mock_cal:
+        with patch('app.services.factor_compute_service.TradingCalendar') as mock_cal:
             mock_cal.get_instance.return_value.offset_trading_days = Mock(return_value="20231201")
 
             # 模拟 DataConfigLoader
-            with patch('services.factor_compute_service.DataConfigLoader') as mock_config:
+            with patch('app.services.factor_compute_service.DataConfigLoader') as mock_config:
                 mock_config.return_value.load.return_value = {}
 
                 service = FactorComputeService(db_client)
@@ -345,9 +345,9 @@ class TestFactorComputeService:
         db_client._ALL_TABLES = []
         db_client.query = Mock(return_value=pl.DataFrame())
 
-        with patch('services.factor_compute_service.TradingCalendar'):
-            with patch('services.factor_compute_service.DataConfigLoader'):
-                with patch('services.factor_compute_service.get_preprocess_loader') as mock_loader:
+        with patch('app.services.factor_compute_service.TradingCalendar'):
+            with patch('app.services.factor_compute_service.DataConfigLoader'):
+                with patch('app.services.factor_compute_service.get_preprocess_loader') as mock_loader:
                     # 模拟配置加载器
                     mock_loader.return_value.get_default_profile.return_value = {
                         "adjust_price": "forward",

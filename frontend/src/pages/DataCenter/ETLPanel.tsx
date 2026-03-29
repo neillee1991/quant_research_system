@@ -1,14 +1,13 @@
 /**
  * ETL 任务面板组件
  */
-import React, { useState } from 'react';
+import React, { useEffect } from 'react';
 import {
   Card,
   Table,
   Button,
   Tag,
   Tooltip,
-  Select,
 } from 'antd';
 import {
   PlayCircleOutlined,
@@ -16,12 +15,14 @@ import {
   DeleteOutlined,
   HistoryOutlined,
 } from '@ant-design/icons';
-import QuantDatePicker from '../../components/QuantDatePicker';
+import { useTaskLogs } from '../../hooks/useTaskLogs';
+import { TaskLogTable } from '../../components/TaskLogTable';
 import type { ETLTask } from '../../types';
+import type { ETLTaskStatus } from './types';
 
 interface ETLPanelProps {
   etlTasks: ETLTask[];
-  etlLogs: any[];
+  etlTaskStatuses: Record<string, ETLTaskStatus>;
   runningEtlTasks: Set<string>;
   selectedEtlTaskIds: string[];
   onSelectedEtlTaskIdsChange: (ids: string[]) => void;
@@ -31,12 +32,11 @@ interface ETLPanelProps {
   onEditTask: (task: ETLTask) => void;
   onDeleteTask: (taskId: string) => void;
   onOpenBackfillModal: (taskId: string) => void;
-  onLoadLogs: (taskId?: string, startDate?: string, endDate?: string) => void;
 }
 
 export const ETLPanel: React.FC<ETLPanelProps> = ({
   etlTasks,
-  etlLogs,
+  etlTaskStatuses,
   runningEtlTasks,
   selectedEtlTaskIds,
   onSelectedEtlTaskIdsChange,
@@ -46,15 +46,12 @@ export const ETLPanel: React.FC<ETLPanelProps> = ({
   onEditTask,
   onDeleteTask,
   onOpenBackfillModal,
-  onLoadLogs,
 }) => {
-  const [filterTaskId, setFilterTaskId] = useState<string | undefined>(undefined);
-  const [filterStartDate, setFilterStartDate] = useState<string>('');
-  const [filterEndDate, setFilterEndDate] = useState<string>('');
+  const { logs: etlLogs, loading: etlLogsLoading, loadLogs: loadEtlLogs } = useTaskLogs('etl');
 
-  const handleFilterChange = () => {
-    onLoadLogs(filterTaskId, filterStartDate || undefined, filterEndDate || undefined);
-  };
+  useEffect(() => {
+    loadEtlLogs();
+  }, [loadEtlLogs]);
 
   const formatDate = (dateStr: string | null | undefined): string => {
     if (!dateStr) return '-';
@@ -184,7 +181,7 @@ export const ETLPanel: React.FC<ETLPanelProps> = ({
               回溯
             </Button>
             <Button
-             
+
               danger
               icon={<DeleteOutlined />}
               onClick={() => onDeleteTask(r.task_id)}
@@ -192,111 +189,6 @@ export const ETLPanel: React.FC<ETLPanelProps> = ({
           </div>
         );
       },
-    },
-  ];
-
-  const etlLogColumns = [
-    {
-      title: '任务ID',
-      dataIndex: 'data_type',
-      key: 'data_type',
-      width: 180,
-      render: (v: string) => (
-        <Tooltip title={v}>
-          <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            <code style={{ color: 'var(--color-primary)', fontSize: '12px' }}>{v}</code>
-          </div>
-        </Tooltip>
-      ),
-    },
-    {
-      title: '执行日期',
-      dataIndex: 'sync_date',
-      key: 'sync_date',
-      width: 100,
-      render: (v: string) => (
-        <Tooltip title={v}>
-          <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {v}
-          </div>
-        </Tooltip>
-      ),
-    },
-    {
-      title: '处理行数',
-      dataIndex: 'rows_synced',
-      key: 'rows_synced',
-      width: 100,
-      render: (text: number) => (
-        <span style={{ color: 'var(--color-primary)', fontWeight: 500 }}>
-          {text?.toLocaleString() || 0}
-        </span>
-      ),
-    },
-    {
-      title: '状态',
-      dataIndex: 'status',
-      key: 'status',
-      width: 80,
-      render: (v: string) => {
-        const colorMap: Record<string, string> = {
-          success: 'green',
-          failed: 'red',
-          running: 'blue',
-        };
-        return <Tag color={(colorMap[v] || 'grey') as any}>{v}</Tag>;
-      },
-    },
-    {
-      title: '参数',
-      dataIndex: 'params',
-      key: 'params',
-      width: 200,
-      render: (v: string) =>
-        v ? (
-          <Tooltip title={v}>
-            <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              <code style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{v}</code>
-            </div>
-          </Tooltip>
-        ) : (
-          '-'
-        ),
-    },
-    {
-      title: '创建时间',
-      dataIndex: 'created_at',
-      key: 'created_at',
-      width: 160,
-      render: (v: string) => (
-        <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-          {v?.slice(0, 19) || '-'}
-        </span>
-      ),
-    },
-    {
-      title: '错误信息',
-      dataIndex: 'error_message',
-      key: 'error_message',
-      width: 300,
-      render: (v: string) =>
-        v ? (
-          <Tooltip title={v}>
-            <div
-              style={{
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-                color: 'var(--color-danger)',
-                fontSize: '12px',
-              }}
-            >
-              {v}
-            </div>
-          </Tooltip>
-        ) : (
-          '-'
-        ),
     },
   ];
 
@@ -317,7 +209,7 @@ export const ETLPanel: React.FC<ETLPanelProps> = ({
                 type="primary"
                 icon={<PlayCircleOutlined />}
                 onClick={onBatchBackfill}
-               
+
               >
                 批量回溯 ({selectedEtlTaskIds.length})
               </Button>
@@ -332,9 +224,12 @@ export const ETLPanel: React.FC<ETLPanelProps> = ({
         }
       >
         <Table
-          dataSource={etlTasks}
+          dataSource={etlTasks.map((task) => {
+            const status = etlTaskStatuses[task.task_id];
+            return { ...task, ...status };
+          })}
           rowKey="task_id"
-         
+
           pagination={false}
           rowSelection={{
             selectedRowKeys: selectedEtlTaskIds,
@@ -350,58 +245,20 @@ export const ETLPanel: React.FC<ETLPanelProps> = ({
         style={{ marginTop: 12 }}
         title={
           <span style={{ color: 'var(--text-primary)', fontSize: '16px', fontWeight: 600 }}>
-            ETL 任务日志
+            ETL 日志
           </span>
         }
         extra={
           <Button
             icon={<ReloadOutlined />}
-            onClick={() => handleFilterChange()}
-           
+            onClick={loadEtlLogs}
             type="text"
           >
             刷新
           </Button>
         }
       >
-        <div
-          style={{
-            display: 'flex',
-            gap: 8,
-            flexWrap: 'wrap',
-            marginBottom: 12,
-            alignItems: 'center',
-          }}
-        >
-          <Select
-            placeholder="按任务筛选"
-            style={{ width: 150 }}
-            allowClear
-           
-            options={etlTasks.map((t) => ({ label: t.task_id, value: t.task_id }))}
-            onChange={(value) => setFilterTaskId(value as string | undefined)}
-          />
-          <QuantDatePicker
-            value={[filterStartDate, filterEndDate]}
-            style={{ width: 280 }}
-            onChange={(s, e) => { setFilterStartDate(s); setFilterEndDate(e); }}
-          />
-          <Button type="primary" onClick={handleFilterChange}>
-            筛选
-          </Button>
-          <span style={{ fontSize: 11, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
-            按任务完成日期筛选
-          </span>
-        </div>
-        <Table
-          dataSource={etlLogs}
-          columns={etlLogColumns}
-          rowKey={(record: any) => `${record.data_type || ''}-${record.sync_date || ''}-${record.created_at || ''}`}
-         
-          pagination={{ pageSize: 50 }}
-          scroll={{ x: 'max-content' }}
-          style={{ width: '100%' }}
-        />
+        <TaskLogTable logs={etlLogs} loading={etlLogsLoading} />
       </Card>
     </>
   );

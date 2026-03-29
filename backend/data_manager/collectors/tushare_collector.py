@@ -1,10 +1,8 @@
 import time
 import polars as pl
 import tushare as ts
-from datetime import datetime, timedelta
 from app.core.config import settings
 from app.core.logger import logger
-from store.dolphindb_client import db_client
 
 
 class TushareCollector:
@@ -62,26 +60,3 @@ class TushareCollector:
         if df is None:
             return None
         return pl.from_pandas(df)
-
-    def sync_stock_daily(self, ts_code: str, start_date: str | None = None):
-        """Incremental sync for a single stock."""
-        last_date = db_client.get_last_sync_date("tushare", ts_code)
-        if last_date:
-            start = (datetime.strptime(last_date, "%Y%m%d") + timedelta(days=1)).strftime("%Y%m%d")
-        else:
-            start = start_date or "20100101"
-
-        end = datetime.today().strftime("%Y%m%d")
-        if start > end:
-            logger.info(f"{ts_code} already up to date")
-            return
-
-        logger.info(f"Syncing {ts_code} from {start} to {end}")
-        df = self.get_daily_data(ts_code, start, end)
-        if df is None or df.is_empty():
-            logger.warning(f"No data returned for {ts_code}")
-            return
-
-        db_client.upsert_daily(df)
-        db_client.update_sync_log("tushare", ts_code, end)
-        logger.info(f"Synced {len(df)} rows for {ts_code}")

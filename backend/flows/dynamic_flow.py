@@ -65,7 +65,7 @@ def _execute_sync_task_sync(task_id: str, target_date: Optional[str]) -> dict:
 def _execute_factor_task_sync(task_id: str, target_date: Optional[str]) -> dict:
     """同步执行因子计算任务"""
     from store.dolphindb_client import db_client
-    from services.factor_compute_service import FactorComputeService
+    from app.services.factor_compute_service import FactorComputeService
 
     logger.info(f"执行因子任务: {task_id}")
     try:

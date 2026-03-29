@@ -85,23 +85,15 @@ const DataCenter: React.FC = () => {
 
   const loadInitialData = async () => {
     try {
-      const [statusBatchRes] = await Promise.all([
-        dataApi.getTaskStatusBatch().catch(() => ({ data: { data: {} } })),
+      await Promise.all([
         syncTasksHook.loadSyncTasks(),
         etlTasksHook.loadEtlTasks(),
         dataQueryHook.loadTables(),
-        syncTasksHook.loadSyncLogs(),
       ]);
 
-      // 直接使用批量状态数据，而不是逐个加载
-      const batchData: Record<string, any> = statusBatchRes.data?.data || {};
-      if (Object.keys(batchData).length > 0) {
-        // 直接设置批量状态数据
-        syncTasksHook.setBatchTaskStatuses(batchData);
-        // 只需要加载调度信息
-        for (const taskId of Object.keys(batchData)) {
-          await syncTasksHook.loadTaskScheduleInfo(taskId);
-        }
+      // 加载调度信息
+      for (const task of syncTasksHook.syncTasks) {
+        await syncTasksHook.loadTaskScheduleInfo(task.task_id);
       }
     } catch (error) {
       console.error('Failed to load initial data:', error);
@@ -320,11 +312,7 @@ const DataCenter: React.FC = () => {
 
       <Tabs
         defaultActiveKey="1"
-        onChange={(activeKey) => {
-          if (activeKey === '1.5') {
-            etlTasksHook.loadEtlLogs();
-          }
-        }}
+        onChange={(_activeKey) => {}}
         items={[
           {
             key: '1',
@@ -333,18 +321,13 @@ const DataCenter: React.FC = () => {
               <SyncPanel
                 syncTasks={syncTasksHook.syncTasks}
                 taskStatuses={syncTasksHook.taskStatuses}
-                syncLogs={syncTasksHook.syncLogs}
                 syncingTasks={syncTasksHook.syncingTasks}
                 selectedTaskIds={syncTasksHook.selectedTaskIds}
                 scheduleInfo={syncTasksHook.scheduleInfo}
                 onSelectedTaskIdsChange={syncTasksHook.setSelectedTaskIds}
                 onRefreshStatus={async () => {
                   try {
-                    const res = await dataApi.getTaskStatusBatch();
-                    const batchData: Record<string, any> = res.data?.data || {};
-                    if (Object.keys(batchData).length > 0) {
-                      syncTasksHook.setBatchTaskStatuses(batchData);
-                    }
+                    await syncTasksHook.loadSyncTasks();
                     message.success('任务状态已刷新');
                   } catch (error) {
                     console.error('Failed to refresh status:', error);
@@ -357,7 +340,6 @@ const DataCenter: React.FC = () => {
                 onSyncTask={handleSyncTask}
                 onDeleteTask={handleDeleteTask}
                 onOpenTaskDrawer={handleOpenTaskDrawer}
-                onLoadSyncLogs={syncTasksHook.loadSyncLogs}
               />
             ),
           },
@@ -367,7 +349,7 @@ const DataCenter: React.FC = () => {
             children: (
               <ETLPanel
                 etlTasks={etlTasksHook.etlTasks}
-                etlLogs={etlTasksHook.etlLogs}
+                etlTaskStatuses={etlTasksHook.etlTaskStatuses}
                 runningEtlTasks={etlTasksHook.runningEtlTasks}
                 selectedEtlTaskIds={etlTasksHook.selectedEtlTaskIds}
                 onSelectedEtlTaskIdsChange={etlTasksHook.setSelectedEtlTaskIds}
@@ -377,7 +359,6 @@ const DataCenter: React.FC = () => {
                 onEditTask={handleEditEtlTask}
                 onDeleteTask={handleDeleteEtlTask}
                 onOpenBackfillModal={handleOpenEtlBackfillModal}
-                onLoadLogs={etlTasksHook.loadEtlLogs}
               />
             ),
           },
@@ -484,6 +465,7 @@ const DataCenter: React.FC = () => {
         visible={indexSubscribeDrawerVisible}
         onClose={() => setIndexSubscribeDrawerVisible(false)}
         onSubscribeSuccess={handleIndexSubscribeSuccess}
+        onUnsubscribeSuccess={handleIndexSubscribeSuccess}
         onSubscribe={handleIndexSubscribe}
       />
     </div>

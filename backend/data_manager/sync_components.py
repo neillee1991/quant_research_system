@@ -122,97 +122,137 @@ class SyncConfigManager:
 
 
 class SyncLogManager:
-    """同步日志管理器"""
+    """同步日志管理器 - 重构版本
+
+    注意:
+    - get_last_sync_date() 现在从目标表实时查询
+    - update_sync_log() 已删除
+    - get_last_sync_info() 保留但标记为 deprecated（供 API 过渡）
+    """
 
     def __init__(self, repository: IDataRepository):
         self.repository = repository
 
     def get_last_sync_date(self, task_id: str) -> Optional[str]:
-        """获取最后同步日期"""
+        """获取最后同步日期（从目标表实时计算）
+
+        Args:
+            task_id: 任务ID
+
+        Returns:
+            最后同步日期 (YYYYMMDD)，无数据时返回 None
+        """
         try:
-            sql = """
-                SELECT last_date
-                FROM sync_log
-                WHERE source = %s AND data_type = %s
-                LIMIT 1
-            """
-            result = self.repository.query(sql, params=("tushare_config", task_id))
-            if not result.is_empty():
-                last_date = result["last_date"][0]
-                # 确保返回字符串格式 YYYYMMDD
-                if isinstance(last_date, str):
-                    return last_date
-                else:
-                    # 如果是 datetime 对象，转换为字符串
-                    from datetime import datetime
-                    if isinstance(last_date, datetime):
-                        return last_date.strftime("%Y%m%d")
-                    return str(last_date)
+            # 1. 从 sync_task_config 获取 table_name 和 date_field
+            task_config = self._get_task_config(task_id)
+            if not task_config:
+                logger.warning(f"Task config not found for {task_id}")
+                return None
+
+            table_name = task_config.get("table_name")
+            date_field = task_config.get("date_field", "trade_date")
+
+            if not table_name:
+                logger.warning(f"Task {task_id} missing table_name")
+                return None
+
+            # 2. 检查表是否存在
+            self.repository.register_meta_table(table_name)
+            if not self.repository.table_exists(table_name):
+                logger.debug(f"Table {table_name} does not exist yet")
+                return None
+
+            # 3. 查询 MAX(date_field)
+            sql = f'SELECT MAX({date_field}) as max_date FROM {table_name}'
+            result = self.repository.query(sql)
+
+            if result.is_empty() or result["max_date"][0] is None:
+                return None
+
+            max_date_val = result["max_date"][0]
+
+            # 4. 格式化日期为 YYYYMMDD
+            return self._format_date(max_date_val)
+
         except Exception as e:
             logger.warning(f"Failed to get last sync date for {task_id}: {e}")
+            return None
+
+    def _get_task_config(self, task_id: str) -> Optional[Dict[str, Any]]:
+        """从 sync_task_config 获取任务配置"""
+        try:
+            sql = "SELECT table_name, date_field FROM sync_task_config WHERE task_id = %s"
+            result = self.repository.query(sql, params=(task_id,))
+            if not result.is_empty():
+                return result.to_dicts()[0]
+        except Exception as e:
+            logger.warning(f"Failed to get task config for {task_id}: {e}")
         return None
 
+    def _format_date(self, date_val: Any) -> Optional[str]:
+        """格式化日期值为 YYYYMMDD 字符串"""
+        if date_val is None:
+            return None
+        if isinstance(date_val, str):
+            # 处理 YYYY-MM-DD 或 YYYYMMDD 格式
+            s = date_val.replace("-", "").replace(" ", "")[:8]
+            if len(s) == 8 and s.isdigit():
+                return s
+            return date_val
+        elif isinstance(date_val, int):
+            # 处理整数格式 20260329
+            s = str(date_val)
+            if len(s) == 8:
+                return s
+            return None
+        elif hasattr(date_val, "strftime"):
+            # datetime 对象
+            return date_val.strftime("%Y%m%d")
+        else:
+            s = str(date_val).replace("-", "").replace(" ", "")[:8]
+            if len(s) == 8 and s.isdigit():
+                return s
+            return None
+
     def get_last_sync_info(self, task_id: str) -> Optional[dict]:
-        """获取最后同步信息（包含同步时间和数据日期）"""
+        """获取最后同步信息（已废弃，保留用于兼容）
+
+        注意: 现在只从 task_runs 表查询，不再查询 sync_log
+        """
+        import warnings
+        warnings.warn(
+            "get_last_sync_info is deprecated. Use task_runs table instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
         try:
+            # 从 task_runs 表查询最近一次成功的记录
             sql = """
-                SELECT last_date, updated_at
-                FROM sync_log
-                WHERE source = %s AND data_type = %s
-                ORDER BY updated_at DESC
+                SELECT finished_at as updated_at
+                FROM task_runs
+                WHERE task_type = 'sync' AND task_id = %s AND status = 'success'
+                ORDER BY finished_at DESC
                 LIMIT 1
             """
-            result = self.repository.query(sql, params=("tushare_config", task_id))
+            result = self.repository.query(sql, params=(task_id,))
             if not result.is_empty():
-                updated_at_val = result["updated_at"][0]
+                row = result.to_dicts()[0]
+                updated_at_val = row.get("updated_at")
                 updated_at_str = None
-                if updated_at_val is not None:
-                    try:
+                if updated_at_val:
+                    if hasattr(updated_at_val, "strftime"):
                         updated_at_str = updated_at_val.strftime("%Y-%m-%d %H:%M:%S")
-                    except AttributeError:
+                    else:
                         updated_at_str = str(updated_at_val)
+                # last_date 仍从目标表实时获取
+                last_date = self.get_last_sync_date(task_id)
                 return {
-                    "last_date": result["last_date"][0],
+                    "last_date": last_date,
                     "updated_at": updated_at_str
                 }
         except Exception as e:
             logger.warning(f"Failed to get last sync info for {task_id}: {e}")
         return None
-
-    def update_sync_log(self, task_id: str, sync_date: str, rows_synced: int = 0, status: str = "success", error_message: str = "", params: str = "") -> None:
-        """更新同步日志（同时记录历史）"""
-        try:
-            # 1. 更新 sync_log 表（保留最新状态）
-            log_data = pl.DataFrame({
-                "source": ["tushare_config"],
-                "data_type": [task_id],
-                "last_date": [sync_date],
-                "updated_at": [datetime.now()]
-            })
-            self.repository.upsert(
-                "sync_log",
-                log_data,
-                ["source", "data_type"]
-            )
-
-            # 2. 插入 sync_log_history 表（记录历史）
-            history_data = pl.DataFrame({
-                "source": ["tushare_config"],
-                "data_type": [task_id],
-                "last_date": [sync_date],
-                "sync_date": [sync_date],
-                "rows_synced": [rows_synced],
-                "status": [status],
-                "error_message": [error_message],
-                "params": [params],
-                "created_at": [datetime.now()]
-            })
-            # 使用 bulk_copy 直接追加到历史表
-            self.repository.bulk_copy("sync_log_history", history_data)
-
-            logger.debug(f"Updated sync log for {task_id}: {sync_date}, rows: {rows_synced}, status: {status}")
-        except Exception as e:
-            logger.error(f"Failed to update sync log: {e}")
 
 
 class TableManager:
@@ -418,10 +458,6 @@ class SyncTaskExecutor(ISyncTaskExecutor):
             logger.error(f"Task {task_id} failed: {e}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
-            try:
-                self.log_manager.update_sync_log(task_id, DateUtils.today(), 0, "failed", str(e), params=f"type={sync_type}")
-            except Exception:
-                pass
             return False
 
     def _fetch_with_pagination(
@@ -486,7 +522,6 @@ class SyncTaskExecutor(ISyncTaskExecutor):
             df = self._fetch_with_pagination(task_id, api_name, params, api_limit)
             if df is None or df.is_empty():
                 logger.warning(f"No data for {task_id}")
-                self.log_manager.update_sync_log(task_id, DateUtils.today(), 0, params=params_str)
                 return False
 
             rows_count = len(df)
@@ -501,12 +536,10 @@ class SyncTaskExecutor(ISyncTaskExecutor):
                 df = df.rename({k: v for k, v in col_mapping.items() if k in df.columns})
             # 全量同步：清空整个表再写入
             self.repository.upsert(table_name, df, primary_keys, is_full_sync=True)
-            self.log_manager.update_sync_log(task_id, DateUtils.today(), rows_count, params=params_str)
             logger.info(f"Full sync completed for {task_id}: {rows_count} rows")
             return True
         except Exception as e:
             logger.error(f"Full sync failed for {task_id}: {e}")
-            self.log_manager.update_sync_log(task_id, DateUtils.today(), 0, "failed", str(e), params=params_str)
             return False
 
     def _execute_incremental_sync(
@@ -587,14 +620,11 @@ class SyncTaskExecutor(ISyncTaskExecutor):
                     total_rows += rows_count
                     logger.info(f"Synced {task_id} for {date_str}: {rows_count} rows")
 
-                    # 记录每次同步的历史
-                    self.log_manager.update_sync_log(task_id, date_str, rows_count, params=params_str)
                 else:
                     # 即使没有数据也记录
-                    self.log_manager.update_sync_log(task_id, date_str, 0, params=params_str)
+                    pass
             except Exception as e:
                 logger.error(f"Sync {task_id} for {date_str} failed: {e}")
-                self.log_manager.update_sync_log(task_id, date_str, 0, "failed", str(e), params=params_str)
 
         logger.info(f"Incremental sync completed for {task_id}: {total_rows} total rows")
         return total_rows > 0 or len(dates) == 0

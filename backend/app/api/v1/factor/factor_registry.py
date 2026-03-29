@@ -8,7 +8,7 @@ from typing import Optional, List, Dict, Any
 import polars as pl
 
 from store.dolphindb_client import db_client
-from engine.production.registry import list_factors, discover_factors, unregister_factor
+from engine.factor.registry import list_factors, discover_factors, unregister_factor
 from app.core.logger import logger
 from app.core.utils import safe_json_parse
 from app.core.cache import api_cache
@@ -60,7 +60,7 @@ def _validate_factor_id(factor_id: str):
 
 # ==================== API Endpoints ====================
 
-@router.get("/production/factors")
+@router.get("/factor/factors")
 async def list_registered_factors():
     """列出所有因子（合并装饰器注册 + 数据库手动注册）"""
     cached = api_cache.get("production:factors")
@@ -101,14 +101,14 @@ async def list_registered_factors():
         except Exception as e:
             logger.debug(f"查询因子最新日期失败: {e}")
 
-        # 查询上次计算时间
+        # 查询上次计算时间（从统一 task_runs 表）
         try:
             run_df = db_client.query(
-                "SELECT factor_id, max(created_at) AS last_run FROM factor_run_log WHERE status = 'success' GROUP BY factor_id"
+                "SELECT task_id, max(started_at) AS last_run FROM task_runs WHERE task_type = 'factor' AND status = 'success' GROUP BY task_id"
             )
             if not run_df.is_empty():
                 for row in run_df.to_dicts():
-                    last_computed[row["factor_id"]] = str(row["last_run"]) if row.get("last_run") else None
+                    last_computed[row["task_id"]] = str(row["last_run"]) if row.get("last_run") else None
         except Exception as e:
             logger.debug(f"查询因子上次计算时间失败: {e}")
     except Exception as e:
@@ -141,7 +141,7 @@ async def list_registered_factors():
     return result
 
 
-@router.post("/production/factors")
+@router.post("/factor/factors")
 async def create_factor(req: FactorCreateRequest):
     """创建新因子（写入数据库）"""
     _validate_factor_id(req.factor_id)
@@ -177,7 +177,7 @@ async def create_factor(req: FactorCreateRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.put("/production/factors/{factor_id}")
+@router.put("/factor/factors/{factor_id}")
 async def update_factor(factor_id: str, req: FactorUpdateRequest):
     """更新因子元数据（直接更新）"""
     _validate_factor_id(factor_id)
@@ -219,7 +219,7 @@ async def update_factor(factor_id: str, req: FactorUpdateRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.delete("/production/factors/{factor_id}")
+@router.delete("/factor/factors/{factor_id}")
 async def delete_factor(factor_id: str, delete_data: bool = False):
     """删除因子元数据和注册表条目，可选删除因子值数据"""
     _validate_factor_id(factor_id)
@@ -242,39 +242,30 @@ async def delete_factor(factor_id: str, delete_data: bool = False):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/production/factors/{factor_id}/logs")
+@router.get("/factor/factors/{factor_id}/logs")
 async def get_factor_logs(factor_id: str, limit: int = 20):
-    """获取因子运行日志"""
+    """获取因子运行日志（使用统一 task_runs 表）"""
     try:
         logs_df = db_client.query(
-            f"SELECT * FROM factor_run_log WHERE factor_id = '{factor_id}' ORDER BY created_at DESC LIMIT {limit}"
+            "SELECT * FROM task_runs WHERE task_type = 'factor' AND task_id = %s ORDER BY started_at DESC LIMIT %s",
+            (factor_id, limit)
         )
         if logs_df.is_empty():
             return {"status": "success", "data": []}
 
         logs = logs_df.to_dicts()
-        logger.debug(f"Raw logs from DB: {logs}")
-
-        # 统一字段名（映射数据库列名到API字段名）
-        # 支持两种列名，兼容不同版本的表结构
-        # 先尝试新列名，如果没有则尝试旧列名
         for log in logs:
-            log["rows"] = log.get("rows") or log.get("rows_affected")
-            log["elapsed_seconds"] = log.get("elapsed_seconds") or log.get("duration_seconds")
-            log["error_message"] = log.get("error_message") or log.get("message")
-            # 确保时间戳字段存在
-            for ts_field in ["created_at", "finished_at"]:
-                if ts_field not in log:
-                    log[ts_field] = None
+            for ts_field in ["started_at", "finished_at"]:
+                if ts_field in log and log[ts_field]:
+                    log[ts_field] = str(log[ts_field])
 
-        logger.debug(f"Processed logs: {logs}")
         return {"status": "success", "data": logs}
     except Exception as e:
         logger.error(f"Failed to get factor logs: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/production/factors/{factor_id}/code")
+@router.get("/factor/factors/{factor_id}/code")
 async def get_factor_code(factor_id: str):
     """获取因子源代码（从数据库读取）"""
     try:
@@ -297,7 +288,7 @@ async def get_factor_code(factor_id: str):
     raise HTTPException(status_code=404, detail=f"因子 {factor_id} 的源代码未找到")
 
 
-@router.put("/production/factors/{factor_id}/code")
+@router.put("/factor/factors/{factor_id}/code")
 async def update_factor_code(factor_id: str, req: FactorCodeUpdateRequest):
     """更新因子源代码（保存到数据库）"""
     try:
@@ -338,7 +329,7 @@ async def update_factor_code(factor_id: str, req: FactorCodeUpdateRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/production/factors/{factor_id}/data")
+@router.get("/factor/factors/{factor_id}/data")
 async def get_factor_data(
     factor_id: str,
     start_date: Optional[str] = None,
@@ -394,7 +385,7 @@ async def get_factor_data(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/production/factors/{factor_id}/stats")
+@router.get("/factor/factors/{factor_id}/stats")
 async def get_factor_stats(factor_id: str):
     """获取因子统计摘要"""
     try:
@@ -453,7 +444,7 @@ async def get_factor_stats(factor_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/production/factors/{factor_id}/missing-dates")
+@router.get("/factor/factors/{factor_id}/missing-dates")
 async def get_factor_missing_dates(factor_id: str):
     """检查因子数据缺失的交易日
 

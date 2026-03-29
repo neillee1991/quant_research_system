@@ -4,37 +4,42 @@
 import { useState, useCallback } from 'react';
 import { message } from 'antd';
 import { dataApi } from '../../../api';
+import { useTaskLogs } from '../../../hooks/useTaskLogs';
 import type { ETLTask, ETLTestResult, ETLFieldDefinition } from '../../../types';
 import type { ETLTaskStatus } from '../types';
 
 export const useETLTasks = () => {
   const [etlTasks, setEtlTasks] = useState<ETLTask[]>([]);
+  const [etlTaskStatuses, setEtlTaskStatuses] = useState<Record<string, ETLTaskStatus>>({});
   const [runningEtlTasks, setRunningEtlTasks] = useState<Set<string>>(new Set());
   const [selectedEtlTaskIds, setSelectedEtlTaskIds] = useState<string[]>([]);
-  const [etlLogs, setEtlLogs] = useState<any[]>([]);
 
   const loadEtlTasks = useCallback(async () => {
     try {
       const res = await dataApi.listEtlTasks();
-      setEtlTasks(res.data.tasks || []);
+      const tasks = res.data.tasks || [];
+      setEtlTasks(tasks);
+
+      // 加载所有 ETL 任务状态
+      const statuses: Record<string, ETLTaskStatus> = {};
+      for (const task of tasks) {
+        try {
+          const statusRes = await dataApi.getEtlTaskStatus(task.task_id);
+          if (statusRes.data?.data) {
+            statuses[task.task_id] = statusRes.data.data;
+          }
+        } catch (err) {
+          console.error(`Failed to load status for ETL ${task.task_id}:`, err);
+        }
+      }
+      setEtlTaskStatuses(statuses);
     } catch (error) {
       console.error('Failed to load ETL tasks:', error);
       message.error('加载 ETL 任务失败');
     }
   }, []);
 
-  const loadEtlLogs = useCallback(async (
-    taskId?: string,
-    startDate?: string,
-    endDate?: string
-  ) => {
-    try {
-      const res = await dataApi.getEtlLogs(taskId, startDate, endDate);
-      setEtlLogs(res.data.logs || []);
-    } catch (error) {
-      console.error('Failed to load ETL logs:', error);
-    }
-  }, []);
+  const { logs: etlLogs, loading: etlLogsLoading, loadLogs: loadEtlLogs } = useTaskLogs('etl');
 
   const testEtlScript = useCallback(async (
     script: string,
@@ -123,7 +128,8 @@ export const useETLTasks = () => {
       }
       message.success(`任务 ${taskId} 回溯已启动`);
       setTimeout(() => {
-        loadEtlLogs(taskId);
+        loadEtlLogs();
+        loadEtlTaskStatus(taskId);
       }, 2000);
       return true;
     } catch (error: any) {
@@ -189,6 +195,7 @@ export const useETLTasks = () => {
           newSet.delete(taskId);
           return newSet;
         });
+        loadEtlTaskStatus(taskId);
       });
       loadEtlLogs();
       setSelectedEtlTaskIds([]);
@@ -234,14 +241,28 @@ export const useETLTasks = () => {
     }
   }, []);
 
+  const loadEtlTaskStatus = useCallback(async (taskId: string) => {
+    try {
+      const res = await dataApi.getEtlTaskStatus(taskId);
+      if (res.data?.data) {
+        setEtlTaskStatuses((prev) => ({ ...prev, [taskId]: res.data.data }));
+      }
+    } catch (error) {
+      console.error(`Failed to load status for ETL ${taskId}:`, error);
+    }
+  }, []);
+
   return {
     etlTasks,
+    etlTaskStatuses,
     runningEtlTasks,
     selectedEtlTaskIds,
     etlLogs,
+    etlLogsLoading,
     setSelectedEtlTaskIds,
     loadEtlTasks,
     loadEtlLogs,
+    loadEtlTaskStatus,
     testEtlScript,
     createEtlTask,
     updateEtlTask,

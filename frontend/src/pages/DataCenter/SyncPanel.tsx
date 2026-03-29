@@ -1,28 +1,26 @@
 /**
  * 同步任务面板组件
  */
-import React, { useState } from 'react';
+import React, { useEffect } from 'react';
 import {
   Card,
   Table,
   Button,
   Tag,
   Tooltip,
-  Select,
 } from 'antd';
 import {
   SyncOutlined,
   ReloadOutlined,
   DeleteOutlined,
-  HistoryOutlined,
 } from '@ant-design/icons';
-import QuantDatePicker from '../../components/QuantDatePicker';
-import type { SyncTask, TaskStatus, SyncLog, ScheduleInfo } from '../../types';
+import { useTaskLogs } from '../../hooks/useTaskLogs';
+import { TaskLogTable } from '../../components/TaskLogTable';
+import type { SyncTask, TaskStatus, ScheduleInfo } from '../../types';
 
 interface SyncPanelProps {
   syncTasks: SyncTask[];
   taskStatuses: Record<string, TaskStatus>;
-  syncLogs: SyncLog[];
   syncingTasks: Set<string>;
   selectedTaskIds: string[];
   scheduleInfo: Record<string, ScheduleInfo>;
@@ -34,13 +32,11 @@ interface SyncPanelProps {
   onSyncTask: (taskId: string) => void;
   onDeleteTask: (taskId: string) => void;
   onOpenTaskDrawer: (task: SyncTask) => void;
-  onLoadSyncLogs: (source?: string, dataType?: string, startDate?: string, endDate?: string) => void;
 }
 
 export const SyncPanel: React.FC<SyncPanelProps> = ({
   syncTasks,
   taskStatuses,
-  syncLogs,
   syncingTasks,
   selectedTaskIds,
   scheduleInfo,
@@ -52,16 +48,12 @@ export const SyncPanel: React.FC<SyncPanelProps> = ({
   onSyncTask,
   onDeleteTask,
   onOpenTaskDrawer,
-  onLoadSyncLogs,
 }) => {
-  const [filterSource, setFilterSource] = useState<string | undefined>(undefined);
-  const [filterDataType, setFilterDataType] = useState<string | undefined>(undefined);
-  const [filterStartDate, setFilterStartDate] = useState<string>('');
-  const [filterEndDate, setFilterEndDate] = useState<string>('');
+  const { logs: syncLogs, loading: syncLogsLoading, loadLogs: loadSyncLogs } = useTaskLogs('sync');
 
-  const handleFilterChange = () => {
-    onLoadSyncLogs(filterSource, filterDataType, filterStartDate || undefined, filterEndDate || undefined);
-  };
+  useEffect(() => {
+    loadSyncLogs();
+  }, [loadSyncLogs]);
 
   const formatDate = (dateStr: string | null | undefined): string => {
     if (!dateStr) return '-';
@@ -188,7 +180,7 @@ export const SyncPanel: React.FC<SyncPanelProps> = ({
         return (
           <div style={{ display: 'flex', gap: 4 }}>
             <Button
-             
+
               icon={
                 <SyncOutlined
                   style={isSyncing ? { animation: 'spin 1s linear infinite' } : undefined}
@@ -201,7 +193,7 @@ export const SyncPanel: React.FC<SyncPanelProps> = ({
               同步
             </Button>
             <Button
-             
+
               danger
               icon={<DeleteOutlined />}
               onClick={() => onDeleteTask(r.task_id)}
@@ -209,114 +201,6 @@ export const SyncPanel: React.FC<SyncPanelProps> = ({
           </div>
         );
       },
-    },
-  ];
-
-  const syncLogColumns = [
-    {
-      title: '任务ID',
-      dataIndex: 'data_type',
-      key: 'data_type',
-      width: 150,
-      render: (v: string) => (
-        <Tooltip title={v}>
-          <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            <code style={{ color: 'var(--color-primary)', fontSize: '12px' }}>{v}</code>
-          </div>
-        </Tooltip>
-      ),
-    },
-    {
-      title: '同步日期',
-      dataIndex: 'sync_date',
-      key: 'sync_date',
-      width: 100,
-      render: (v: string) => (
-        <Tooltip title={v}>
-          <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {v}
-          </div>
-        </Tooltip>
-      ),
-    },
-    {
-      title: '参数',
-      dataIndex: 'params',
-      key: 'params',
-      width: 200,
-      render: (v: string) =>
-        v ? (
-          <Tooltip title={v}>
-            <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              <code style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{v}</code>
-            </div>
-          </Tooltip>
-        ) : (
-          '-'
-        ),
-    },
-    {
-      title: '同步行数',
-      dataIndex: 'rows_synced',
-      key: 'rows_synced',
-      width: 90,
-      render: (text: number) => (
-        <span style={{ color: 'var(--color-primary)', fontWeight: 500 }}>
-          {text?.toLocaleString() || 0}
-        </span>
-      ),
-    },
-    {
-      title: '状态',
-      dataIndex: 'status',
-      key: 'status',
-      width: 80,
-      render: (v: string) => {
-        const colorMap: Record<string, string> = {
-          success: 'green',
-          failed: 'red',
-          running: 'blue',
-        };
-        return <Tag color={(colorMap[v] || 'grey') as any}>{v}</Tag>;
-      },
-    },
-    {
-      title: '创建时间',
-      dataIndex: 'created_at',
-      key: 'created_at',
-      width: 150,
-      render: (v: string) => (
-        <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-          {v?.slice(0, 19) || '-'}
-        </span>
-      ),
-    },
-    {
-      title: '错误信息',
-      dataIndex: 'error_message',
-      key: 'error_message',
-      width: 200,
-      render: (v: string) =>
-        v ? (
-          <Tooltip title={v}>
-            <div
-              style={{
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                display: '-webkit-box',
-                WebkitLineClamp: 2,
-                WebkitBoxOrient: 'vertical',
-                color: 'var(--color-danger)',
-                fontSize: '12px',
-                lineHeight: '1.4',
-              }}
-            >
-              {v}
-            </div>
-          </Tooltip>
-        ) : (
-          '-'
-        ),
     },
   ];
 
@@ -361,7 +245,7 @@ export const SyncPanel: React.FC<SyncPanelProps> = ({
             return { ...task, status, taskScheduleInfo };
           })}
           rowKey="task_id"
-         
+
           pagination={false}
           rowSelection={{
             selectedRowKeys: selectedTaskIds,
@@ -382,51 +266,14 @@ export const SyncPanel: React.FC<SyncPanelProps> = ({
         extra={
           <Button
             icon={<ReloadOutlined />}
-            onClick={() => handleFilterChange()}
-           
+            onClick={loadSyncLogs}
             type="text"
           >
             刷新
           </Button>
         }
       >
-        <div
-          style={{
-            display: 'flex',
-            gap: 8,
-            flexWrap: 'wrap',
-            marginBottom: 12,
-            alignItems: 'center',
-          }}
-        >
-          <Select
-            placeholder="按任务筛选"
-            style={{ width: 150 }}
-            allowClear
-           
-            options={syncTasks.map((task) => ({ label: task.task_id, value: task.task_id }))}
-            onChange={(value) => setFilterDataType(value as string | undefined)}
-          />
-          <QuantDatePicker
-            value={[filterStartDate, filterEndDate]}
-            style={{ width: 280 }}
-            onChange={(s, e) => { setFilterStartDate(s); setFilterEndDate(e); }}
-          />
-          <Button type="primary" onClick={handleFilterChange}>
-            筛选
-          </Button>
-          <span style={{ fontSize: 11, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
-            按任务完成日期筛选
-          </span>
-        </div>
-        <Table
-          dataSource={syncLogs}
-          columns={syncLogColumns}
-          rowKey={(record: any) => `${record.id || ''}-${record.created_at || ''}`}
-         
-          pagination={{ pageSize: 10 }}
-          scroll={{ x: '100%' }}
-        />
+        <TaskLogTable logs={syncLogs} loading={syncLogsLoading} />
       </Card>
     </>
   );

@@ -53,6 +53,7 @@ const getTaskTypeColor = (type: string): string => {
     case 'sync': return 'green';
     case 'etl': return 'orange';
     case 'analysis': return 'purple';
+    case 'backtest': return 'cyan';
     default: return 'default';
   }
 };
@@ -63,6 +64,7 @@ const getTaskTypeLabel = (type: string): string => {
     case 'sync': return '数据同步';
     case 'etl': return 'ETL任务';
     case 'analysis': return '因子分析';
+    case 'backtest': return '回测';
     default: return type;
   }
 };

@@ -37,7 +37,7 @@ class TestMetadataManagerBasics:
         schemas = metadata_manager._META_TABLE_SCHEMAS
 
         # 验证关键表存在
-        assert "sync_log" in schemas
+        assert "factor_metadata" in schemas
         assert "factor_metadata" in schemas
         assert "sync_task_config" in schemas
         assert "etl_task_config" in schemas
@@ -68,7 +68,7 @@ class TestTableCreation:
         # Mock 表不存在
         mock_data_ops.query.return_value = pl.DataFrame()
 
-        metadata_manager.create_meta_table("sync_log")
+        metadata_manager.create_meta_table("factor_metadata")
 
         # 验证执行了创建表的 SQL
         assert mock_data_ops.execute.called
@@ -76,9 +76,9 @@ class TestTableCreation:
     def test_create_meta_table_already_exists(self, metadata_manager, mock_data_ops):
         """测试表已存在时跳过创建"""
         # Mock 表已存在
-        mock_data_ops.query.return_value = pl.DataFrame({"name": ["sync_log"]})
+        mock_data_ops.query.return_value = pl.DataFrame({"name": ["factor_metadata"]})
 
-        metadata_manager.create_meta_table("sync_log")
+        metadata_manager.create_meta_table("factor_metadata")
 
         # 不应该执行创建表的 SQL
         assert not mock_data_ops.execute.called
@@ -333,7 +333,7 @@ class TestErrorHandling:
         mock_data_ops.query.side_effect = Exception("Database error")
 
         with pytest.raises(Exception):
-            metadata_manager.create_meta_table("sync_log")
+            metadata_manager.create_meta_table("factor_metadata")
 
     def test_create_version_database_error(self, metadata_manager, mock_data_ops):
         """测试创建版本时的数据库错误"""
