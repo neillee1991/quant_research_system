@@ -184,6 +184,7 @@ class FactorComputeService:
             result_df = pipeline.execute(context)
 
             # 8. 获取结果统计
+            elapsed = (datetime.now() - started_at).total_seconds()
             rows = context.get_state("saved_rows") or (len(result_df) if result_df is not None else 0)
             quality_metrics = context.get_state("quality_metrics")
 
