@@ -4,15 +4,17 @@
 
 import { useState, useCallback, useEffect } from 'react';
 import { message } from 'antd';
-import { productionApi, type TaskRun } from '../../../api';
+import { productionApi } from '../../../api';
+import { useTaskLogs } from '../../../hooks/useTaskLogs';
 import type { FactorDefinition } from '../../../types';
 
 export const useFactorList = () => {
   const [factors, setFactors] = useState<FactorDefinition[]>([]);
-  const [history, setHistory] = useState<TaskRun[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [runLoading, setRunLoading] = useState<string | null>(null);
   const [selectedFactor, setSelectedFactor] = useState<string | null>(null);
+
+  const { logs: history, loading: historyLoading, loadLogs: loadHistory } = useTaskLogs('factor', 100);
 
   const loadFactors = useCallback(async (): Promise<void> => {
     setLoading(true);
@@ -24,16 +26,6 @@ export const useFactorList = () => {
       message.error('加载因子列表失败');
     } finally {
       setLoading(false);
-    }
-  }, []);
-
-  const loadHistory = useCallback(async (factorId?: string): Promise<void> => {
-    try {
-      const res = await productionApi.getProductionHistory(factorId, 30);
-      setHistory(res.data?.data || []);
-    } catch (error) {
-      console.error('Failed to load history:', error);
-      message.error('加载历史记录失败');
     }
   }, []);
 
@@ -51,7 +43,7 @@ export const useFactorList = () => {
       await productionApi.runProduction(factorId, runMode, undefined, startDate, endDate, pp);
       message.success(`因子 ${factorId} ${runMode === 'incremental' ? '增量' : '全量'}计算完成`);
       await loadFactors();
-      await loadHistory(selectedFactor || undefined);
+      await loadHistory({ taskId: selectedFactor || undefined });
     } catch (error: any) {
       const errorMessage = error.response?.data?.detail || '执行失败';
       message.error(errorMessage);
@@ -83,6 +75,7 @@ export const useFactorList = () => {
     factors,
     history,
     loading,
+    historyLoading,
     runLoading,
     selectedFactor,
     setSelectedFactor,

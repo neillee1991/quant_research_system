@@ -24,7 +24,7 @@ const StrategyCenter: React.FC = () => {
   const [weights, setWeights] = useState<MLWeights>({});
   const [polling, setPolling] = useState<boolean>(false);
 
-  const { logs: backtestLogs, loading: backtestLogsLoading, loadLogs: loadBacktestLogs } = useTaskLogs('backtest', undefined, 50);
+  const { logs: backtestLogs, loading: backtestLogsLoading, loadLogs: loadBacktestLogs } = useTaskLogs('backtest', 50);
 
   useEffect(() => {
     loadBacktestLogs();
@@ -507,7 +507,7 @@ const StrategyCenter: React.FC = () => {
         {
           key: 'history',
           label: '回测历史',
-          children: <TaskLogTable logs={backtestLogs} loading={backtestLogsLoading} taskIdLabel="策略名称" />,
+          children: <TaskLogTable logs={backtestLogs} loading={backtestLogsLoading} taskIdLabel="策略名称" onFilter={loadBacktestLogs} />,
         },
       ]} />
     </div>

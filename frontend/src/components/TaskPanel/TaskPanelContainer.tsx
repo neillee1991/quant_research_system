@@ -144,6 +144,7 @@ export function TaskPanel<TTask, TStatus extends GenericTaskStatus, TRunParams e
             logs={logs}
             loading={logsLoading}
             taskIdLabel="任务ID"
+            onFilter={loadLogs}
           />
         </Card>
       )}

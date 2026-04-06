@@ -258,7 +258,7 @@ export const ETLPanel: React.FC<ETLPanelProps> = ({
           </Button>
         }
       >
-        <TaskLogTable logs={etlLogs} loading={etlLogsLoading} />
+        <TaskLogTable logs={etlLogs} loading={etlLogsLoading} onFilter={loadEtlLogs} />
       </Card>
     </>
   );

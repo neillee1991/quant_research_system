@@ -273,7 +273,7 @@ export const SyncPanel: React.FC<SyncPanelProps> = ({
           </Button>
         }
       >
-        <TaskLogTable logs={syncLogs} loading={syncLogsLoading} />
+        <TaskLogTable logs={syncLogs} loading={syncLogsLoading} onFilter={loadSyncLogs} />
       </Card>
     </>
   );

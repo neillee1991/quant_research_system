@@ -7,7 +7,7 @@ from typing import Optional, List, Dict, Any
 from pathlib import Path
 
 import polars as pl
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Query
 from pydantic import BaseModel
 
 from store.dolphindb_client import db_client
@@ -207,35 +207,28 @@ def _save_analysis_result(
 @tracked_task("analysis", task_id_kwarg="factor_id")
 def _run_analysis_background(task_id: str, req: AnalysisRequest, run_id: str = None, factor_id: str = None):
     """后台执行分析，更新 task_status"""
-    try:
-        _update_task_status(task_id, "running")
-        results = analyzer.analyze(
-            factor_id=req.factor_id,
-            start_date=req.start_date,
-            end_date=req.end_date,
-            periods=req.periods,
-            quantiles=req.quantiles,
-            index_pool=req.index_pool,
-            groupby_field=req.groupby_field,
-            next_day_entry=req.next_day_entry,
-            entry_price=req.entry_price,
-            neutralize=req.neutralize,
-            neutralize_controls=req.neutralize_controls,
-            industry_level=req.industry_level,
-            winsorize=req.winsorize,
-            winsorize_lower=req.winsorize_lower,
-            winsorize_upper=req.winsorize_upper,
-        )
-        if results is None:
-            _update_task_status(task_id, "failed", error="分析返回空结果")
-        else:
-            _save_analysis_result(task_id, req.factor_id, results)
-            return {"extra": {"result": {"type": "table", "table": "factor_analysis_extended"}}}
-    except Exception as e:
-        logger.error(f"Background analysis failed for task {task_id}: {e}")
-        import traceback
-        traceback.print_exc()
-        _update_task_status(task_id, "failed", error=str(e))
+    _update_task_status(task_id, "running")
+    results = analyzer.analyze(
+        factor_id=req.factor_id,
+        start_date=req.start_date,
+        end_date=req.end_date,
+        periods=req.periods,
+        quantiles=req.quantiles,
+        index_pool=req.index_pool,
+        groupby_field=req.groupby_field,
+        next_day_entry=req.next_day_entry,
+        entry_price=req.entry_price,
+        neutralize=req.neutralize,
+        neutralize_controls=req.neutralize_controls,
+        industry_level=req.industry_level,
+        winsorize=req.winsorize,
+        winsorize_lower=req.winsorize_lower,
+        winsorize_upper=req.winsorize_upper,
+    )
+    if results is None:
+        raise RuntimeError("分析返回空结果")
+    _save_analysis_result(task_id, req.factor_id, results)
+    return {"extra": {"result_id": task_id, "table": "factor_analysis_extended"}}
 
 
 # ==================== API Endpoints ====================
@@ -322,77 +315,29 @@ async def get_alphalens_analysis_by_id(factor_id: str, analysis_id: str):
 
 
 @router.get("/factor/analysis/{factor_id}/history")
-async def get_alphalens_analysis_history(
+async def get_analysis_history(
     factor_id: str,
-    limit: int = 20,
-    offset: int = 0
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
 ):
-    """获取指定因子的 Alphalens 分析历史记录
-
-    Args:
-        factor_id: 因子ID
-        limit: 返回记录数量
-        offset: 偏移量
-
-    Returns:
-        历史分析记录列表（不包含完整结果，仅元数据）
-    """
+    """获取因子分析历史（从统一 task_runs 表查询）"""
     try:
-        df = db_client.query("""
-            SELECT
-                id, factor_id, analysis_date, start_date, end_date,
-                config, task_status, ic_summary, ic_by_period, decay_analysis
-            FROM loadTable("dfs://quant", "factor_analysis_extended")
-            WHERE factor_id = %s
-            ORDER BY analysis_date DESC
-            LIMIT %s, %s
-        """, (factor_id, offset, limit))
-
-        if df.is_empty():
-            return {
-                "status": "success",
-                "data": {
-                    "records": [],
-                    "total": 0,
-                    "limit": limit,
-                    "offset": offset
-                }
-            }
-
-        records = df.to_dicts()
-
-        for record in records:
-            if 'config' in record and record['config']:
-                config = safe_json_parse(record['config'])
-                record['periods'] = config.get('periods')
-                record['quantiles'] = config.get('quantiles')
-                record['index_pool'] = config.get('index_pool')
-                record['groupby_field'] = config.get('groupby_field')
-                record['entry_price'] = config.get('entry_price')
-                record['neutralize'] = config.get('neutralize')
-                record['neutralize_controls'] = config.get('neutralize_controls')
-                record['industry_level'] = config.get('industry_level')
-                record['winsorize'] = config.get('winsorize')
-                record['winsorize_lower'] = config.get('winsorize_lower')
-                record['winsorize_upper'] = config.get('winsorize_upper')
-
-        count_df = db_client.query("""
-            SELECT COUNT(*) as total
-            FROM loadTable("dfs://quant", "factor_analysis_extended")
-            WHERE factor_id = %s
-        """, (factor_id,))
-        total = count_df.to_dicts()[0]['total'] if not count_df.is_empty() else 0
-
-        return {
-            "status": "success",
-            "data": {
-                "records": records,
-                "total": total,
-                "limit": limit,
-                "offset": offset
-            }
-        }
-
+        df = db_client.query(
+            """
+            SELECT * FROM task_runs
+            WHERE task_type = 'analysis' AND task_id = %s
+            ORDER BY started_at DESC LIMIT %s
+            """,
+            (factor_id, limit)
+        )
+        records = []
+        if not df.is_empty():
+            for row in df.to_dicts():
+                for field in ["started_at", "finished_at"]:
+                    if field in row and row[field]:
+                        row[field] = str(row[field])
+                records.append(row)
+        return {"status": "success", "data": {"records": records, "total": len(records)}}
     except Exception as e:
         logger.error(f"Failed to get analysis history: {e}")
         raise HTTPException(status_code=500, detail=str(e))

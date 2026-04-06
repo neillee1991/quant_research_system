@@ -1,13 +1,18 @@
-import React from 'react';
-import { Table, Tag, Tooltip, Typography } from 'antd';
+import React, { useState, useMemo } from 'react';
+import { Table, Tag, Tooltip, Typography, Select, DatePicker, Button, Space } from 'antd';
+import { SearchOutlined, ReloadOutlined } from '@ant-design/icons';
+import dayjs, { Dayjs } from 'dayjs';
 import type { TaskRun } from '../../api';
+import type { TaskLogFilter } from '../../hooks/useTaskLogs';
 
 const { Text } = Typography;
+const { RangePicker } = DatePicker;
 
 interface TaskLogTableProps {
   logs: TaskRun[];
   loading?: boolean;
   taskIdLabel?: string;
+  onFilter?: (filter: TaskLogFilter) => void;
 }
 
 const statusColorMap: Record<string, string> = {
@@ -46,7 +51,31 @@ export const TaskLogTable: React.FC<TaskLogTableProps> = ({
   logs,
   loading = false,
   taskIdLabel = '任务ID',
+  onFilter,
 }) => {
+  const [selectedTaskId, setSelectedTaskId] = useState<string | undefined>();
+  const [dateRange, setDateRange] = useState<[Dayjs | null, Dayjs | null] | null>(null);
+
+  const taskIdOptions = useMemo(() => {
+    const ids = Array.from(new Set(logs.map(l => l.task_id).filter(Boolean)));
+    return ids.map(id => ({ label: id, value: id }));
+  }, [logs]);
+
+  const handleFilter = () => {
+    if (!onFilter) return;
+    onFilter({
+      taskId: selectedTaskId,
+      startDate: dateRange?.[0]?.format('YYYYMMDD'),
+      endDate: dateRange?.[1]?.format('YYYYMMDD'),
+    });
+  };
+
+  const handleReset = () => {
+    setSelectedTaskId(undefined);
+    setDateRange(null);
+    onFilter?.({});
+  };
+
   const columns = [
     {
       title: taskIdLabel,
@@ -126,15 +155,45 @@ export const TaskLogTable: React.FC<TaskLogTableProps> = ({
   ];
 
   return (
-    <Table
-      dataSource={logs}
-      columns={columns}
-      rowKey="run_id"
-      loading={loading}
-      pagination={{ pageSize: 10 }}
-      scroll={{ x: '100%' }}
-      size="small"
-    />
+    <div>
+      {onFilter && (
+        <Space style={{ marginBottom: 12 }} wrap>
+          <Select
+            allowClear
+            placeholder={`筛选${taskIdLabel}`}
+            style={{ minWidth: 180 }}
+            options={taskIdOptions}
+            value={selectedTaskId}
+            onChange={setSelectedTaskId}
+            showSearch
+            filterOption={(input, opt) =>
+              (opt?.label as string)?.toLowerCase().includes(input.toLowerCase())
+            }
+          />
+          <RangePicker
+            value={dateRange}
+            onChange={v => setDateRange(v as [Dayjs | null, Dayjs | null] | null)}
+            format="YYYY-MM-DD"
+            placeholder={['开始日期', '结束日期']}
+          />
+          <Button type="primary" icon={<SearchOutlined />} onClick={handleFilter}>
+            筛选
+          </Button>
+          <Button icon={<ReloadOutlined />} onClick={handleReset}>
+            重置
+          </Button>
+        </Space>
+      )}
+      <Table
+        dataSource={logs}
+        columns={columns}
+        rowKey="run_id"
+        loading={loading}
+        pagination={{ pageSize: 10 }}
+        scroll={{ x: '100%' }}
+        size="small"
+      />
+    </div>
   );
 };
 

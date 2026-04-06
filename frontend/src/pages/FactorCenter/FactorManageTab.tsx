@@ -31,8 +31,6 @@ const FactorManageTab: React.FC = () => {
     history,
     loading,
     runLoading,
-    selectedFactor,
-    setSelectedFactor,
     loadFactors,
     loadHistory,
     runFactor,
@@ -108,7 +106,7 @@ const FactorManageTab: React.FC = () => {
       message.success(`已提交 ${tasks.length} 个因子计算任务，后台执行中`);
       setSelectedRowKeys([]);
       loadFactors();
-      loadHistory(selectedFactor || undefined);
+      loadHistory();
     } catch (e: any) {
       const errorMessage = e.response?.data?.detail || '批量执行失败';
       message.error(errorMessage);
@@ -256,13 +254,10 @@ const FactorManageTab: React.FC = () => {
       </Card>
 
       <Card style={{ background: 'var(--bg-card)' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <div style={{ marginBottom: 12 }}>
           <span style={{ color: 'var(--text-secondary)', fontWeight: 600, fontSize: 15 }}>计算历史</span>
-          <Select allowClear placeholder="筛选因子" style={{ width: 160 }}
-            value={selectedFactor || undefined} onChange={(v) => { setSelectedFactor((v as string) || null); loadHistory((v as string) || undefined); }}
-            options={factors.map(f => ({ label: f.factor_id, value: f.factor_id }))} />
         </div>
-        <TaskLogTable logs={history} taskIdLabel="因子ID" />
+        <TaskLogTable logs={history} taskIdLabel="因子ID" onFilter={loadHistory} />
       </Card>
 
       {/* 新建因子 Drawer */}

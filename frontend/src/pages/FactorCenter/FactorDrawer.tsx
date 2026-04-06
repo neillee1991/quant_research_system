@@ -11,6 +11,7 @@ import {
   EditOutlined, SaveOutlined, CodeOutlined, DatabaseOutlined, SearchOutlined, BarChartOutlined,
 } from '@ant-design/icons';
 import { useMessage } from '../../hooks/useMessage';
+import { useTaskLogs } from '../../hooks/useTaskLogs';
 import Editor from '@monaco-editor/react';
 import { productionApi, DEFAULT_PREPROCESS } from '../../api';
 import { useThemeStore } from '../../store';
@@ -55,10 +56,7 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
   const [dataFilter, setDataFilter] = useState<{ ts_code?: string; start_date?: string; end_date?: string }>({});
 
   // 计算日志
-  const [history, setHistory] = useState<any[]>([]);
-  const [historyLoading, setHistoryLoading] = useState<boolean>(false);
-  const [filterStartDate, setFilterStartDate] = useState<string>('');
-  const [filterEndDate, setFilterEndDate] = useState<string>('');
+  const { logs: history, loading: historyLoading, loadLogs: loadHistory } = useTaskLogs('factor', 50);
 
   // 数据源注解
   const [dataConfigLabels, setDataConfigLabels] = useState<Record<string, DataConfigLabel>>({});
@@ -160,26 +158,13 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
     setDataLoading(false);
   }, [factorId, dataFilter]);
 
-  const loadHistory = useCallback(async () => {
+  const handleLoadHistory = useCallback(() => {
     if (!factorId) return;
-    setHistoryLoading(true);
-    try {
-      const res = await productionApi.getProductionHistory(
-        factorId,
-        50,
-        filterStartDate || undefined,
-        filterEndDate || undefined
-      );
-      setHistory(res.data?.data || []);
-    } catch (error) {
-      console.error('Failed to load history:', error);
-      setHistory([]);
-    }
-    setHistoryLoading(false);
-  }, [factorId, filterStartDate, filterEndDate]);
+    loadHistory({ taskId: factorId });
+  }, [factorId, loadHistory]);
 
   useEffect(() => { if (activeTab === 'data' && factorId) loadData(); }, [activeTab, factorId, loadData]);
-  useEffect(() => { if (activeTab === 'logs' && factorId) loadHistory(); }, [activeTab, factorId, loadHistory]);
+  useEffect(() => { if (activeTab === 'logs' && factorId) handleLoadHistory(); }, [activeTab, factorId, handleLoadHistory]);
 
   // 保存编辑（基本信息 + 预处理）
   const handleSave = async (): Promise<void> => {
@@ -429,21 +414,12 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
           label: <span><BarChartOutlined /> 日志</span>,
           children: (
             <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 8 }}>
-                <span style={{ color: 'var(--text-secondary)', fontSize: 13 }}>最近 50 条计算记录</span>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <QuantDatePicker
-                    value={[filterStartDate, filterEndDate]}
-                    style={{ width: 280 }}
-                    onChange={(s, e) => { setFilterStartDate(s); setFilterEndDate(e); }}
-                  />
-                  <Button size="middle" icon={<SearchOutlined />} onClick={loadHistory}>筛选</Button>
-                  <span style={{ fontSize: 11, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
-                    按任务完成日期筛选
-                  </span>
-                </div>
-              </div>
-              <TaskLogTable logs={history} loading={historyLoading} />
+              <TaskLogTable
+                logs={history}
+                loading={historyLoading}
+                taskIdLabel="因子ID"
+                onFilter={(f) => loadHistory({ ...f, taskId: f.taskId || factorId || undefined })}
+              />
             </div>
           ),
         },

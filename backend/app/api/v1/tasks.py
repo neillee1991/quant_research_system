@@ -182,7 +182,9 @@ def get_running_tasks(
 def get_task_history(
     limit: int = Query(default=50, ge=1, le=200),
     task_type: Optional[str] = Query(default=None, description="按任务类型过滤 (sync/etl/factor)"),
-    task_id: Optional[str] = Query(default=None, description="按任务ID过滤")
+    task_id: Optional[str] = Query(default=None, description="按任务ID过滤"),
+    start_date: Optional[str] = Query(default=None, description="开始日期 (YYYYMMDD)，按 started_at 过滤"),
+    end_date: Optional[str] = Query(default=None, description="结束日期 (YYYYMMDD)，按 started_at 过滤"),
 ):
     """获取最近完成/失败的任务历史（查询统一 task_runs 表）"""
     try:
@@ -199,6 +201,14 @@ def get_task_history(
             if task_id:
                 where_conditions.append("task_id = %s")
                 params.append(task_id)
+
+            if start_date:
+                where_conditions.append("started_at >= temporalParse(%s, 'yyyyMMdd')")
+                params.append(start_date)
+
+            if end_date:
+                where_conditions.append("started_at < temporalParse(%s, 'yyyyMMdd') + 1")
+                params.append(end_date)
 
             where_clause = " AND ".join(where_conditions) if where_conditions else "1=1"
 

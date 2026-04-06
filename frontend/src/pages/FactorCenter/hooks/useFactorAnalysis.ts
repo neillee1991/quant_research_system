@@ -32,8 +32,6 @@ export const useFactorAnalysis = () => {
   const [analysisResult, setAnalysisResult] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [runLoading, setRunLoading] = useState(false);
-  const [analysisHistory, setAnalysisHistory] = useState<any[]>([]);
-  const [historyLoading, setHistoryLoading] = useState(false);
   const [taskId, setTaskId] = useState<string | null>(null);
   const [taskStatus, setTaskStatus] = useState<'idle' | 'pending' | 'running' | 'completed' | 'failed'>('idle');
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -69,7 +67,6 @@ export const useFactorAnalysis = () => {
           setRunLoading(false);
           const resultRes = await productionApi.getLatestAlphalensAnalysis(selectedFactor);
           setAnalysisResult(resultRes.data?.data);
-          await loadHistory(selectedFactor);
           message.success('分析完成');
         } else if (status === 'failed') {
           stopPolling();
@@ -85,14 +82,6 @@ export const useFactorAnalysis = () => {
   };
 
   useEffect(() => () => stopPolling(), []);
-
-  useEffect(() => {
-    if (selectedFactor) {
-      loadHistory(selectedFactor);
-    } else {
-      setAnalysisHistory([]);
-    }
-  }, [selectedFactor]);
 
   const runAnalysis = async () => {
     if (!selectedFactor) {
@@ -121,8 +110,6 @@ export const useFactorAnalysis = () => {
       });
       const id = res.data?.data?.task_id;
       setTaskId(id);
-      // 提交成功后立即刷新历史记录
-      await loadHistory(selectedFactor);
       startPolling(id);
     } catch (error: any) {
       setRunLoading(false);
@@ -144,24 +131,10 @@ export const useFactorAnalysis = () => {
     }
   };
 
-  const loadHistory = async (factorId: string) => {
-    setHistoryLoading(true);
-    try {
-      const res = await productionApi.getAlphalensAnalysisHistory(factorId, 10);
-      setAnalysisHistory(res.data?.data?.records || []);
-    } catch (error) {
-      console.error('Failed to load analysis history:', error);
-      setAnalysisHistory([]);
-    } finally {
-      setHistoryLoading(false);
-    }
-  };
-
   const deleteAnalysis = async (analysisId: string) => {
     if (!selectedFactor) return false;
     try {
       await productionApi.deleteAlphalensAnalysisById(selectedFactor, analysisId);
-      await loadHistory(selectedFactor);
       return true;
     } catch (error) {
       console.error('Failed to delete analysis:', error);
@@ -209,11 +182,8 @@ export const useFactorAnalysis = () => {
     setAnalysisResult,
     loading,
     runLoading,
-    analysisHistory,
-    historyLoading,
     runAnalysis,
     loadAnalysis,
-    loadHistory,
     deleteAnalysis,
   };
 };

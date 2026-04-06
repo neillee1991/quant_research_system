@@ -4,7 +4,7 @@
 
 import React, { useMemo, useState, useEffect } from 'react';
 import {
-  Card, Button, Select, InputNumber, Spin, Empty, Table, Tag, Checkbox, Collapse, Popconfirm,
+  Card, Button, Select, InputNumber, Spin, Empty, Table, Tag, Checkbox, Collapse,
 } from 'antd';
 import { BarChartOutlined, ApartmentOutlined } from '@ant-design/icons';
 import { useMessage } from '../../hooks/useMessage';
@@ -12,7 +12,9 @@ import ReactECharts from 'echarts-for-react';
 import QuantDatePicker from '../../components/QuantDatePicker';
 import { useFactorAnalysis } from './hooks/useFactorAnalysis';
 import { productionApi } from '../../api';
+import { useTaskLogs } from '../../hooks/useTaskLogs';
 import FactorFlowDrawer from './FactorFlowDrawer';
+import TaskLogTable from '../../components/TaskLogTable';
 
 /** 统一日期格式化：YYYYMMDD 或 datetime 字符串 → YYYY-MM-DD */
 const formatDate = (d: string) => {
@@ -603,153 +605,18 @@ const AnalysisPanel: React.FC = () => {
     resolvedConfig,
     taskStatus,
     analysisResult,
-    setAnalysisResult,
     loading,
     runLoading,
-    analysisHistory,
-    historyLoading,
     runAnalysis,
     loadAnalysis,
-    deleteAnalysis,
   } = useFactorAnalysis();
 
-  const [flowDrawerOpen, setFlowDrawerOpen] = React.useState<boolean>(false);
+  const { logs: analysisHistory, loading: historyLoading, loadLogs: loadAnalysisHistory } = useTaskLogs('analysis', 50);
 
-  const historyColumns = [
-    {
-      title: '分析日期',
-      dataIndex: 'analysis_date',
-      key: 'analysis_date',
-      render: (v: any) => (v ? new Date(v).toLocaleString('zh-CN') : '-'),
-      width: 160,
-    },
-    {
-      title: '日期范围',
-      key: 'range',
-      width: 200,
-      render: (_: any, r: any) => `${r.start_date || '-'} ~ ${r.end_date || '-'}`,
-    },
-    {
-      title: '股票池',
-      dataIndex: 'index_pool',
-      key: 'index_pool',
-      width: 120,
-      render: (v: string) => v || '全市场',
-    },
-    {
-      title: '持仓周期',
-      dataIndex: 'periods',
-      key: 'periods',
-      width: 140,
-      render: (v: number[]) => v?.length ? v.map(p => `${p}D`).join(' / ') : '-',
-    },
-    {
-      title: '分层数',
-      dataIndex: 'quantiles',
-      key: 'quantiles',
-      width: 80,
-      render: (v: number) => v ?? '-',
-    },
-    {
-      title: '买入价格',
-      dataIndex: 'entry_price',
-      key: 'entry_price',
-      width: 100,
-      render: (v: string) => {
-        const priceMap: Record<string, string> = {
-          open: '次日开盘',
-          close: '次日收盘',
-          high: '次日最高',
-          low: '次日最低',
-        };
-        return priceMap[v] || v || '-';
-      },
-    },
-    {
-      title: '预处理',
-      key: 'preprocess',
-      width: 200,
-      render: (_: any, r: any) => {
-        const tags: React.ReactNode[] = [];
-        if (r.neutralize) {
-          const controls = r.neutralize_controls || [];
-          const labels: Record<string, string> = {
-            market: '有截距',
-            industry: '行业',
-            size: '市值',
-          };
-          controls.forEach((c: string) => {
-            tags.push(
-              <Tag key={c} color="blue" style={{ marginBottom: 4 }}>
-                {labels[c] || c}
-              </Tag>
-            );
-          });
-        }
-        if (r.winsorize) {
-          tags.push(
-            <Tag key="winsorize" color="purple" style={{ marginBottom: 4 }}>
-              Winsorize [{(r.winsorize_lower * 100).toFixed(0)}%, {(r.winsorize_upper * 100).toFixed(0)}%]
-            </Tag>
-          );
-        }
-        if (tags.length === 0) {
-          return <Tag color="default">无</Tag>;
-        }
-        return <div>{tags}</div>;
-      },
-    },
-    {
-      title: '状态',
-      dataIndex: 'task_status',
-      key: 'task_status',
-      width: 80,
-      render: (v: string) => <Tag color={v === 'completed' ? 'green' : 'orange'}>{v}</Tag>,
-    },
-    {
-      title: '操作',
-      key: 'action',
-      width: 160,
-      fixed: 'right' as const,
-      render: (_: any, r: any) => (
-        <div style={{ display: 'flex', gap: 8 }}>
-          <Button
-            size="middle"
-            onClick={async () => {
-              try {
-                const res = await productionApi.getAlphalensAnalysisById(selectedFactor, r.id);
-                setAnalysisResult(res.data?.data);
-                message.success('加载成功');
-              } catch (error) {
-                console.error('Failed to load analysis:', error);
-                message.error('加载失败');
-              }
-            }}
-          >
-            查看
-          </Button>
-          <Popconfirm
-            title="确定要删除这条分析记录吗？"
-            description="删除后无法恢复"
-            onConfirm={async () => {
-              const success = await deleteAnalysis(r.id);
-              if (success) {
-                message.success('删除成功');
-              } else {
-                message.error('删除失败');
-              }
-            }}
-            okText="确定"
-            cancelText="取消"
-          >
-            <Button size="middle" danger>
-              删除
-            </Button>
-          </Popconfirm>
-        </div>
-      ),
-    },
-  ];
+  // 初始化时加载分析历史
+  React.useEffect(() => { loadAnalysisHistory(); }, [loadAnalysisHistory]);
+
+  const [flowDrawerOpen, setFlowDrawerOpen] = React.useState<boolean>(false);
 
   const labelStyle: React.CSSProperties = { color: 'var(--text-secondary)', fontSize: 11, marginBottom: 4 };
   const rowStyle: React.CSSProperties = { display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' };
@@ -1098,22 +965,17 @@ const AnalysisPanel: React.FC = () => {
         <Empty description="选择因子并运行分析" style={{ marginTop: 60 }} />
       )}
 
-      {selectedFactor && (
-        <Card
+      <Card
           style={{ marginTop: 16, background: 'var(--bg-card)' }}
           title={<span style={{ color: 'var(--text-secondary)' }}>分析历史</span>}
         >
-          <Spin spinning={historyLoading}>
-            <Table
-              dataSource={analysisHistory}
-              columns={historyColumns}
-              rowKey="id"
-              pagination={{ pageSize: 5 }}
-              scroll={{ x: 1200 }}
-            />
-          </Spin>
+          <TaskLogTable
+            logs={analysisHistory}
+            loading={historyLoading}
+            taskIdLabel="因子ID"
+            onFilter={loadAnalysisHistory}
+          />
         </Card>
-      )}
 
       <FactorFlowDrawer
         open={flowDrawerOpen}
