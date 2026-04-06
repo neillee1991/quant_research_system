@@ -83,20 +83,17 @@ def _run_factor_background(
     run_id: str
 ):
     """后台执行因子计算"""
-    try:
-        result = factor_service.compute_factor(
-            factor_id=factor_id,
-            mode=mode,
-            target_date=target_date,
-            start_date=start_date,
-            end_date=end_date,
-            preprocess=preprocess,
-            run_id=run_id,
-        )
-        logger.info(f"Factor {factor_id} computation completed: run_id={run_id}, success={result.success}, rows={result.rows}")
-        return result
-    except Exception as e:
-        logger.error(f"Factor {factor_id} computation failed: run_id={run_id}, error={e}")
+    result = factor_service.compute_factor(
+        factor_id=factor_id,
+        mode=mode,
+        target_date=target_date,
+        start_date=start_date,
+        end_date=end_date,
+        preprocess=preprocess,
+        run_id=run_id,
+    )
+    logger.info(f"Factor {factor_id} computation completed: run_id={run_id}, success={result.success}, rows={result.rows}")
+    return result
 
 
 @router.post("/factor/run")

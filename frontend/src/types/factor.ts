@@ -46,24 +46,6 @@ export interface FactorValue {
   created_at?: string;
 }
 
-export interface FactorRunRecord {
-  run_id: string;
-  factor_id: string;
-  start_date?: string;
-  end_date?: string;
-  status: 'success' | 'failed' | 'running';
-  rows?: number;
-  elapsed_seconds?: number;
-  error_message?: string;
-  preprocess?: PreprocessOptions | string;
-  created_at: string;
-  finished_at?: string;
-  rows_affected?: number;
-  duration_seconds?: number;
-  rows_computed?: number;
-  completed_at?: string;
-}
-
 export interface FactorAnalysisResult {
   factor_id: string;
   ic_mean?: number;

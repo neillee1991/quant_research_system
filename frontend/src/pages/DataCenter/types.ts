@@ -22,6 +22,7 @@ export interface ETLTaskStatus {
   last_sync_time: string | null;
   table_name: string;
   table_latest_date?: string | null;
+  [key: string]: unknown;
 }
 
 export interface CopyTaskConfig {

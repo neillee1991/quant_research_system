@@ -8,10 +8,16 @@ from app.services.task_service import (
     etl_service,
     factor_service
 )
+from app.services.config_export_service import ConfigExportService
+from app.services.config_import_service import ConfigImportService
+from app.services.config_diff_service import ConfigDiffService
 
 __all__ = [
     "TaskService",
     "sync_service",
     "etl_service",
-    "factor_service"
+    "factor_service",
+    "ConfigExportService",
+    "ConfigImportService",
+    "ConfigDiffService",
 ]

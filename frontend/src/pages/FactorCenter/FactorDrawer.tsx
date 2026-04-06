@@ -5,7 +5,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Drawer, Tabs, Button, Input, Select, InputNumber,
-  Collapse, Card, Spin, Empty, Table, Tag, Tooltip, Checkbox,
+  Collapse, Card, Spin, Empty, Table, Tooltip, Checkbox,
 } from 'antd';
 import {
   EditOutlined, SaveOutlined, CodeOutlined, DatabaseOutlined, SearchOutlined, BarChartOutlined,
@@ -17,10 +17,10 @@ import { useThemeStore } from '../../store';
 import { formatCode } from '../../utils/codeFormatter';
 import type { PreprocessOptions, FactorValue, FactorAnalysisResult } from '../../types';
 import type { FactorDrawerProps, FactorCodeInfo, DataConfigLabel } from './types';
-import { formatRunParams } from './types';
 import TestPanel from './TestPanel';
 import { DataInspection } from '../../components/DataInspection';
 import QuantDatePicker from '../../components/QuantDatePicker';
+import TaskLogTable from '../../components/TaskLogTable';
 
 const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, onClose, onSaved }) => {
   const message = useMessage();
@@ -240,36 +240,6 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
     { title: '因子值', dataIndex: 'factor_value', key: 'factor_value', render: (v: number) => v?.toFixed(6) },
   ];
 
-  const logColumns = [
-    { title: '状态', dataIndex: 'status', key: 'status', width: 80,
-      render: (v: string) => <Tag color={v === 'success' ? 'green' : v === 'running' ? 'blue' : 'red'}>{v}</Tag>
-    },
-    { title: '计算参数', key: 'range',
-      render: (_: any, record: any) => {
-        const text = formatRunParams(record);
-        return <Tooltip title={text}><span style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>{text}</span></Tooltip>;
-      }
-    },
-    { title: '行数', dataIndex: 'rows', key: 'rows', width: 100,
-      render: (v: number) => v?.toLocaleString() || '-'
-    },
-    { title: '耗时', dataIndex: 'elapsed_seconds', key: 'dur', width: 80,
-      render: (v: number) => v ? `${v.toFixed(1)}s` : '-'
-    },
-    { title: '时间', dataIndex: 'created_at', key: 'time',
-      render: (v: string) => v ? <Tooltip title={v}><span style={{ color: 'var(--text-secondary)', fontSize: '12px' }}>{v.slice(0, 19)}</span></Tooltip> : '-'
-    },
-    { title: '失败原因', dataIndex: 'error_message', key: 'error', width: 200,
-      render: (v: string) => v ? (
-        <Tooltip title={v} placement="topLeft">
-          <span style={{ color: 'var(--color-loss)', fontSize: '12px', cursor: 'help' }}>
-            {v.length > 40 ? v.slice(0, 40) + '…' : v}
-          </span>
-        </Tooltip>
-      ) : null
-    },
-  ];
-
   return (
     <Drawer
       title={
@@ -473,10 +443,7 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
                   </span>
                 </div>
               </div>
-              <Table dataSource={history} columns={logColumns}
-                rowKey={(r: any) => `${r.factor_id}-${r.created_at}`}
-                loading={historyLoading} size="middle" pagination={{ pageSize: 15 }}
-                locale={{ emptyText: <Empty description="暂无计算记录" /> }} />
+              <TaskLogTable logs={history} loading={historyLoading} />
             </div>
           ),
         },

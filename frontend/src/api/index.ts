@@ -1,5 +1,16 @@
 import axios from 'axios';
 import type { DataFieldMapping } from '../types/factor';
+import type {
+  ConfigType,
+  ImportMode,
+  ConfigTypeOption,
+  ExportRequest,
+  ExportResponse,
+  ImportVerifyRequest,
+  ImportVerifyResponse,
+  ImportApplyRequest,
+  ImportApplyResponse,
+} from '../pages/ConfigManagement/types';
 
 // 因子计算预处理选项
 export interface PreprocessOptions {
@@ -356,6 +367,14 @@ export const taskMonitorApi = {
     api.post('/tasks/cleanup', null, { params: { timeout_minutes: timeoutMinutes } }),
   getTaskStatus: (taskType: string, runId: string) =>
     api.get(`/tasks/${taskType}/status/${runId}`),
+};
+
+// 配置管理 API
+export const configApi = {
+  getConfigTypes: () => api.get<ConfigTypeOption[]>('/config/types'),
+  exportConfigs: (data: ExportRequest) => api.post<ExportResponse>('/config/export', data),
+  verifyImport: (data: ImportVerifyRequest) => api.post<ImportVerifyResponse>('/config/import/verify', data),
+  applyImport: (data: ImportApplyRequest) => api.post<ImportApplyResponse>('/config/import/apply', data),
 };
 
 export default api;

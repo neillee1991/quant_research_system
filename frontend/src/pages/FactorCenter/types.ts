@@ -5,8 +5,8 @@
 import type {
   PreprocessOptions,
   FactorDefinition,
-  FactorRunRecord,
 } from '../../types';
+import type { TaskRun } from '../../api';
 
 export interface FactorCodeInfo {
   filename: string;
@@ -61,7 +61,7 @@ export interface TestResult {
 
 export interface FactorManageState {
   factors: FactorDefinition[];
-  history: FactorRunRecord[];
+  history: TaskRun[];
   loading: boolean;
   runLoading: string | null;
   selectedFactor: string | null;
@@ -120,22 +120,16 @@ const formatDate = (date: string | null | undefined): string => {
   return str;
 };
 
-export const formatRunParams = (record: FactorRunRecord): string => {
+export const formatRunParams = (record: TaskRun): string => {
   const parts: string[] = [];
-  const start = formatDate(record.start_date);
-  const end = formatDate(record.end_date);
-  if (start || end) parts.push(`${start}~${end}`);
-  if (record.preprocess) {
-    try {
-      const pp = typeof record.preprocess === 'string' ? JSON.parse(record.preprocess) : record.preprocess;
-      const adjMap: Record<string, string> = { forward: '前复权', backward: '后复权', none: '不复权' };
-      if (pp.adjust_price) parts.push(adjMap[pp.adjust_price] || pp.adjust_price);
-      if (pp.filter_st === false) parts.push('含ST');
-      if (pp.filter_new_stock === false) parts.push('含次新');
-      if (pp.mark_limit === false) parts.push('不标涨跌停');
-    } catch {
-      // Ignore parse errors
-    }
+  try {
+    const p = record.params ? JSON.parse(record.params) : {};
+    const start = formatDate(p.start_date);
+    const end = formatDate(p.end_date);
+    if (start || end) parts.push(`${start}~${end}`);
+    if (p.mode) parts.push(p.mode === 'incremental' ? '增量' : '全量');
+  } catch {
+    // Ignore parse errors
   }
   return parts.join(' | ') || '-';
 };

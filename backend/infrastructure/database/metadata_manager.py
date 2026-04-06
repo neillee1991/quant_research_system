@@ -49,26 +49,7 @@ class MetadataManager:
             "array(TIMESTAMP,0) as created_at)",
             ["factor_id", "analysis_date"],
         ),
-        "factor_task_run": (
-            "table("
-            "array(SYMBOL,0) as factor_id,"
-            "array(SYMBOL,0) as mode,"
-            "array(SYMBOL,0) as status,"
-            "array(STRING,0) as start_date,"
-            "array(STRING,0) as end_date,"
-            "array(INT,0) as rows_affected,"
-            "array(DOUBLE,0) as duration_seconds,"
-            "array(BOOL,0) as filter_st,"
-            "array(BOOL,0) as filter_new_stock,"
-            "array(INT,0) as new_stock_days,"
-            "array(BOOL,0) as mark_limit,"
-            "array(STRING,0) as adjust_price,"
-            "array(STRING,0) as preprocess,"
-            "array(STRING,0) as run_id,"
-            "array(STRING,0) as error_message,"
-            "array(TIMESTAMP,0) as created_at)",
-            ["factor_id", "created_at"],
-        ),
+
         "sync_task_config": (
             "table("
             "array(SYMBOL,0) as task_id,"

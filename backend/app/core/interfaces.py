@@ -121,8 +121,8 @@ class ISyncTaskExecutor(ABC):
         self,
         task_config: Dict[str, Any],
         target_date: Optional[str] = None
-    ) -> bool:
-        """执行同步任务"""
+    ) -> int:
+        """执行同步任务，返回同步行数，-1 表示失败"""
         pass
 
 

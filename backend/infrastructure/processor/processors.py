@@ -668,7 +668,8 @@ class ResultWriterProcessor(IProcessor):
         try:
             if compute_mode == "full":
                 # 全量模式：清空整个因子的所有数据
-                rows = self.db.upsert(table_name, result_df, primary_keys, is_full_sync=True)
+                self.db.upsert(table_name, result_df, primary_keys, is_full_sync=True)
+                rows = len(result_df)
             else:
                 # 增量模式：按 trade_date 逐个清空并写入（精确到 factor_id）
                 if "trade_date" in result_df.columns:
@@ -676,7 +677,6 @@ class ResultWriterProcessor(IProcessor):
                     total_rows = 0
                     for trade_date in trade_dates:
                         date_df = result_df.filter(pl.col("trade_date") == trade_date)
-                        # 传入 factor_id，确保只删除该因子在该日期的数据
                         self.db.upsert(
                             table_name, date_df, primary_keys,
                             is_full_sync=False,
@@ -686,8 +686,8 @@ class ResultWriterProcessor(IProcessor):
                         total_rows += len(date_df)
                     rows = total_rows
                 else:
-                    # 没有 trade_date 列，直接写入
-                    rows = self.db.upsert(table_name, result_df, primary_keys, is_full_sync=False)
+                    self.db.upsert(table_name, result_df, primary_keys, is_full_sync=False)
+                    rows = len(result_df)
 
             logger.info(f"Saved {rows} rows to {table_name} (mode={compute_mode})")
             context.set_state("saved_rows", rows)

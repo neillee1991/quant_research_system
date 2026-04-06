@@ -85,6 +85,7 @@ export interface TaskStatus {
   source?: string;
   enabled?: boolean;
   schedule?: string;
+  [key: string]: unknown;
 }
 
 export interface SyncLog {

@@ -16,6 +16,32 @@ const statusColorMap: Record<string, string> = {
   running: 'blue',
 };
 
+function renderJsonCell(v: string | null) {
+  if (!v) return '-';
+  try {
+    const obj = JSON.parse(v);
+    const text = Object.entries(obj)
+      .filter(([, val]) => val != null && val !== '')
+      .map(([k, val]) => `${k}: ${val}`)
+      .join(', ');
+    return (
+      <Tooltip title={<pre style={{ margin: 0, fontSize: 11 }}>{JSON.stringify(obj, null, 2)}</pre>}>
+        <Text style={{ fontSize: '12px' }} ellipsis>{text || '-'}</Text>
+      </Tooltip>
+    );
+  } catch {
+    return <Text style={{ fontSize: '12px' }} ellipsis>{v}</Text>;
+  }
+}
+
+function renderTime(v: string | null) {
+  return (
+    <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+      {v ? v.slice(0, 19) : '-'}
+    </span>
+  );
+}
+
 export const TaskLogTable: React.FC<TaskLogTableProps> = ({
   logs,
   loading = false,
@@ -29,22 +55,18 @@ export const TaskLogTable: React.FC<TaskLogTableProps> = ({
       width: 150,
       render: (v: string) => (
         <Tooltip title={v}>
-          <Text code style={{ fontSize: '12px' }} ellipsis>
-            {v}
-          </Text>
+          <Text code style={{ fontSize: '12px' }} ellipsis>{v}</Text>
         </Tooltip>
       ),
     },
     {
-      title: '任务名称',
-      dataIndex: 'task_name',
-      key: 'task_name',
-      width: 160,
+      title: '运行ID',
+      dataIndex: 'run_id',
+      key: 'run_id',
+      width: 120,
       render: (v: string) => (
         <Tooltip title={v}>
-          <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {v || '-'}
-          </div>
+          <Text code style={{ fontSize: '12px' }} ellipsis>{v.slice(-8)}</Text>
         </Tooltip>
       ),
     },
@@ -53,20 +75,7 @@ export const TaskLogTable: React.FC<TaskLogTableProps> = ({
       dataIndex: 'status',
       key: 'status',
       width: 80,
-      render: (v: string) => (
-        <Tag color={statusColorMap[v] || 'default'}>{v}</Tag>
-      ),
-    },
-    {
-      title: '行数',
-      dataIndex: 'rows',
-      key: 'rows',
-      width: 80,
-      render: (v: number | null) => (
-        <span style={{ color: 'var(--color-primary)', fontWeight: 500 }}>
-          {v != null && v > 0 ? v.toLocaleString() : '-'}
-        </span>
-      ),
+      render: (v: string) => <Tag color={statusColorMap[v] || 'default'}>{v}</Tag>,
     },
     {
       title: '耗时(s)',
@@ -80,27 +89,39 @@ export const TaskLogTable: React.FC<TaskLogTableProps> = ({
       dataIndex: 'started_at',
       key: 'started_at',
       width: 150,
-      render: (v: string) => (
-        <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-          {v ? v.slice(0, 19) : '-'}
+      render: renderTime,
+    },
+    {
+      title: '结束时间',
+      dataIndex: 'finished_at',
+      key: 'finished_at',
+      width: 150,
+      render: renderTime,
+    },
+    {
+      title: '行数',
+      dataIndex: 'rows',
+      key: 'rows',
+      width: 80,
+      render: (v: number | null) => (
+        <span style={{ color: 'var(--color-primary)', fontWeight: 500 }}>
+          {v != null && v > 0 ? v.toLocaleString() : '-'}
         </span>
       ),
     },
     {
-      title: '错误信息',
-      dataIndex: 'error',
-      key: 'error',
-      width: 200,
-      render: (v: string | null) =>
-        v ? (
-          <Tooltip title={v}>
-            <Text type="danger" style={{ fontSize: '12px' }} ellipsis>
-              {v}
-            </Text>
-          </Tooltip>
-        ) : (
-          '-'
-        ),
+      title: '参数',
+      dataIndex: 'params',
+      key: 'params',
+      width: 180,
+      render: renderJsonCell,
+    },
+    {
+      title: '附加信息',
+      dataIndex: 'extra',
+      key: 'extra',
+      width: 160,
+      render: renderJsonCell,
     },
   ];
 

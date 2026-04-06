@@ -63,14 +63,14 @@ class RefactoredSyncEngine:
             log_manager=self.log_manager
         )
 
-    def sync_task(self, task_id: str, target_date: Optional[str] = None, end_date: Optional[str] = None) -> bool:
-        """同步单个任务"""
+    def sync_task(self, task_id: str, target_date: Optional[str] = None, end_date: Optional[str] = None) -> int:
+        """同步单个任务，返回同步行数，-1 表示失败"""
         try:
             task = self.config_manager.get_task(task_id)
             return self.task_executor.execute_task(task, target_date, end_date)
         except Exception as e:
             logger.error(f"Failed to sync task {task_id}: {e}")
-            return False
+            return -1
 
     def sync_all_enabled_tasks(self, target_date: Optional[str] = None) -> Dict[str, str]:
         """同步所有启用的任务"""
@@ -80,8 +80,8 @@ class RefactoredSyncEngine:
         results = {}
         for task in tasks:
             task_id = task["task_id"]
-            success = self.task_executor.execute_task(task, target_date)
-            results[task_id] = "success" if success else "failed"
+            rows = self.task_executor.execute_task(task, target_date)
+            results[task_id] = "success" if rows >= 0 else "failed"
 
         logger.info(f"Sync completed. Results: {results}")
         return results

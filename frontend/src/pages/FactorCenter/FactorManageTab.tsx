@@ -18,9 +18,10 @@ import { productionApi, DEFAULT_PREPROCESS } from '../../api';
 import { useThemeStore } from '../../store';
 import { formatCode } from '../../utils/codeFormatter';
 import type { PreprocessOptions, FactorDefinition } from '../../types';
-import { CODE_TEMPLATE, formatRunParams } from './types';
+import { CODE_TEMPLATE } from './types';
 import { useFactorList } from './hooks/useFactorList';
 import FactorDrawer from './FactorDrawer';
+import TaskLogTable from '../../components/TaskLogTable';
 
 const FactorManageTab: React.FC = () => {
   const message = useMessage();
@@ -103,16 +104,13 @@ const FactorManageTab: React.FC = () => {
     setBatchLoading(true);
     try {
       const res = await productionApi.batchRunFactors(selectedRowKeys, runMode, startDate, endDate);
-      const results = res.data?.data || [];
-      const ok = results.filter((r: any) => r.success).length;
-      const fail = results.length - ok;
-      message.success(`批量计算完成: ${ok} 成功, ${fail} 失败`);
+      const tasks = res.data?.data?.tasks || [];
+      message.success(`已提交 ${tasks.length} 个因子计算任务，后台执行中`);
       setSelectedRowKeys([]);
       loadFactors();
       loadHistory(selectedFactor || undefined);
     } catch (e: any) {
       const errorMessage = e.response?.data?.detail || '批量执行失败';
-      console.error('Batch run failed:', e);
       message.error(errorMessage);
     }
     setBatchLoading(false);
@@ -208,11 +206,11 @@ const FactorManageTab: React.FC = () => {
     },
     { title: '上次计算', key: 'last_run', width: 150,
       render: (_: any, record: any) => {
-        const lastRun = history.find(h => h.factor_id === record.factor_id);
+        const lastRun = history.find(h => h.task_id === record.factor_id);
         if (!lastRun) return <span style={{ color: 'var(--text-muted)' }}>-</span>;
-        const dateTimeStr = lastRun.created_at?.slice(0, 19).replace('T', ' ') || '-';  // YYYY-MM-DD HH:mm:ss
+        const dateTimeStr = lastRun.started_at?.slice(0, 19).replace('T', ' ') || '-';  // YYYY-MM-DD HH:mm:ss
         return (
-          <Tooltip title={lastRun.created_at}>
+          <Tooltip title={lastRun.started_at}>
             <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-secondary)', fontSize: '12px' }}>
               {dateTimeStr}
             </div>
@@ -235,73 +233,6 @@ const FactorManageTab: React.FC = () => {
           </Popconfirm>
         </div>
       )
-    },
-  ];
-
-  const historyColumns = [
-    { title: '因子ID', dataIndex: 'factor_id', key: 'factor_id', width: 150,
-      render: (v: string) => {
-        const formatted = v || '-';
-        return (
-          <Tooltip title={formatted}>
-            <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              <code style={{ fontSize: '12px' }}>{formatted}</code>
-            </div>
-          </Tooltip>
-        );
-      }
-    },
-    { title: '状态', dataIndex: 'status', key: 'status', width: 70,
-      render: (v: string) => <Tag color={v === 'success' ? 'green' : v === 'running' ? 'blue' : 'red'}>{v}</Tag>
-    },
-    { title: '行数', dataIndex: 'rows', key: 'rows', width: 100,
-      render: (v: number) => {
-        const formatted = v?.toLocaleString() || '-';
-        return (
-          <Tooltip title={formatted}>
-            <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{formatted}</div>
-          </Tooltip>
-        );
-      }
-    },
-    { title: '耗时', dataIndex: 'elapsed_seconds', key: 'dur', width: 80,
-      render: (v: number) => {
-        const formatted = v ? `${v.toFixed(1)}s` : '-';
-        return (
-          <Tooltip title={formatted}>
-            <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{formatted}</div>
-          </Tooltip>
-        );
-      }
-    },
-    { title: '计算参数', key: 'range', width: 200,
-      render: (_: any, record: any) => {
-        const text = formatRunParams(record);
-        return (
-          <Tooltip title={text}>
-            <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '12px', color: 'var(--text-secondary)' }}>{text}</div>
-          </Tooltip>
-        );
-      }
-    },
-    { title: '时间', dataIndex: 'created_at', key: 'time', width: 140,
-      render: (v: string) => {
-        const formatted = v?.slice(0, 16) || '-';  // 只显示到分钟
-        return (
-          <Tooltip title={v}>
-            <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '12px', color: 'var(--text-secondary)' }}>{formatted}</div>
-          </Tooltip>
-        );
-      }
-    },
-    { title: '失败原因', dataIndex: 'error_message', key: 'error', width: 200,
-      render: (v: string) => v ? (
-        <Tooltip title={v} placement="topLeft">
-          <span style={{ color: 'var(--color-loss)', fontSize: '12px', cursor: 'help' }}>
-            {v.length > 40 ? v.slice(0, 40) + '…' : v}
-          </span>
-        </Tooltip>
-      ) : null
     },
   ];
 
@@ -331,8 +262,7 @@ const FactorManageTab: React.FC = () => {
             value={selectedFactor || undefined} onChange={(v) => { setSelectedFactor((v as string) || null); loadHistory((v as string) || undefined); }}
             options={factors.map(f => ({ label: f.factor_id, value: f.factor_id }))} />
         </div>
-        <Table dataSource={history} columns={historyColumns} rowKey={(r: any) => `${r.factor_id}-${r.created_at}`}
-          pagination={{ pageSize: 10 }} />
+        <TaskLogTable logs={history} taskIdLabel="因子ID" />
       </Card>
 
       {/* 新建因子 Drawer */}

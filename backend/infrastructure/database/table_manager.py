@@ -17,7 +17,7 @@ class TableManager:
     # 元数据表集合（维度表，存储在 meta 数据库）
     _META_TABLES = frozenset({
         "stock_basic", "factor_metadata",
-        "factor_analysis", "dag_run_log", "dag_task_log", "factor_task_run",
+        "factor_analysis",
         "sync_task_config", "etl_task_config", "factor_data_config", "trade_cal",
         "index_metadata", "user_sync_preference"
     })

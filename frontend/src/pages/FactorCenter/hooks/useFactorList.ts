@@ -4,12 +4,12 @@
 
 import { useState, useCallback, useEffect } from 'react';
 import { message } from 'antd';
-import { productionApi } from '../../../api';
-import type { FactorDefinition, FactorRunRecord } from '../../../types';
+import { productionApi, type TaskRun } from '../../../api';
+import type { FactorDefinition } from '../../../types';
 
 export const useFactorList = () => {
   const [factors, setFactors] = useState<FactorDefinition[]>([]);
-  const [history, setHistory] = useState<FactorRunRecord[]>([]);
+  const [history, setHistory] = useState<TaskRun[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [runLoading, setRunLoading] = useState<string | null>(null);
   const [selectedFactor, setSelectedFactor] = useState<string | null>(null);

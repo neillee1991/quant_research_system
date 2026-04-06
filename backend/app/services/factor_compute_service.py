@@ -184,7 +184,7 @@ class FactorComputeService:
             result_df = pipeline.execute(context)
 
             # 8. 获取结果统计
-            rows = context.get_state("saved_rows", len(result_df) if result_df is not None else 0)
+            rows = context.get_state("saved_rows") or (len(result_df) if result_df is not None else 0)
             quality_metrics = context.get_state("quality_metrics")
 
             # 9. 更新因子元数据
@@ -539,58 +539,3 @@ class FactorComputeService:
         except Exception as e:
             logger.warning(f"Failed to load preprocess config for {factor_id}: {e}")
             return {}
-
-    def _insert_run_record(
-        self,
-        factor_id: str,
-        mode: str,
-        start_date: Optional[str],
-        end_date: Optional[str],
-        opts: Optional[Dict[str, Any]] = None
-    ) -> Optional[str]:
-        """插入运行记录,包含所有预处理选项 (增强版,迁移自 ProductionEngine)
-
-        Args:
-            factor_id: 因子ID
-            mode: 计算模式
-            start_date: 开始日期
-            end_date: 结束日期
-            opts: 预处理选项
-
-        Returns:
-            run_id (时间戳字符串)
-        """
-        import json
-        try:
-            now = datetime.now()
-            run_id = now.strftime("%Y%m%d%H%M%S%f")
-
-            opts = opts or {}
-            opts_str = json.dumps(opts)
-
-            record = pl.DataFrame({
-                "factor_id": [factor_id],
-                "mode": [mode or ""],
-                "status": ["running"],
-                "start_date": [start_date or ""],
-                "end_date": [end_date or ""],
-                "rows_affected": [0],
-                "duration_seconds": [0.0],
-                "filter_st": [opts.get("filter_st", True)],
-                "filter_new_stock": [opts.get("filter_new_stock", True)],
-                "new_stock_days": [opts.get("new_stock_days", 60)],
-                "mark_limit": [opts.get("mark_limit", True)],
-                "adjust_price": [opts.get("adjust_price", "none")],
-                "preprocess": [opts_str],
-                "run_id": [run_id],
-                "error_message": [""],
-                "created_at": [now],
-            })
-            self.db.append("factor_task_run", record)
-            logger.info(f"Inserted run record: {run_id} for factor {factor_id}")
-            return run_id
-
-        except Exception as e:
-            import traceback
-            logger.error(f"Failed to insert run record for {factor_id}: {e}\n{traceback.format_exc()}")
-            return None

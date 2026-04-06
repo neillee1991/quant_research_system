@@ -432,15 +432,15 @@ class SyncTaskExecutor(ISyncTaskExecutor):
         task_config: Dict[str, Any],
         target_date: Optional[str] = None,
         end_date: Optional[str] = None
-    ) -> bool:
-        """执行同步任务"""
+    ) -> int:
+        """执行同步任务，返回同步行数，-1 表示失败"""
         task_id = task_config["task_id"]
         api_name = task_config["api_name"]
         sync_type = task_config["sync_type"]
 
         if not task_config.get("enabled", True):
             logger.info(f"Task {task_id} is disabled")
-            return True
+            return 0
 
         logger.info(f"Starting sync task: {task_id}")
 
@@ -458,7 +458,7 @@ class SyncTaskExecutor(ISyncTaskExecutor):
             logger.error(f"Task {task_id} failed: {e}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
-            return False
+            return -1
 
     def _fetch_with_pagination(
         self,
@@ -508,21 +508,20 @@ class SyncTaskExecutor(ISyncTaskExecutor):
             )
         return result
 
-    def _execute_full_sync(self, task: Dict[str, Any]) -> bool:
-        """执行全量同步"""
+    def _execute_full_sync(self, task: Dict[str, Any]) -> int:
+        """执行全量同步，返回同步行数，-1 表示失败"""
         task_id = task["task_id"]
         api_name = task["api_name"]
         api_limit = task.get("api_limit", 5000)
         table_name = task["table_name"]
         primary_keys = task.get("primary_keys", [])
         params = self._format_params(task["params"])
-        params_str = f"type=full, api={api_name}"
 
         try:
             df = self._fetch_with_pagination(task_id, api_name, params, api_limit)
             if df is None or df.is_empty():
                 logger.warning(f"No data for {task_id}")
-                return False
+                return 0
 
             rows_count = len(df)
             # 列重命名（如 con_code → ts_code）
@@ -537,10 +536,10 @@ class SyncTaskExecutor(ISyncTaskExecutor):
             # 全量同步：清空整个表再写入
             self.repository.upsert(table_name, df, primary_keys, is_full_sync=True)
             logger.info(f"Full sync completed for {task_id}: {rows_count} rows")
-            return True
+            return rows_count
         except Exception as e:
             logger.error(f"Full sync failed for {task_id}: {e}")
-            return False
+            return -1
 
     def _execute_incremental_sync(
         self,
@@ -627,7 +626,7 @@ class SyncTaskExecutor(ISyncTaskExecutor):
                 logger.error(f"Sync {task_id} for {date_str} failed: {e}")
 
         logger.info(f"Incremental sync completed for {task_id}: {total_rows} total rows")
-        return total_rows > 0 or len(dates) == 0
+        return total_rows
 
     def _format_params(
         self,
