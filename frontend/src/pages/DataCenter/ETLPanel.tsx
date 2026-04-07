@@ -251,7 +251,7 @@ export const ETLPanel: React.FC<ETLPanelProps> = ({
         extra={
           <Button
             icon={<ReloadOutlined />}
-            onClick={loadEtlLogs}
+            onClick={() => loadEtlLogs()}
             type="text"
           >
             刷新

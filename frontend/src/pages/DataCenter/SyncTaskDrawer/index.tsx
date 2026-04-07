@@ -7,8 +7,8 @@ import { useMessage } from '../../../hooks/useMessage';
 import { dataApi } from '../../../api';
 import { BaseTaskDrawer } from '../../../components/TaskDrawer/BaseTaskDrawer';
 import { UniversalJsonEditorTab } from '../../../components/TaskDrawer/tabs/UniversalJsonEditorTab';
-import { UniversalHistoryTab } from '../../../components/TaskDrawer/tabs/UniversalHistoryTab';
-import { UniversalStatusTab } from '../../../components/TaskDrawer/tabs/UniversalStatusTab';
+import { useTaskLogs } from '../../../hooks/useTaskLogs';
+import { TaskLogTable } from '../../../components/TaskLogTable';
 import { SyncVisualEditorTab } from './VisualEditorTab';
 import { SyncDataInspectTab } from './DataInspectTab';
 import type { SyncTask } from '../../../types';
@@ -68,10 +68,16 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
   onSave,
 }) => {
   const message = useMessage();
+  const { logs: syncLogs, loading: syncLogsLoading, loadLogs: loadSyncLogs } = useTaskLogs('sync', 50);
   const [activeTab, setActiveTab] = useState('visual');
   const [config, setConfig] = useState<any>(null);
   const [jsonText, setJsonText] = useState('');
-  const [taskStatus, setTaskStatus] = useState<any>(null);
+
+  useEffect(() => {
+    if (activeTab === 'history' && task?.task_id && !isNew) {
+      loadSyncLogs({ taskId: task.task_id });
+    }
+  }, [activeTab, task?.task_id, isNew]);
 
   useEffect(() => {
     if (!visible) return;
@@ -80,7 +86,6 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
       const initial = buildInitialConfig(task);
       setConfig(initial);
       setJsonText(JSON.stringify(initial, null, 2));
-      setTaskStatus(null);
       return;
     }
 
@@ -262,30 +267,21 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
     },
     ...(!isNew && task ? [
       {
-        key: 'status',
-        label: '状态',
-        children: (
-          <UniversalStatusTab
-            taskType="sync"
-            taskId={task.task_id}
-            status={taskStatus}
-          />
-        ),
-      },
-      {
         key: 'history',
-        label: '历史记录',
+        label: '历史与数据',
         children: (
-          <UniversalHistoryTab
-            taskType="sync"
-            taskId={task.task_id}
-          />
+          <div>
+            <TaskLogTable
+              logs={syncLogs}
+              loading={syncLogsLoading}
+              taskIdLabel="任务ID"
+              onFilter={(f) => loadSyncLogs({ ...f, taskId: f.taskId || task.task_id })}
+            />
+            <div style={{ marginTop: 24 }}>
+              <SyncDataInspectTab taskId={task.task_id} />
+            </div>
+          </div>
         ),
-      },
-      {
-        key: 'inspect',
-        label: '数据探查',
-        children: <SyncDataInspectTab taskId={task.task_id} />,
       },
     ] : []),
   ];

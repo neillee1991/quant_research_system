@@ -9,7 +9,6 @@ import {
   Upload,
   Space,
   Alert,
-  Spin,
   Divider,
   Typography,
   message,
@@ -17,7 +16,6 @@ import {
 import {
   DownloadOutlined,
   UploadOutlined,
-  SettingOutlined,
 } from '@ant-design/icons';
 import type { UploadFile, UploadProps } from 'antd/es/upload/interface';
 import {
@@ -35,7 +33,7 @@ import { configApi } from '../../api';
 import DiffViewer from './DiffViewer';
 import ImportResult from './ImportResult';
 
-const { Title, Text } = Typography;
+const { Text } = Typography;
 const { Group: CheckboxGroup } = Checkbox;
 const { Group: RadioGroup } = Radio;
 
@@ -268,16 +266,7 @@ const ConfigManagement: React.FC = () => {
   };
 
   return (
-    <div style={{ padding: 24 }}>
-      <Title level={2}>
-        <SettingOutlined /> 配置管理
-      </Title>
-      <Text type="secondary">
-        备份和恢复系统配置，包括同步任务、ETL任务、因子配置等
-      </Text>
-
-      <Divider />
-
+    <div>
       <Row gutter={24}>
         {/* 导出配置 */}
         <Col span={12}>

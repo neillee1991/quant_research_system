@@ -131,6 +131,19 @@ export const useFactorAnalysis = () => {
     }
   };
 
+  const loadAnalysisById = async (factorId: string, analysisId: string) => {
+    setLoading(true);
+    try {
+      const res = await productionApi.getAlphalensAnalysisById(factorId, analysisId);
+      setAnalysisResult(res.data?.data);
+    } catch (error) {
+      console.error('Failed to load analysis by id:', error);
+      setAnalysisResult(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const deleteAnalysis = async (analysisId: string) => {
     if (!selectedFactor) return false;
     try {
@@ -184,6 +197,7 @@ export const useFactorAnalysis = () => {
     runLoading,
     runAnalysis,
     loadAnalysis,
+    loadAnalysisById,
     deleteAnalysis,
   };
 };

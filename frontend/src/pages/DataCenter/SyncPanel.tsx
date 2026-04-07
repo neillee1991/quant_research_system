@@ -266,7 +266,7 @@ export const SyncPanel: React.FC<SyncPanelProps> = ({
         extra={
           <Button
             icon={<ReloadOutlined />}
-            onClick={loadSyncLogs}
+            onClick={() => loadSyncLogs()}
             type="text"
           >
             刷新

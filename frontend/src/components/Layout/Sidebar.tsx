@@ -7,7 +7,6 @@ import {
   ScheduleOutlined,
   FundOutlined,
   AppstoreOutlined,
-  SettingOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 
@@ -17,7 +16,6 @@ const menuItems = [
   { key: '/factor', label: '因子', icon: <ExperimentOutlined /> },
   { key: '/strategy', label: '策略', icon: <LineChartOutlined /> },
   { key: '/scheduler', label: '调度', icon: <ScheduleOutlined /> },
-  { key: '/config', label: '配置', icon: <SettingOutlined /> },
 ];
 
 const Sidebar: React.FC = () => {

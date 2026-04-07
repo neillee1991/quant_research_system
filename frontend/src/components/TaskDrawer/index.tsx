@@ -3,5 +3,3 @@
  */
 export { BaseTaskDrawer } from './BaseTaskDrawer';
 export { UniversalJsonEditorTab } from './tabs/UniversalJsonEditorTab';
-export { UniversalHistoryTab } from './tabs/UniversalHistoryTab';
-export { UniversalStatusTab } from './tabs/UniversalStatusTab';

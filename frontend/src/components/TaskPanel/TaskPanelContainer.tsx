@@ -133,7 +133,7 @@ export function TaskPanel<TTask, TStatus extends GenericTaskStatus, TRunParams e
           extra={
             <Button
               icon={<ReloadOutlined />}
-              onClick={loadLogs}
+              onClick={() => loadLogs()}
               type="text"
             >
               刷新

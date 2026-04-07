@@ -4,9 +4,10 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  Drawer, Tabs, Button, Input, Select, InputNumber,
+  Tabs, Button, Input, Select, InputNumber,
   Collapse, Card, Spin, Empty, Table, Tooltip, Checkbox,
 } from 'antd';
+import { BaseTaskDrawer } from '../../components/TaskDrawer/BaseTaskDrawer';
 import {
   EditOutlined, SaveOutlined, CodeOutlined, DatabaseOutlined, SearchOutlined, BarChartOutlined,
 } from '@ant-design/icons';
@@ -89,7 +90,6 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
     setStats(null);
     setFactorData([]);
     setDataFilter({});
-    setHistory([]);
 
     // 编辑表单
     setEditDesc(factor.description || '');
@@ -226,13 +226,14 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
   ];
 
   return (
-    <Drawer
-      title={
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <span style={{ color: 'var(--color-primary)' }}>{factorId}</span>
-        </div>
-      }
-      open={open} onClose={onClose} width={780}
+    <BaseTaskDrawer
+      visible={open}
+      title={factorId || ''}
+      onClose={onClose}
+      onSave={handleSave}
+      saveLoading={editSaving}
+      saveText="保存"
+      width={780}
     >
       <Tabs activeKey={activeTab} onChange={setActiveTab} size="middle" items={[
         {
@@ -381,9 +382,6 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
                   ),
                 },
               ]} />
-              <div style={{ marginTop: 12, textAlign: 'right' }}>
-                <Button type="primary" icon={<SaveOutlined />} loading={editSaving} onClick={handleSave}>保存</Button>
-              </div>
             </div>
           ),
         },
@@ -424,7 +422,7 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
           ),
         },
       ]} />
-    </Drawer>
+    </BaseTaskDrawer>
   );
 };
 

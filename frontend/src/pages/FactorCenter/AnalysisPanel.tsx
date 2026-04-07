@@ -609,6 +609,7 @@ const AnalysisPanel: React.FC = () => {
     runLoading,
     runAnalysis,
     loadAnalysis,
+    loadAnalysisById,
   } = useFactorAnalysis();
 
   const { logs: analysisHistory, loading: historyLoading, loadLogs: loadAnalysisHistory } = useTaskLogs('analysis', 50);
@@ -671,7 +672,55 @@ const AnalysisPanel: React.FC = () => {
           />
         </div>
 
-        {/* 第二行：因子预处理 */}
+        {/* 第二行：查看版本 */}
+        {selectedFactor && (
+          <div style={{ marginBottom: 12 }}>
+            <div style={labelStyle}>查看版本</div>
+            <Select
+              allowClear
+              style={{ width: '100%', ...ctrlH }}
+              placeholder="默认显示最新分析结果，可切换历史版本"
+              showSearch
+              filterOption={(input, opt) =>
+                (opt?.label as string)?.toLowerCase().includes(input.toLowerCase())
+              }
+              onChange={(runId: string | undefined) => {
+                if (!runId) {
+                  if (selectedFactor) loadAnalysis(selectedFactor);
+                  return;
+                }
+                const record = analysisHistory.find(r => r.run_id === runId);
+                if (!record) return;
+                try {
+                  const extra = JSON.parse(record.extra || '{}');
+                  if (extra.result_id) {
+                    loadAnalysisById(record.task_id, extra.result_id);
+                  }
+                } catch { /* ignore */ }
+              }}
+              options={analysisHistory
+                .filter(r => r.status === 'success' && r.task_id === selectedFactor)
+                .map(r => {
+                  let paramsSummary = '';
+                  try {
+                    const p = JSON.parse(r.params || '{}');
+                    const parts: string[] = [];
+                    if (p.start_date || p.end_date) parts.push(`${p.start_date || ''}~${p.end_date || ''}`);
+                    if (p.periods) parts.push(`T+${Array.isArray(p.periods) ? p.periods.join(',') : p.periods}`);
+                    if (p.quantiles) parts.push(`${p.quantiles}分组`);
+                    if (p.index_pool) parts.push(p.index_pool);
+                    paramsSummary = parts.join(' ');
+                  } catch { /* ignore */ }
+                  return {
+                    value: r.run_id,
+                    label: `${(r.started_at || '').slice(0, 19)}${paramsSummary ? `  ·  ${paramsSummary}` : ''}`,
+                  };
+                })}
+            />
+          </div>
+        )}
+
+        {/* 第三行：因子预处理 */}
         <div style={{ marginBottom: 12, padding: '8px 12px', background: 'var(--bg-tertiary)', borderRadius: 4 }}>
           <div style={{ ...labelStyle, marginBottom: 8 }}>因子预处理</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
@@ -966,16 +1015,16 @@ const AnalysisPanel: React.FC = () => {
       )}
 
       <Card
-          style={{ marginTop: 16, background: 'var(--bg-card)' }}
-          title={<span style={{ color: 'var(--text-secondary)' }}>分析历史</span>}
-        >
-          <TaskLogTable
-            logs={analysisHistory}
-            loading={historyLoading}
-            taskIdLabel="因子ID"
-            onFilter={loadAnalysisHistory}
-          />
-        </Card>
+        style={{ marginTop: 16, background: 'var(--bg-card)' }}
+        title={<span style={{ color: 'var(--text-secondary)' }}>分析历史</span>}
+      >
+        <TaskLogTable
+          logs={analysisHistory}
+          loading={historyLoading}
+          taskIdLabel="因子ID"
+          onFilter={loadAnalysisHistory}
+        />
+      </Card>
 
       <FactorFlowDrawer
         open={flowDrawerOpen}

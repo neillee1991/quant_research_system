@@ -2,14 +2,14 @@
  * ETL 任务配置抽屉 - 组装层
  */
 import React, { useState, useEffect } from 'react';
-import { Tabs, Tag, Modal } from 'antd';
+import { Tabs, Modal } from 'antd';
 import { useMessage } from '../../../hooks/useMessage';
-import { dataApi, taskMonitorApi } from '../../../api';
+import { dataApi } from '../../../api';
 import type { ETLTask } from '../../../types';
 import { BaseTaskDrawer } from '../../../components/TaskDrawer/BaseTaskDrawer';
 import { UniversalJsonEditorTab } from '../../../components/TaskDrawer/tabs/UniversalJsonEditorTab';
-import { UniversalStatusTab } from '../../../components/TaskDrawer/tabs/UniversalStatusTab';
-import { UniversalHistoryTab } from '../../../components/TaskDrawer/tabs/UniversalHistoryTab';
+import { useTaskLogs } from '../../../hooks/useTaskLogs';
+import { TaskLogTable } from '../../../components/TaskLogTable';
 import { ETLVisualEditorTab } from './VisualEditorTab';
 import { ETLScriptTestTab } from './ScriptTestTab';
 
@@ -58,7 +58,6 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
   const message = useMessage();
   const [activeTab, setActiveTab] = useState('config');
   const [config, setConfig] = useState<any>(DEFAULT_CONFIG);
-  const [taskStatus, setTaskStatus] = useState<any>(null);
   const [tableExists, setTableExists] = useState(false);
   const [currentFields, setCurrentFields] = useState<FieldType[]>([]);
   const [testFields, setTestFields] = useState<FieldType[]>([]);
@@ -68,10 +67,11 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
   const [testLoading, setTestLoading] = useState(false);
   const [testDate, setTestDate] = useState('');
 
+  const { logs: etlLogs, loading: etlLogsLoading, loadLogs: loadEtlLogs } = useTaskLogs('etl', 50);
+
   useEffect(() => {
     if (visible && task && !isNew) {
       loadTaskConfig();
-      loadTaskStatus();
     } else if (visible && isNew && !task) {
       setConfig(DEFAULT_CONFIG);
       setTableExists(false);
@@ -80,9 +80,14 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
       setFieldDiffs([]);
       setSelectedPrimaryKeys([]);
       setTestResult(null);
-      setTaskStatus(null);
     }
   }, [visible, task, isNew]);
+
+  useEffect(() => {
+    if (activeTab === 'history' && config.task_id && !isNew) {
+      loadEtlLogs({ taskId: config.task_id });
+    }
+  }, [activeTab, config.task_id, isNew]);
 
   const loadTaskConfig = async () => {
     if (!task) return;
@@ -106,16 +111,6 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
       console.error('Failed to load ETL table schema:', error);
       setTableExists(false);
       setCurrentFields([]);
-    }
-  };
-
-  const loadTaskStatus = async () => {
-    if (!task) return;
-    try {
-      const res = await dataApi.getEtlTaskStatus(task.task_id);
-      setTaskStatus(res.data);
-    } catch (error) {
-      console.error('Failed to load ETL task status:', error);
     }
   };
 
@@ -308,24 +303,15 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
         />
       ),
     },
-    {
-      key: 'status',
-      label: '状态',
-      children: (
-        <UniversalStatusTab
-          taskType="etl"
-          taskId={config.task_id}
-          status={taskStatus}
-        />
-      ),
-    },
     ...(isNew ? [] : [{
       key: 'history',
       label: '历史记录',
       children: (
-        <UniversalHistoryTab
-          taskType="etl"
-          taskId={config.task_id}
+        <TaskLogTable
+          logs={etlLogs}
+          loading={etlLogsLoading}
+          taskIdLabel="任务ID"
+          onFilter={(f) => loadEtlLogs({ ...f, taskId: f.taskId || config.task_id })}
         />
       ),
     }]),
@@ -340,29 +326,6 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
       width={720}
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '8px 0' }}>
-        {/* 状态信息栏 - 仅编辑模式显示 */}
-        {!isNew && taskStatus && (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, padding: '12px', background: 'var(--bg-tertiary)', borderRadius: '6px' }}>
-            <div>
-              <div style={{ color: 'var(--text-secondary)', fontSize: '12px', marginBottom: 4 }}>最新数据</div>
-              <span style={{ color: 'var(--color-gain)', fontSize: '13px', fontWeight: 500 }}>{taskStatus.last_date || '-'}</span>
-            </div>
-            <div>
-              <div style={{ color: 'var(--text-secondary)', fontSize: '12px', marginBottom: 4 }}>上次同步</div>
-              <span style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>
-                {taskStatus.last_sync_time ? new Date(taskStatus.last_sync_time).toLocaleString() : '-'}
-              </span>
-            </div>
-            {selectedPrimaryKeys.length > 0 && (
-              <div>
-                <div style={{ color: 'var(--text-secondary)', fontSize: '12px', marginBottom: 4 }}>主键</div>
-                <span style={{ fontSize: '13px' }}>
-                  {selectedPrimaryKeys.map((k) => <Tag key={k} style={{ marginRight: 4 }}>{k}</Tag>)}
-                </span>
-              </div>
-            )}
-          </div>
-        )}
         <Tabs activeKey={activeTab} onChange={setActiveTab} items={tabItems} />
       </div>
     </BaseTaskDrawer>
