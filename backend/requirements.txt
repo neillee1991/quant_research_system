@@ -29,8 +29,10 @@ scikit-learn>=1.4.0
 xgboost>=2.0.0
 lightgbm>=4.0.0
 
-# Task Scheduling - Prefect
-prefect>=3.0.0
+# Task Scheduling - Custom Scheduler (replaces Prefect)
+asyncpg>=0.29.0
+psycopg2-binary>=2.9.0
+croniter>=2.0.0
 
 # Utilities
 python-dotenv>=1.0.0

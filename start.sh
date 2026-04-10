@@ -1,7 +1,7 @@
 #!/bin/bash
 # ===================================================================
 # 量化研究系统 - 一键启动脚本
-# 自动启动 DolphinDB、Prefect、后端和前端服务
+# 自动启动 DolphinDB、PostgreSQL、后端和前端服务
 # ===================================================================
 
 set -e
@@ -54,7 +54,7 @@ stop_services() {
     print_warning "正在停止已有服务..."
 
     # 按 PID 文件停止
-    for pid_file in "$BACKEND_PID" "$FRONTEND_PID" "$PREFECT_WORKER_PID"; do
+    for pid_file in "$BACKEND_PID" "$FRONTEND_PID"; do
         if [ -f "$pid_file" ]; then
             PID_NUM=$(cat "$pid_file")
             if kill -0 "$PID_NUM" 2>/dev/null; then
@@ -68,7 +68,6 @@ stop_services() {
     # 按进程名兜底
     pkill -f "uvicorn app.main:app" 2>/dev/null || true
     pkill -f "react-scripts start" 2>/dev/null || true
-    pkill -f "flows/serve.py" 2>/dev/null || true
 
     # 等待端口释放
     sleep 2
@@ -88,7 +87,7 @@ stop_services() {
 
 # 检查 Docker
 check_docker() {
-    print_step "1/7" "检查 Docker 环境..."
+    print_step "1/6" "检查 Docker 环境..."
 
     if ! command -v docker &> /dev/null; then
         print_error "Docker 未安装"
@@ -105,7 +104,7 @@ check_docker() {
 
 # 启动基础服务
 start_infrastructure() {
-    print_step "2/7" "启动基础服务 (DolphinDB + Prefect)..."
+    print_step "2/6" "启动基础服务 (DolphinDB + PostgreSQL)..."
 
     cd "$SCRIPT_DIR"
     DOLPHINDB_DATA_DIR="/Users/lisheng/Code/application/dolphin"
@@ -124,7 +123,7 @@ start_infrastructure() {
     chmod -R 777 "$DOLPHINDB_DATA_DIR"
 
     export DOLPHINDB_DATA_DIR
-    docker-compose up -d dolphindb prefect-server
+    docker-compose up -d dolphindb postgres
 
     # 等待 DolphinDB 就绪
     echo -e "${YELLOW}等待 DolphinDB 初始化...${NC}"
@@ -145,25 +144,25 @@ start_infrastructure() {
         exit 1
     fi
 
-    # 等待 Prefect Server 就绪
+    # 等待 PostgreSQL 就绪
     attempt=0
-    while [ $attempt -lt 20 ]; do
-        if curl -sf http://localhost:$PREFECT_PORT/api/health > /dev/null 2>&1; then
-            print_success "Prefect Server 已就绪"
+    while [ $attempt -lt $POSTGRES_MAX_ATTEMPTS ]; do
+        if docker exec $POSTGRES_CONTAINER pg_isready -U quant -d quantsystem -h localhost > /dev/null 2>&1; then
+            print_success "PostgreSQL 已就绪"
             break
         fi
         attempt=$((attempt + 1))
-        sleep 2
+        sleep $POSTGRES_CHECK_INTERVAL
     done
 
-    if [ $attempt -eq 20 ]; then
-        print_warning "Prefect Server 启动较慢，继续..."
+    if [ $attempt -eq $POSTGRES_MAX_ATTEMPTS ]; then
+        print_warning "PostgreSQL 启动较慢，继续..."
     fi
 }
 
 # 检查 Python 环境
 check_python() {
-    print_step "3/7" "检查 Python 环境..."
+    print_step "3/6" "检查 Python 环境..."
 
     if command -v python3.11 &> /dev/null; then
         PYTHON_CMD="python3.11"
@@ -188,7 +187,7 @@ check_python() {
 
 # 初始化后端
 init_backend() {
-    print_step "4/7" "初始化后端环境..."
+    print_step "4/6" "初始化后端环境..."
 
     cd "$BACKEND_DIR"
 
@@ -207,15 +206,12 @@ init_backend() {
         print_success "依赖已安装"
     fi
 
-    # 设置 Prefect API URL
-    export PREFECT_API_URL="http://localhost:$PREFECT_PORT/api"
-
     print_success "后端环境就绪"
 }
 
 # 启动后端
 start_backend() {
-    print_step "5/7" "启动后端服务..."
+    print_step "5/6" "启动后端服务..."
 
     cd "$BACKEND_DIR"
     source "$VENV_DIR/bin/activate"
@@ -223,8 +219,8 @@ start_backend() {
     # 创建日志和PID目录
     mkdir -p "$LOG_DIR" "$PID_DIR"
 
-    # 启动 uvicorn
-    nohup $PYTHON_CMD -m uvicorn app.main:app \
+    # 启动 uvicorn - 使用虚拟环境里的 python
+    nohup python -m uvicorn app.main:app \
         --host $BACKEND_HOST \
         --port $BACKEND_PORT \
         $BACKEND_RELOAD \
@@ -234,31 +230,9 @@ start_backend() {
     print_success "后端服务已启动 (PID: $(cat "$BACKEND_PID"))"
 }
 
-# 启动 Prefect Worker
-start_prefect_worker() {
-    print_step "6/7" "启动 Prefect Worker..."
-
-    if [ "$ENABLE_PREFECT_WORKER" != true ]; then
-        print_warning "Prefect Worker 已禁用"
-        return
-    fi
-
-    cd "$BACKEND_DIR"
-    source "$VENV_DIR/bin/activate"
-
-    export PREFECT_API_URL="http://localhost:$PREFECT_PORT/api"
-    export NO_PROXY="localhost,127.0.0.1"
-    export no_proxy="localhost,127.0.0.1"
-
-    # 注册并启动 flows
-    nohup $PYTHON_CMD flows/serve.py > "$PREFECT_WORKER_LOG" 2>&1 &
-    echo $! > "$PREFECT_WORKER_PID"
-    print_success "Prefect Worker 已启动 (PID: $(cat "$PREFECT_WORKER_PID"))"
-}
-
 # 启动前端
 start_frontend() {
-    print_step "7/7" "启动前端服务..."
+    print_step "6/6" "启动前端服务..."
 
     cd "$FRONTEND_DIR"
 
@@ -284,13 +258,11 @@ show_status() {
     echo -e "${BLUE}访问地址:${NC}"
     echo -e "  前端界面:    ${GREEN}http://localhost:$FRONTEND_PORT${NC}"
     echo -e "  API 文档:    ${GREEN}http://localhost:$BACKEND_PORT/docs${NC}"
-    echo -e "  Prefect UI:  ${GREEN}http://localhost:$PREFECT_PORT${NC}"
     echo -e "  DolphinDB:   ${GREEN}http://localhost:8848${NC} (Web管理)"
     echo ""
     echo -e "${BLUE}日志文件:${NC}"
     echo -e "  后端:          $BACKEND_LOG"
     echo -e "  前端:          $FRONTEND_LOG"
-    echo -e "  Prefect Worker: $PREFECT_WORKER_LOG"
     echo ""
     echo -e "${BLUE}管理命令:${NC}"
     echo -e "  查看状态: ${YELLOW}./check_status.sh${NC}"
@@ -321,7 +293,6 @@ main() {
     check_python
     init_backend
     start_backend
-    start_prefect_worker
     start_frontend
     show_status
 }

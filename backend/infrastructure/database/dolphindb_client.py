@@ -251,6 +251,14 @@ class DolphinDBClient:
         """种子数据：因子元数据"""
         logger.warning("seed_factor_metadata 需要从原始实现调用")
 
+    def seed_flow_config(self) -> None:
+        """种子数据：flow 配置"""
+        logger.warning("seed_flow_config 需要从原始实现调用")
+
+    def seed_user_sync_preference(self) -> None:
+        """种子数据：用户同步偏好配置"""
+        logger.warning("seed_user_sync_preference 需要从原始实现调用")
+
     def __getattr__(self, name):
         """
         向后兼容：捕获未定义的属性访问

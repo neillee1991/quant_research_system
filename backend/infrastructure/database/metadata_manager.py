@@ -144,6 +144,20 @@ class MetadataManager:
             "array(TIMESTAMP,0) as updated_at)",
             ["user_id"],
         ),
+        "flow_config": (
+            "table("
+            "array(SYMBOL,0) as name,"
+            "array(STRING,0) as description,"
+            "array(STRING,0) as cron,"
+            "array(STRING,0) as tags,"
+            "array(BOOL,0) as enabled,"
+            "array(INT,0) as date_offset_days,"
+            "array(STRING,0) as tasks,"
+            "array(TIMESTAMP,0) as created_at,"
+            "array(TIMESTAMP,0) as updated_at,"
+            "array(INT,0) as version)",
+            ["name"],
+        ),
         "task_runs": (
             "table("
             "array(SYMBOL,0) as run_id,"

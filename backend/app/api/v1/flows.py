@@ -1,163 +1,182 @@
 """
-Flow 配置管理 API
+Flow Configuration Management API (PostgreSQL + Custom Scheduler)
 """
-import re
-from pathlib import Path
 from typing import List, Optional
-from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
-import yaml
+from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
+from datetime import datetime, timedelta
 
 from app.core.logger import logger
+from app.models.flow_config import (
+    FlowConfigCreate,
+    FlowConfigUpdate,
+    FlowConfigInDB,
+    FlowConfigListItem,
+    TaskInDAG,
+)
+from app.services.flow_service import flow_service
+from scheduler.core import get_scheduler
+from scheduler.repository import FlowRunRepository
 
 router = APIRouter()
 
-# Flow 配置目录
-FLOWS_DIR = Path(__file__).parent.parent.parent.parent.parent / "config" / "flows"
 
-_SAFE_NAME_RE = re.compile(r'^[a-zA-Z0-9_\-]+$')
+# ==================== API Endpoints ====================
 
-
-def _validate_flow_name(name: str):
-    if not _SAFE_NAME_RE.match(name):
-        raise HTTPException(status_code=400, detail=f"Invalid flow name: '{name}'")
-
-
-class TaskConfig(BaseModel):
-    id: str
-    type: str  # "sync" or "factor"
-    depends_on: List[str] = []
+@router.get("/flows", response_model=List[FlowConfigListItem])
+def list_flows(
+    enabled_only: bool = Query(default=False, description="Only return enabled flows"),
+):
+    """List all flow configurations"""
+    try:
+        return flow_service.list_flows(enabled_only=enabled_only)
+    except Exception as e:
+        logger.error(f"Failed to list flows: {e}")
+        raise HTTPException(status_code=500, detail="Failed to list flows")
 
 
-class FlowConfig(BaseModel):
-    name: str
-    description: str = ""
-    cron: str
-    tags: List[str] = []
-    enabled: bool = True
-    tasks: List[TaskConfig] = []
-
-
-class FlowListItem(BaseModel):
-    name: str
-    description: str
-    cron: str
-    tags: List[str]
-    enabled: bool
-    task_count: int
-
-
-def _load_flow(name: str) -> dict:
-    """加载单个 Flow 配置"""
-    _validate_flow_name(name)
-    file_path = FLOWS_DIR / f"{name}.yaml"
-    if not file_path.exists():
-        raise HTTPException(status_code=404, detail=f"Flow '{name}' not found")
-    with open(file_path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
-
-
-def _save_flow(config: dict):
-    """保存 Flow 配置"""
-    _validate_flow_name(config['name'])
-    FLOWS_DIR.mkdir(parents=True, exist_ok=True)
-    file_path = FLOWS_DIR / f"{config['name']}.yaml"
-    with open(file_path, "w", encoding="utf-8") as f:
-        yaml.dump(config, f, allow_unicode=True, default_flow_style=False)
-
-
-def _delete_flow_file(name: str):
-    """删除 Flow 配置文件"""
-    file_path = FLOWS_DIR / f"{name}.yaml"
-    if file_path.exists():
-        file_path.unlink()
-
-
-@router.get("/flows", response_model=List[FlowListItem])
-def list_flows():
-    """列出所有 Flow 配置"""
-    flows = []
-    if not FLOWS_DIR.exists():
-        return flows
-
-    for file_path in FLOWS_DIR.glob("*.yaml"):
-        try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                config = yaml.safe_load(f)
-                flows.append(FlowListItem(
-                    name=config.get("name", file_path.stem),
-                    description=config.get("description", ""),
-                    cron=config.get("cron", ""),
-                    tags=config.get("tags", []),
-                    enabled=config.get("enabled", True),
-                    task_count=len(config.get("tasks", []))
-                ))
-        except Exception as e:
-            logger.warning(f"Failed to load flow {file_path}: {e}")
-
-    return flows
-
-
-@router.get("/flows/{name}", response_model=FlowConfig)
+@router.get("/flows/{name}", response_model=FlowConfigInDB)
 def get_flow(name: str):
-    """获取单个 Flow 配置"""
-    config = _load_flow(name)
-    return FlowConfig(**config)
+    """Get a single flow configuration"""
+    try:
+        flow = flow_service.get_flow(name)
+        if not flow:
+            raise HTTPException(status_code=404, detail=f"Flow '{name}' not found")
+        return flow
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get flow {name}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get flow")
 
 
-@router.post("/flows", response_model=FlowConfig)
-def create_flow(config: FlowConfig):
-    """创建新 Flow"""
-    file_path = FLOWS_DIR / f"{config.name}.yaml"
-    if file_path.exists():
-        raise HTTPException(status_code=400, detail=f"Flow '{config.name}' already exists")
+@router.post("/flows", response_model=FlowConfigInDB)
+def create_flow(config: FlowConfigCreate):
+    """Create a new flow configuration"""
+    try:
+        return flow_service.create_flow(config)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to create flow: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create flow")
 
-    _save_flow(config.model_dump())
-    logger.info(f"Created flow: {config.name}")
-    return config
 
-
-@router.put("/flows/{name}", response_model=FlowConfig)
-def update_flow(name: str, config: FlowConfig):
-    """更新 Flow 配置"""
-    file_path = FLOWS_DIR / f"{name}.yaml"
-    if not file_path.exists():
-        raise HTTPException(status_code=404, detail=f"Flow '{name}' not found")
-
-    # 如果名称变更，删除旧文件
-    if config.name != name:
-        _delete_flow_file(name)
-
-    _save_flow(config.model_dump())
-    logger.info(f"Updated flow: {config.name}")
-    return config
+@router.put("/flows/{name}", response_model=FlowConfigInDB)
+def update_flow(name: str, config: FlowConfigUpdate):
+    """Update a flow configuration"""
+    try:
+        return flow_service.update_flow(name, config)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to update flow {name}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update flow")
 
 
 @router.delete("/flows/{name}")
-def delete_flow(name: str):
-    """删除 Flow"""
-    file_path = FLOWS_DIR / f"{name}.yaml"
-    if not file_path.exists():
-        raise HTTPException(status_code=404, detail=f"Flow '{name}' not found")
-
-    _delete_flow_file(name)
-    logger.info(f"Deleted flow: {name}")
-    return {"status": "success", "message": f"Flow '{name}' deleted"}
+def delete_flow(name: str, hard: bool = Query(default=False, description="Hard delete (permanently remove)")):
+    """Delete a flow (disable by default, or hard delete)"""
+    try:
+        flow_service.delete_flow(name, soft_delete=not hard)
+        if hard:
+            return {"status": "success", "message": f"Flow '{name}' permanently deleted"}
+        else:
+            return {"status": "success", "message": f"Flow '{name}' disabled"}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to delete flow {name}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete flow")
 
 
 @router.post("/flows/{name}/run")
 async def run_flow(
     name: str,
-    target_date: Optional[str] = Query(None, description="目标日期 YYYYMMDD")
+    target_date: Optional[str] = Query(None, description="Target date YYYYMMDD (override date offset)"),
+    background_tasks: BackgroundTasks = None,
 ):
-    """立即执行 Flow"""
-    from flows.dynamic_flow import run_dynamic_flow
-
-    config = _load_flow(name)
-
+    """Run a flow immediately (legacy endpoint, uses scheduler)"""
     try:
-        result = await run_dynamic_flow(config, target_date)
-        return {"status": "success", "result": result}
+        scheduler = get_scheduler()
+        flow_run_id = await scheduler.trigger_flow_manual(name, target_date)
+
+        if not flow_run_id:
+            raise HTTPException(status_code=404, detail=f"Flow '{name}' not found")
+
+        return {
+            "status": "success",
+            "message": f"Flow '{name}' triggered",
+            "flow_run_id": flow_run_id,
+            "target_date": target_date,
+        }
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Flow execution failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Failed to run flow {name}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to run flow")
+
+
+@router.post("/flows/{name}/trigger")
+async def trigger_flow(
+    name: str,
+    target_date: Optional[str] = Query(None, description="Target date YYYYMMDD (override date offset)"),
+):
+    """Trigger a flow manually (returns flow_run_id)"""
+    try:
+        scheduler = get_scheduler()
+        flow_run_id = await scheduler.trigger_flow_manual(name, target_date)
+
+        if not flow_run_id:
+            raise HTTPException(status_code=404, detail=f"Flow '{name}' not found")
+
+        return {
+            "status": "success",
+            "message": f"Flow '{name}' triggered",
+            "flow_run_id": flow_run_id,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to trigger flow {name}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to trigger flow")
+
+
+@router.get("/flows/{name}/runs")
+async def list_flow_runs(
+    name: str,
+    limit: int = Query(default=50, ge=1, le=200, description="Maximum number of runs to return"),
+):
+    """List flow execution history"""
+    try:
+        runs = await FlowRunRepository.list_by_flow_name(name, limit=limit)
+        return {
+            "status": "success",
+            "data": runs,
+        }
+    except Exception as e:
+        logger.error(f"Failed to list flow runs for {name}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to list flow runs")
+
+
+# ==================== Dependency Inference ====================
+
+@router.post("/flows/infer-dependencies")
+def infer_dependencies(tasks: List[TaskInDAG]):
+    """
+    Infer dependencies for tasks automatically
+
+    For ETL tasks: parses SQL to find source tables and maps to sync tasks
+    For factor tasks: uses depends_on from factor config
+    """
+    try:
+        from app.services.dependency_inference import dependency_inference_service
+
+        inferred_tasks = dependency_inference_service.infer_dependencies(tasks)
+
+        return {
+            "status": "success",
+            "tasks": inferred_tasks,
+        }
+    except Exception as e:
+        logger.error(f"Failed to infer dependencies: {e}")
+        raise HTTPException(status_code=500, detail="Failed to infer dependencies")

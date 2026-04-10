@@ -39,6 +39,7 @@ class SeedDataManager:
         self.seed_factor_data_config()
         self.seed_factor_metadata()
         self.seed_user_sync_preference()
+        self.seed_flow_config()
         logger.info("Seed data initialization completed")
 
     def seed_sync_task_config(self) -> None:
@@ -220,3 +221,41 @@ class SeedDataManager:
         seed_df = pl.DataFrame([default_preference])
         self.db_client.upsert("user_sync_preference", seed_df, ["user_id"])
         logger.info("已写入默认用户同步偏好配置")
+
+    def seed_flow_config(self) -> None:
+        """
+        如果 flow_config 表为空，则写入默认 flow 配置
+        仅在首次启动时生效，后续可通过 API 增删改
+        """
+        try:
+            count = self.db_client.query("SELECT count(*) as cnt FROM flow_config")
+            if not count.is_empty() and count["cnt"][0] > 0:
+                logger.info("flow_config 已有数据，跳过 seed")
+                return
+        except Exception as e:
+            logger.debug(f"检查 flow_config 数据失败（表可能刚创建）: {e}")
+            # 表可能刚创建，继续 seed
+
+        now = datetime.now()
+        from .seed_flow_config import DEFAULT_FLOWS
+        import json
+
+        if not DEFAULT_FLOWS:
+            logger.warning("No flows found in DEFAULT_FLOWS, skipping seed")
+            return
+
+        seed_df = pl.DataFrame({
+            "name": [f["name"] for f in DEFAULT_FLOWS],
+            "description": [f["description"] for f in DEFAULT_FLOWS],
+            "cron": [f["cron"] for f in DEFAULT_FLOWS],
+            "tags": [json.dumps(f["tags"], ensure_ascii=False) for f in DEFAULT_FLOWS],
+            "enabled": [f["enabled"] for f in DEFAULT_FLOWS],
+            "date_offset_days": [f["date_offset_days"] for f in DEFAULT_FLOWS],
+            "tasks": [json.dumps(f["tasks"], ensure_ascii=False) for f in DEFAULT_FLOWS],
+            "created_at": [now] * len(DEFAULT_FLOWS),
+            "updated_at": [now] * len(DEFAULT_FLOWS),
+            "version": [1] * len(DEFAULT_FLOWS),
+        })
+
+        self.db_client.upsert("flow_config", seed_df, ["name"])
+        logger.info(f"已写入 {len(DEFAULT_FLOWS)} 条默认 flow 配置")

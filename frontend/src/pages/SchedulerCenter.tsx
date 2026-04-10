@@ -11,24 +11,25 @@ import {
 } from 'antd';
 import {
   ReloadOutlined,
-  ExportOutlined,
   ScheduleOutlined,
   PlusOutlined,
   EditOutlined,
   DeleteOutlined,
   PlayCircleOutlined,
+  HistoryOutlined,
 } from '@ant-design/icons';
 import { useMessage } from '../hooks/useMessage';
 import cronstrue from 'cronstrue/i18n';
-import { flowApi, FlowListItem } from '../api';
+import { flowApi, FlowListItem, FlowRun } from '../api';
 import FlowEditor from '../components/SchedulerFlowEditor';
 
 const SchedulerCenter: React.FC = () => {
-  const prefectUrl = process.env.REACT_APP_PREFECT_URL || 'http://localhost:4200';
   const message = useMessage();
 
   const [flows, setFlows] = useState<FlowListItem[]>([]);
+  const [flowRuns, setFlowRuns] = useState<FlowRun[]>([]);
   const [loading, setLoading] = useState(false);
+  const [runsLoading, setRunsLoading] = useState(false);
   const [editorVisible, setEditorVisible] = useState(false);
   const [editingFlow, setEditingFlow] = useState<string | undefined>();
   const [runningFlow, setRunningFlow] = useState<string | null>(null);
@@ -45,9 +46,41 @@ const SchedulerCenter: React.FC = () => {
     }
   };
 
+  const fetchFlowRuns = async () => {
+    setRunsLoading(true);
+    try {
+      // 为了简单，这里获取所有 flow 的最近运行记录
+      // 实际项目中可能需要单独的 API 来获取所有 flow runs
+      const allRuns: FlowRun[] = [];
+      for (const flow of flows) {
+        try {
+          const res = await flowApi.listRuns(flow.name, 10);
+          if (res.data?.data) {
+            allRuns.push(...res.data.data);
+          }
+        } catch (e) {
+          // 忽略单个 flow 的错误
+        }
+      }
+      // 按时间倒序排列
+      allRuns.sort((a, b) => new Date(b.started_at || 0).getTime() - new Date(a.started_at || 0).getTime());
+      setFlowRuns(allRuns.slice(0, 100));
+    } catch (e) {
+      message.error({ content: '加载 Flow 运行记录失败' });
+    } finally {
+      setRunsLoading(false);
+    }
+  };
+
   useEffect(() => {
     fetchFlows();
   }, []);
+
+  useEffect(() => {
+    if (flows.length > 0) {
+      fetchFlowRuns();
+    }
+  }, [flows]);
 
   const handleCreate = () => {
     setEditingFlow(undefined);
@@ -61,10 +94,13 @@ const SchedulerCenter: React.FC = () => {
 
   const handleDelete = async (name: string) => {
     try {
-      await flowApi.delete(name);
+      console.log('Deleting flow:', name);
+      await flowApi.delete(name, true);
       message.success({ content: `Flow "${name}" 已删除` });
-      fetchFlows();
+      console.log('Fetching flows again...');
+      await fetchFlows();
     } catch (e: any) {
+      console.error('Delete failed:', e);
       message.error({ content: e?.response?.data?.detail || '删除失败' });
     }
   };
@@ -72,8 +108,10 @@ const SchedulerCenter: React.FC = () => {
   const handleRun = async (name: string) => {
     setRunningFlow(name);
     try {
-      await flowApi.run(name);
+      await flowApi.trigger(name);
       message.success({ content: `Flow "${name}" 已开始执行` });
+      // 刷新运行记录
+      setTimeout(fetchFlowRuns, 2000);
     } catch (e: any) {
       message.error({ content: e?.response?.data?.detail || '执行失败' });
     } finally {
@@ -81,7 +119,39 @@ const SchedulerCenter: React.FC = () => {
     }
   };
 
-  const columns = [
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'success':
+        return 'green';
+      case 'running':
+        return 'blue';
+      case 'failed':
+        return 'red';
+      case 'cancelled':
+        return 'grey';
+      default:
+        return 'orange';
+    }
+  };
+
+  const getStatusText = (status: string) => {
+    switch (status) {
+      case 'success':
+        return '成功';
+      case 'running':
+        return '运行中';
+      case 'failed':
+        return '失败';
+      case 'cancelled':
+        return '已取消';
+      case 'pending':
+        return '等待中';
+      default:
+        return status;
+    }
+  };
+
+  const flowColumns = [
     {
       title: '名称',
       dataIndex: 'name',
@@ -94,7 +164,10 @@ const SchedulerCenter: React.FC = () => {
       title: '调度',
       dataIndex: 'cron',
       key: 'cron',
-      render: (cron: string) => {
+      render: (cron?: string) => {
+        if (!cron) {
+          return <span style={{ color: 'var(--text-secondary)' }}>手动触发</span>;
+        }
         let desc = '';
         try {
           desc = cronstrue.toString(cron, { locale: 'zh_CN' });
@@ -151,7 +224,6 @@ const SchedulerCenter: React.FC = () => {
             <Button
               type="text"
               icon={<PlayCircleOutlined />}
-             
               loading={runningFlow === record.name}
               onClick={() => handleRun(record.name)}
             />
@@ -160,25 +232,89 @@ const SchedulerCenter: React.FC = () => {
             <Button
               type="text"
               icon={<EditOutlined />}
-             
               onClick={() => handleEdit(record.name)}
             />
           </Tooltip>
-          <Popconfirm
-            title="确定删除此 Flow？"
-            onConfirm={() => handleDelete(record.name)}
-          >
-            <Tooltip title="删除">
+          <Tooltip title="删除">
+            <Popconfirm
+              title="确定删除此 Flow？"
+              onConfirm={() => handleDelete(record.name)}
+            >
               <Button
                 type="text"
                 icon={<DeleteOutlined />}
-               
                 danger
               />
-            </Tooltip>
-          </Popconfirm>
+            </Popconfirm>
+          </Tooltip>
         </Space>
       ),
+    },
+  ];
+
+  const runColumns = [
+    {
+      title: 'Flow 名称',
+      dataIndex: 'flow_name',
+      key: 'flow_name',
+      render: (name: string) => (
+        <span style={{ fontWeight: 500 }}>{name}</span>
+      ),
+    },
+    {
+      title: '运行 ID',
+      dataIndex: 'flow_run_id',
+      key: 'flow_run_id',
+      render: (id: string) => (
+        <code style={{ fontSize: 11 }}>{id.slice(0, 8)}...</code>
+      ),
+    },
+    {
+      title: '触发方式',
+      dataIndex: 'trigger_type',
+      key: 'trigger_type',
+      render: (type: string) => (
+        <Tag color={type === 'scheduled' ? 'blue' : 'orange'}>
+          {type === 'scheduled' ? '定时' : '手动'}
+        </Tag>
+      ),
+    },
+    {
+      title: '目标日期',
+      dataIndex: 'target_date',
+      key: 'target_date',
+    },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      key: 'status',
+      render: (status: string) => (
+        <Tag color={getStatusColor(status)}>
+          {getStatusText(status)}
+        </Tag>
+      ),
+    },
+    {
+      title: '开始时间',
+      dataIndex: 'started_at',
+      key: 'started_at',
+      render: (time?: string) => time ? new Date(time).toLocaleString('zh-CN') : '-',
+    },
+    {
+      title: '耗时',
+      dataIndex: 'duration_sec',
+      key: 'duration_sec',
+      render: (sec?: number) => sec !== undefined ? `${sec.toFixed(1)}s` : '-',
+    },
+    {
+      title: '错误',
+      dataIndex: 'error',
+      key: 'error',
+      render: (error?: string) => error ? (
+        <Tooltip title={error}>
+          <span style={{ color: 'var(--error-color)' }}>查看</span>
+        </Tooltip>
+      ) : '-',
     },
   ];
 
@@ -230,7 +366,7 @@ const SchedulerCenter: React.FC = () => {
               </div>
 
               <Table
-                columns={columns}
+                columns={flowColumns}
                 dataSource={flows}
                 rowKey="name"
                 loading={loading}
@@ -241,34 +377,28 @@ const SchedulerCenter: React.FC = () => {
           ),
         },
         {
-          key: 'prefect',
-          label: 'Prefect Dashboard',
+          key: 'history',
+          label: '执行历史',
           children: (
             <div>
-              <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-                <Tooltip title="刷新">
-                  <Button type="text" icon={<ReloadOutlined />} onClick={() => {
-                    const iframe = document.querySelector('iframe');
-                    if (iframe) iframe.src = iframe.src;
-                  }} />
-                </Tooltip>
-                <Tooltip title="在新标签页打开">
-                  <Button type="text" icon={<ExportOutlined />} onClick={() => window.open(prefectUrl, '_blank')} />
-                </Tooltip>
+              <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'flex-end' }}>
+                <Button
+                  type="text"
+                  icon={<ReloadOutlined />}
+                  onClick={fetchFlowRuns}
+                >
+                  刷新
+                </Button>
               </div>
 
-              <div style={{
-                borderRadius: 8,
-                overflow: 'hidden',
-                border: '1px solid var(--border-color)',
-                minHeight: 'calc(100vh - 240px)',
-              }}>
-                <iframe
-                  src={prefectUrl}
-                  style={{ width: '100%', height: 'calc(100vh - 240px)', border: 'none' }}
-                  title="Prefect Dashboard"
-                />
-              </div>
+              <Table
+                columns={runColumns}
+                dataSource={flowRuns}
+                rowKey="flow_run_id"
+                loading={runsLoading}
+                pagination={{ pageSize: 20 }}
+                locale={{ emptyText: <Empty description="暂无执行记录" /> }}
+              />
             </div>
           ),
         },
@@ -278,7 +408,9 @@ const SchedulerCenter: React.FC = () => {
         visible={editorVisible}
         flowName={editingFlow}
         onClose={() => setEditorVisible(false)}
-        onSaved={fetchFlows}
+        onSaved={() => {
+          fetchFlows();
+        }}
       />
     </div>
   );

@@ -19,7 +19,7 @@ class TableManager:
         "stock_basic", "factor_metadata",
         "factor_analysis",
         "sync_task_config", "etl_task_config", "factor_data_config", "trade_cal",
-        "index_metadata", "user_sync_preference"
+        "index_metadata", "user_sync_preference", "flow_config"
     })
 
     # TSDB 表集合（时间序列表，存储在 TSDB 数据库）

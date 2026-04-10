@@ -39,6 +39,10 @@ def main():
         db_client.seed_factor_metadata()
         print("✓ 种子因子定义已写入")
 
+        # 写入默认 flow 配置
+        db_client.seed_flow_config()
+        print("✓ flow 配置种子数据已写入")
+
         print("\n所有元数据表初始化完成！")
 
     except Exception as e:

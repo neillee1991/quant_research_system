@@ -25,26 +25,25 @@ services:
     networks:
       - quant_network
 
-  prefect-server:
-    image: prefecthq/prefect:3-latest
-    container_name: quant_prefect
-    command: prefect server start 
+  postgres:
+    image: postgres:16-alpine
+    container_name: quant_postgres
     ports:
-      - "4200:4200"
-    environment:
-      PREFECT_SERVER_API_HOST: "0.0.0.0"
-      PREFECT_UI_API_URL: "http://localhost:4200/api"
-      PREFECT_API_DATABASE_CONNECTION_URL: "sqlite+aiosqlite:////data/prefect.db"
-      TZ: Asia/Shanghai
+      - "5432:5432"
     volumes:
-      - ${PREFECT_DATA_DIR:-./data/prefect}:/data
+      - ${POSTGRES_DATA_DIR:-./data/postgres}:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: quantsystem
+      POSTGRES_USER: quant
+      POSTGRES_PASSWORD: quant123
+      TZ: Asia/Shanghai
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "python -c 'import httpx; httpx.get(\"http://localhost:4200/api/health\")' || exit 1"]
-      interval: 15s
-      timeout: 10s
+      test: ["CMD-SHELL", "pg_isready -U quant -d quantsystem -h localhost"]
+      interval: 10s
+      timeout: 5s
       retries: 5
-      start_period: 20s
+      start_period: 10s
     networks:
       - quant_network
 

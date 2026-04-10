@@ -38,6 +38,15 @@ class DolphinDBConfig(_BaseConfig):
     db_path: str = Field(default="dfs://quant", env="DOLPHINDB_DB_PATH")
 
 
+class PostgreSQLConfig(_BaseConfig):
+    """PostgreSQL 数据库配置（调度器元数据）"""
+    postgres_host: str = Field(default="localhost", env="POSTGRES_HOST")
+    postgres_port: int = Field(default=5432, env="POSTGRES_PORT")
+    postgres_db: str = Field(default="quantsystem", env="POSTGRES_DB")
+    postgres_user: str = Field(default="quant", env="POSTGRES_USER")
+    postgres_password: str = Field(default="quant123", env="POSTGRES_PASSWORD")
+
+
 class BacktestConfig(_BaseConfig):
     """回测配置"""
     initial_capital: float = Field(default=1_000_000.0, gt=0)
@@ -87,6 +96,7 @@ class Settings(BaseSettings):
     # 子配置
     collector: DataCollectorConfig = Field(default_factory=DataCollectorConfig)
     database: DolphinDBConfig = Field(default_factory=DolphinDBConfig)
+    postgresql: PostgreSQLConfig = Field(default_factory=PostgreSQLConfig)
     prefect_api_url: str = Field(default="http://localhost:4200/api", env="PREFECT_API_URL")
     backtest: BacktestConfig = Field(default_factory=BacktestConfig)
     ml: MLConfig = Field(default_factory=MLConfig)

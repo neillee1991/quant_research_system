@@ -52,14 +52,11 @@ kill_service "后端服务" "$BACKEND_PID" "uvicorn app.main:app"
 # 停止前端（匹配 react-scripts start）
 kill_service "前端服务" "$FRONTEND_PID" "react-scripts start"
 
-# 停止 Prefect Worker
-kill_service "Prefect Worker" "$PREFECT_WORKER_PID" "flows/serve.py"
-
 # 等待端口释放
 sleep 1
 
 # 验证端口已释放
-for port in 8000 3000; do
+for port in $BACKEND_PORT $FRONTEND_PORT; do
     if lsof -ti ":$port" > /dev/null 2>&1; then
         echo -e "${YELLOW}端口 $port 仍被占用，强制释放...${NC}"
         lsof -ti ":$port" | xargs kill -9 2>/dev/null || true
@@ -69,7 +66,7 @@ done
 
 # 询问是否停止 Docker 服务
 echo ""
-read -p "是否停止 Docker 服务 (DolphinDB/Prefect)? (y/n): " -n 1 -r
+read -p "是否停止 Docker 服务 (DolphinDB/PostgreSQL)? (y/n): " -n 1 -r
 echo
 if [[ $REPLY =~ ^[Yy]$ ]]; then
     cd "$SCRIPT_DIR"

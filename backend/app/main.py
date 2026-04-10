@@ -20,6 +20,13 @@ from infrastructure.seed import SeedDataLoader, SeedDataManager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     logger.info("Starting application...")
+
+    # 启动调度器
+    from scheduler.core import get_scheduler
+    scheduler = get_scheduler()
+    await scheduler.start()
+    logger.info("调度器已启动")
+
     # 动态创建缺失的维度表（使用全局单例，避免重复连接）
     try:
         db_client.ensure_meta_tables()
@@ -46,7 +53,11 @@ async def lifespan(app: FastAPI):
         logger.warning(f"Failed to cleanup stale tasks: {e}")
 
     yield
+
     logger.info("Shutting down application...")
+    # 停止调度器
+    await scheduler.stop()
+    logger.info("调度器已停止")
 
 
 def create_app() -> FastAPI:

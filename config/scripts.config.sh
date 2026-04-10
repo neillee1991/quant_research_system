@@ -14,8 +14,8 @@ BACKEND_RELOAD="--reload"  # 开发模式自动重载，生产环境设为空
 # 前端服务
 FRONTEND_PORT="3000"
 
-# Prefect 服务
-PREFECT_PORT="4200"
+# PostgreSQL 服务
+POSTGRES_PORT="5432"
 
 # ==================== Docker 服务 ====================
 
@@ -23,8 +23,8 @@ PREFECT_PORT="4200"
 DOLPHINDB_CONTAINER="quant_dolphindb"
 DOLPHINDB_PORT="8848"
 
-# Prefect
-PREFECT_CONTAINER="quant_prefect"
+# PostgreSQL
+POSTGRES_CONTAINER="quant_postgres"
 
 # ==================== 路径配置 ====================
 
@@ -37,13 +37,11 @@ FRONTEND_DIR="$SCRIPT_DIR/frontend"
 LOG_DIR="$SCRIPT_DIR/logs"
 BACKEND_LOG="$LOG_DIR/backend.log"
 FRONTEND_LOG="$LOG_DIR/frontend.log"
-PREFECT_WORKER_LOG="$LOG_DIR/prefect_worker.log"
 
 # PID 文件目录
 PID_DIR="$SCRIPT_DIR/.pids"
 BACKEND_PID="$PID_DIR/backend.pid"
 FRONTEND_PID="$PID_DIR/frontend.pid"
-PREFECT_WORKER_PID="$PID_DIR/prefect_worker.pid"
 
 # ==================== Python 配置 ====================
 
@@ -65,6 +63,11 @@ DB_INIT_WAIT=10
 DB_MAX_ATTEMPTS=30
 DB_CHECK_INTERVAL=3
 
+# PostgreSQL 健康检查
+POSTGRES_INIT_WAIT=5
+POSTGRES_MAX_ATTEMPTS=10
+POSTGRES_CHECK_INTERVAL=2
+
 # ==================== 颜色配置 ====================
 
 RED='\033[0;31m'
@@ -77,6 +80,3 @@ NC='\033[0m'  # No Color
 
 # 是否自动安装依赖（true/false）
 AUTO_INSTALL_DEPS=true
-
-# 是否启动 Prefect Worker（true/false）
-ENABLE_PREFECT_WORKER=true
