@@ -1,17 +1,24 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.security import OAuth2PasswordRequestForm
 
 from app.core.config import settings
 from app.core.logger import logger
 from app.core.exceptions import QuantException, quant_exception_handler, general_exception_handler
-from app.api.v1 import strategy, ml, flows, versions, tasks, schema_tools
+from app.core.auth import (
+    create_access_token,
+    get_current_active_user,
+    User,
+    fake_users_db,
+)
+from app.core.rate_limit import setup_rate_limiter
+from app.api.v1 import strategy, ml, flows, tasks, schema_tools
 from app.api.v1 import factor  # 使用拆分后的 factor 模块
 from app.api.v1 import data  # 使用拆分后的 data 模块
 from app.api.v1 import config_api  # 配置管理 API
-from app.api.v1.generic_task import create_task_router
-from app.services import sync_service, etl_service, factor_service
+from app.api.v1 import config_api  # 配置管理 API
 from store.dolphindb_client import db_client
 from infrastructure.seed import SeedDataLoader, SeedDataManager
 
@@ -100,9 +107,32 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    # 速率限制中间件
+    setup_rate_limiter(app)
+
     # 异常处理器
     app.add_exception_handler(QuantException, quant_exception_handler)
     app.add_exception_handler(Exception, general_exception_handler)
+
+    # 认证端点
+    @app.post(f"{settings.api_v1_prefix}/auth/token", tags=["auth"])
+    async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
+        """OAuth2 兼容的 token 端点"""
+        user_dict = fake_users_db.get(form_data.username)
+        if not user_dict:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="用户名或密码错误",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        access_token = create_access_token(data={"sub": form_data.username})
+        return {"access_token": access_token, "token_type": "bearer"}
+
+    @app.get(f"{settings.api_v1_prefix}/auth/me", tags=["auth"])
+    async def read_users_me(current_user: User = Depends(get_current_active_user)):
+        """获取当前用户信息"""
+        return current_user
 
     # 路由注册
     app.include_router(data.router, prefix=settings.api_v1_prefix, tags=["data"])
@@ -110,23 +140,11 @@ def create_app() -> FastAPI:
     app.include_router(ml.router, prefix=settings.api_v1_prefix, tags=["ml"])
     app.include_router(factor.router, prefix=settings.api_v1_prefix, tags=["factor"])
     app.include_router(flows.router, prefix=settings.api_v1_prefix, tags=["flows"])
-    app.include_router(versions.router, prefix=settings.api_v1_prefix, tags=["versions"])
     app.include_router(schema_tools.router, prefix=settings.api_v1_prefix, tags=["schema-tools"])
     app.include_router(config_api.router, prefix=settings.api_v1_prefix, tags=["config"])
 
     # 统一任务管理路由
     app.include_router(tasks.router, prefix=settings.api_v1_prefix, tags=["tasks"])
-
-    # 新的通用任务管理路由
-    app.include_router(
-        create_task_router(sync_service, f"{settings.api_v1_prefix}/sync", ["Sync Tasks"]),
-    )
-    app.include_router(
-        create_task_router(etl_service, f"{settings.api_v1_prefix}/etl", ["ETL Tasks"]),
-    )
-    app.include_router(
-        create_task_router(factor_service, f"{settings.api_v1_prefix}/factors", ["Factor Tasks"]),
-    )
 
     return app
 

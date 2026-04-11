@@ -1,55 +1,42 @@
 #!/usr/bin/env python3
 """
-手动初始化 DolphinDB 元数据表
+手动初始化 PostgreSQL 元数据表（seed 数据）
+
+用法：
+    cd backend
+    python database/init_meta_tables.py
 """
+import asyncio
 import sys
 from pathlib import Path
-# Add backend directory to Python path so imports work correctly
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from store.dolphindb_client import db_client
-from app.core.logger import logger
 
-def main():
+async def main():
     print("开始初始化元数据表...")
 
     try:
-        # 创建所有元数据表
-        db_client.ensure_meta_tables()
-        print("✓ 元数据表创建成功")
+        from scheduler.db import init_db, close_db
+        await init_db()
 
-        # 初始化股票池表（新增）
-        from database.init_stock_pool_tables import init_stock_pool_tables
-        init_stock_pool_tables()
-        print("✓ 股票池模块表创建成功")
-
-        # 写入默认同步任务配置
-        db_client.seed_sync_task_config()
-        print("✓ 同步任务配置种子数据已写入")
-
-        # 写入默认 ETL 任务配置
-        db_client.seed_etl_task_config()
-        print("✓ ETL 任务配置种子数据已写入")
-
-        # 写入因子数据配置
-        db_client.seed_factor_data_config()
-        print("✓ 因子数据配置种子数据已写入")
-
-        # 写入默认种子因子定义
-        db_client.seed_factor_metadata()
-        print("✓ 种子因子定义已写入")
-
-        # 写入默认 flow 配置
-        db_client.seed_flow_config()
-        print("✓ flow 配置种子数据已写入")
-
-        print("\n所有元数据表初始化完成！")
+        from infrastructure.seed import SeedDataLoader, SeedDataManager
+        seed_manager = SeedDataManager(loader=SeedDataLoader())
+        await seed_manager.seed_all()
+        print("✓ 所有元数据表初始化完成")
 
     except Exception as e:
         print(f"✗ 初始化失败: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)
+    finally:
+        try:
+            from scheduler.db import close_db
+            await close_db()
+        except Exception:
+            pass
+
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

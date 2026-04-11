@@ -87,9 +87,9 @@ class SeedDataManager:
             await DatabasePool.execute("""
                 INSERT INTO etl_task_configs
                   (task_id, description, script, sync_type, date_field,
-                   primary_keys_json, table_name, schema_json, enabled,
+                   primary_keys_json, table_name, schema_json, source_tables, enabled,
                    created_at, updated_at)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
                 ON CONFLICT (task_id) DO NOTHING
             """,
                 t["task_id"], t["description"], t["script"],
@@ -97,6 +97,7 @@ class SeedDataManager:
                 json.dumps(t.get("primary_keys", [])),
                 t["table_name"],
                 json.dumps(t.get("schema", {}), ensure_ascii=False),
+                json.dumps(t.get("source_tables", [])),
                 True, now, now,
             )
         logger.info(f"已写入 {len(tasks)} 条默认 ETL 任务配置")

@@ -7,15 +7,17 @@ import uuid
 import types
 import traceback
 from datetime import datetime
-from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Query, BackgroundTasks, Depends
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 import polars as pl
 
 from store.dolphindb_client import db_client
-from app.services.factor_compute_service import FactorComputeService, DEFAULT_PREPROCESS as _DEFAULT_PREPROCESS
+from app.services.factor_service import FactorComputeService, DEFAULT_PREPROCESS as _DEFAULT_PREPROCESS
 from engine.factor.registry import FactorDefinition, StorageConfig
 from app.core.logger import logger
+from app.core.auth import get_current_active_user, User
+from app.core.sandbox import check_security, SandboxSecurityError
 from app.core.utils import (
     DateUtils,
     safe_json_parse,
@@ -97,7 +99,11 @@ async def _run_factor_background(
 
 
 @router.post("/factor/run")
-async def run_production(req: ProductionRunRequest, background_tasks: BackgroundTasks):
+async def run_production(
+    req: ProductionRunRequest,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_active_user)
+):
     """运行生产任务（异步）
 
     立即返回 run_id，后台执行计算。使用 /production/status/{run_id} 查询状态。
@@ -140,7 +146,11 @@ async def run_production(req: ProductionRunRequest, background_tasks: Background
 
 
 @router.post("/factor/batch-run")
-async def batch_run_production(req: BatchRunRequest, background_tasks: BackgroundTasks):
+async def batch_run_production(
+    req: BatchRunRequest,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_active_user)
+):
     """批量计算因子（异步）
 
     立即返回所有 run_id，后台并行执行。使用 /production/status/{run_id} 查询各因子状态。
@@ -183,7 +193,10 @@ async def batch_run_production(req: BatchRunRequest, background_tasks: Backgroun
 
 
 @router.get("/factor/status/{run_id}")
-async def get_run_status(run_id: str):
+async def get_run_status(
+    run_id: str,
+    current_user: User = Depends(get_current_active_user)
+):
     """查询因子计算任务状态（使用统一 task_runs 表）"""
     from scheduler.db import DatabasePool
 
@@ -214,7 +227,8 @@ async def get_production_history(
     factor_id: Optional[str] = None,
     limit: int = 20,
     start_date: Optional[str] = Query(None, description="开始日期 YYYYMMDD"),
-    end_date: Optional[str] = Query(None, description="结束日期 YYYYMMDD")
+    end_date: Optional[str] = Query(None, description="结束日期 YYYYMMDD"),
+    current_user: User = Depends(get_current_active_user)
 ):
     """获取生产运行历史（使用统一 task_runs 表）"""
     from scheduler.db import DatabasePool
@@ -267,7 +281,10 @@ async def get_production_history(
 
 
 @router.post("/factor/factors/test")
-async def test_factor_code(req: FactorTestRequest):
+async def test_factor_code(
+    req: FactorTestRequest,
+    current_user: User = Depends(get_current_active_user)
+):
     """编译并测试因子代码，返回计算结果预览
 
     流程：
@@ -292,7 +309,14 @@ async def test_factor_code(req: FactorTestRequest):
             "stdout": stdout_capture.getvalue(),
         }
 
-    # 1. 编译代码
+    # 1. 安全检查
+    log("security", "执行安全检查...")
+    security_issues = check_security(req.code)
+    if security_issues:
+        return make_error("security", f"安全检查失败: {'; '.join(security_issues)}")
+    log("security", "安全检查通过")
+
+    # 2. 编译代码
     log("compile", f"编译代码 ({len(req.code)} 字符)...")
     t0 = time.time()
     try:

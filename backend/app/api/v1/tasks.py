@@ -120,6 +120,23 @@ def _get_service(task_type: str) -> TaskService:
     return service
 
 
+def _normalize_task_config(config_data: Dict[str, Any]) -> Dict[str, Any]:
+    """将前端发送的字段名规范化为模型期望的字段名。
+
+    前端 SyncTaskDrawer/ETLTaskDrawer 发送 primary_keys (list) 和 schema (dict)，
+    但 SyncTaskConfig/ETLTaskConfig 期望 primary_keys_json (string) 和 schema_json (string)。
+    """
+    data = dict(config_data)
+    if "primary_keys" in data and "primary_keys_json" not in data:
+        pk = data.pop("primary_keys")
+        data["primary_keys_json"] = json.dumps(pk) if isinstance(pk, list) else str(pk)
+    if "schema" in data and "schema_json" not in data:
+        schema = data.pop("schema")
+        data["schema_json"] = json.dumps(schema, ensure_ascii=False) if isinstance(schema, dict) else str(schema)
+    data.pop("confirm_schema_change", None)
+    return data
+
+
 # ==================== API 端点 ====================
 
 class RunningTaskResponse(BaseModel):
@@ -268,6 +285,151 @@ async def get_config_version():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ==================== ETL / Sync 专用端点 ====================
+
+@router.post("/tasks/etl/test")
+async def test_etl_script(payload: dict):
+    """测试 ETL 脚本，返回执行结果及字段类型"""
+    from app.api.v1.data.etl_api import test_etl_script as _test
+    return await _test(payload)
+
+
+@router.post("/tasks/sync/all")
+async def sync_all_tasks(
+    target_date: Optional[str] = Query(None, description="目标日期 YYYYMMDD")
+):
+    """同步所有启用的任务（后台执行）"""
+    import threading
+    from data_manager.refactored_sync_engine import sync_engine
+
+    try:
+        tasks = await sync_service.list_tasks(enabled_only=True)
+        for task in tasks:
+            t_run_id = f"{task.task_id}_{int(time.time() * 1000)}"
+            await TaskRunner.start(
+                t_run_id, "sync", task.task_id, f"数据同步: {task.task_id}",
+                params=json.dumps({"target_date": target_date}),
+            )
+    except Exception as log_err:
+        logger.warning(f"Failed to start tasks for sync_all: {log_err}")
+
+    def run_sync():
+        try:
+            results = sync_engine.sync_all_enabled_tasks(target_date)
+            logger.info(f"Background sync completed: {results}")
+        except Exception as e:
+            logger.error(f"Background sync failed: {e}")
+
+    threading.Thread(target=run_sync, daemon=True).start()
+    return {"status": "started", "message": "All enabled tasks sync started in background"}
+
+
+@router.post("/tasks/etl/{task_id}/backfill")
+async def backfill_etl_task(
+    task_id: str = Path(..., description="任务ID"),
+    start_date: str = Query("", description="开始日期 YYYYMMDD"),
+    end_date: str = Query("", description="结束日期 YYYYMMDD"),
+):
+    """回溯执行 ETL 任务"""
+    from app.api.v1.data.etl_api import backfill_etl_task as _backfill
+    return await _backfill(task_id, start_date, end_date)
+
+
+@router.post("/tasks/etl/{task_id}/create-table")
+async def create_etl_table(
+    task_id: str = Path(..., description="任务ID"),
+    payload: dict = None,
+):
+    """根据字段定义创建 ETL 目标表"""
+    from app.api.v1.data.etl_api import create_etl_table as _create
+    return await _create(task_id, payload or {})
+
+
+@router.get("/tasks/etl/{task_id}/schema")
+async def get_etl_table_schema(
+    task_id: str = Path(..., description="任务ID"),
+):
+    """获取 ETL 任务的字段定义"""
+    from app.api.v1.data.etl_api import get_etl_table_schema as _schema
+    return await _schema(task_id)
+
+
+@router.get("/tasks/{task_type}/{task_id}/status")
+async def get_task_data_status(
+    task_type: str = Path(..., description="任务类型: sync, etl"),
+    task_id: str = Path(..., description="任务ID"),
+):
+    """获取任务数据状态（最新数据日期、上次同步时间）"""
+    try:
+        from scheduler.db import DatabasePool
+
+        # 获取任务配置
+        service = _get_service(task_type)
+        task = await service.get_task(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail=f"Task {task_id} not found in {task_type}")
+
+        task_dict = task.model_dump()
+        table_name = task_dict.get("table_name")
+        date_field = task_dict.get("date_field") or ""
+
+        # 获取最新数据日期（从目标表）
+        table_latest_date = None
+        if table_name:
+            try:
+                db_client.register_meta_table(table_name)
+                if date_field and db_client.table_exists(table_name):
+                    sql = f'SELECT MAX({date_field}) as max_date FROM {table_name}'
+                    result = db_client.query(sql)
+                    if not result.is_empty() and result["max_date"][0] is not None:
+                        max_date_val = result["max_date"][0]
+                        if isinstance(max_date_val, str):
+                            s = max_date_val.replace("-", "").replace(" ", "")[:8]
+                            if len(s) == 8 and s.isdigit():
+                                table_latest_date = s
+                        elif isinstance(max_date_val, int):
+                            s = str(max_date_val)
+                            if len(s) == 8:
+                                table_latest_date = s
+                        elif hasattr(max_date_val, "strftime"):
+                            table_latest_date = max_date_val.strftime("%Y%m%d")
+            except Exception as e:
+                logger.warning(f"Failed to get latest date for {task_type} table {table_name}: {e}")
+
+        # 获取上次同步时间（从 PostgreSQL task_runs 表）
+        last_sync_time = None
+        try:
+            last_run = await DatabasePool.fetchrow("""
+                SELECT finished_at FROM task_runs
+                WHERE task_type = $1 AND task_id = $2 AND status = 'success'
+                ORDER BY COALESCE(finished_at, started_at) DESC
+                LIMIT 1
+            """, task_type, task_id)
+            if last_run and last_run.get("finished_at"):
+                finished_at = last_run["finished_at"]
+                last_sync_time = finished_at.strftime("%Y-%m-%d %H:%M:%S") if hasattr(finished_at, "strftime") else str(finished_at)
+        except Exception as e:
+            logger.warning(f"Failed to get last sync time for {task_type} task {task_id}: {e}")
+
+        # 构建响应（统一格式）
+        result = {
+            "task_id": task_dict.get("task_id"),
+            "description": task_dict.get("description", ""),
+            "sync_type": task_dict.get("sync_type", ""),
+            "table_name": table_name,
+            "enabled": task_dict.get("enabled", True),
+            "last_sync_date": table_latest_date,
+            "last_sync_time": last_sync_time,
+            "table_latest_date": table_latest_date,  # 别名，兼容前端
+        }
+        return {"status": "success", "data": result}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get {task_type} task status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/tasks/{task_type}", response_model=TaskListResponse)
 async def list_tasks(
     task_type: str = Path(..., description="任务类型: sync, etl, factor"),
@@ -351,7 +513,7 @@ async def create_task(
     try:
         service = _get_service(task_type)
         task = await service.create_task(
-            config_data=request.config_data,
+            config_data=_normalize_task_config(request.config_data),
             changed_by=request.changed_by,
             change_reason=request.change_reason
         )
@@ -376,7 +538,7 @@ async def update_task(
         service = _get_service(task_type)
         task = await service.update_task(
             task_id=task_id,
-            config_data=request.config_data,
+            config_data=_normalize_task_config(request.config_data),
             changed_by=request.changed_by,
             change_reason=request.change_reason
         )
@@ -505,7 +667,7 @@ async def _execute_etl_task_background(task_id: str, start_date: Optional[str], 
 async def _execute_factor_task_background(task_id: str, start_date: Optional[str], end_date: Optional[str], run_id: str):
     """后台执行因子任务"""
     import asyncio
-    from app.services.factor_compute_service import FactorComputeService
+    from app.services.factor_service import FactorComputeService
     from store.dolphindb_client import db_client
     service = FactorComputeService(db_client)
     compute_result = await asyncio.get_event_loop().run_in_executor(

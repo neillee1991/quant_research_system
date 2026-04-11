@@ -285,8 +285,10 @@ db_client.upsert("table_name", polars_df, ["primary", "keys"])
 | Data processor | `backend/data_manager/processor.py` |
 | Sync engine | `backend/data_manager/refactored_sync_engine.py` |
 | DolphinDB client | `backend/store/dolphindb_client.py` |
-| Production API | `backend/app/api/v1/production.py` |
-| Data API | `backend/app/api/v1/data_merged.py` |
+| Factor API | `backend/app/api/v1/factor/` |
+| Data API | `backend/app/api/v1/data/` |
+| Tasks API (unified) | `backend/app/api/v1/tasks.py` |
+| Factor compute service | `backend/app/services/factor_service.py` |
 | Prefect flows | `backend/flows/data_sync_flow.py` |
 | Config | `.env` (project root) |
 | Logs | `backend/logs/app.log` |

@@ -3,10 +3,11 @@ Pytest 配置文件
 提供共享的 fixtures 和测试配置
 """
 import pytest
-from unittest.mock import Mock, MagicMock
+from unittest.mock import Mock, MagicMock, patch
 import polars as pl
 import pandas as pd
 from datetime import datetime
+from fastapi.testclient import TestClient
 
 
 @pytest.fixture
@@ -291,3 +292,10 @@ def pytest_collection_modifyitems(config, items):
         # 为所有测试添加 unit 标记（如果没有其他标记）
         if not any(mark.name in ["integration", "slow"] for mark in item.iter_markers()):
             item.add_marker(pytest.mark.unit)
+
+
+@pytest.fixture
+def client():
+    """TestClient fixture for FastAPI app"""
+    from app.main import app
+    return TestClient(app)
