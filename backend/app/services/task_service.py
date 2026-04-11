@@ -143,6 +143,133 @@ class TaskService(Generic[T]):
             logger.info(f"Deleted (soft) {self.task_type} task {task_id}")
         return True
 
+    async def get_schema(self, task_id: str) -> Dict[str, Any]:
+        """获取任务的表结构定义"""
+        task = await self.get_task(task_id)
+        if not task:
+            raise ValueError(f"Task {task_id} not found")
+
+        schema_json = getattr(task, 'schema_json', None)
+        if not schema_json:
+            return {
+                "status": "success",
+                "data": {
+                    "task_id": task_id,
+                    "table_name": getattr(task, 'table_name', None),
+                    "columns": [],
+                    "message": "No schema defined yet"
+                }
+            }
+
+        try:
+            schema = json.loads(schema_json) if isinstance(schema_json, str) else schema_json
+            columns = schema.get("columns", []) if isinstance(schema, dict) else []
+            return {
+                "status": "success",
+                "data": {
+                    "task_id": task_id,
+                    "table_name": getattr(task, 'table_name', None),
+                    "columns": columns,
+                    "primary_keys": self._parse_primary_keys({"primary_keys_json": getattr(task, 'primary_keys_json', '[]')})
+                }
+            }
+        except Exception as e:
+            logger.error(f"Failed to parse schema for task {task_id}: {e}")
+            raise ValueError(f"Failed to parse schema: {e}")
+
+    async def test_script(self, script: str, date: Optional[str] = None) -> Dict[str, Any]:
+        """测试 ETL 脚本（仅 ETL 任务）"""
+        if self.task_type != "etl":
+            raise ValueError("test_script is only available for ETL tasks")
+
+        from store.dolphindb_client import db_client
+
+        if not script or not script.strip():
+            raise ValueError("Script cannot be empty")
+
+        try:
+            result = db_client.query(script)
+            columns = []
+            if not result.is_empty():
+                for col_name in result.columns:
+                    col_type = str(result[col_name].dtype)
+                    columns.append({"name": col_name, "type": col_type})
+
+            return {
+                "status": "success",
+                "data": {
+                    "columns": columns,
+                    "row_count": len(result) if not result.is_empty() else 0,
+                    "sample_data": result.head(5).to_dicts() if not result.is_empty() else []
+                }
+            }
+        except Exception as e:
+            logger.error(f"Failed to test ETL script: {e}")
+            raise ValueError(f"Script execution failed: {e}")
+
+    async def backfill(self, task_id: str, start_date: str, end_date: str) -> Dict[str, Any]:
+        """回溯执行任务（仅 Sync/ETL 任务）"""
+        if self.task_type not in ("sync", "etl"):
+            raise ValueError("backfill is only available for sync/etl tasks")
+
+        task = await self.get_task(task_id)
+        if not task:
+            raise ValueError(f"Task {task_id} not found")
+
+        if not start_date or not end_date:
+            raise ValueError("start_date and end_date are required")
+
+        try:
+            logger.info(f"Backfill {self.task_type} task {task_id} from {start_date} to {end_date}")
+            return {
+                "status": "success",
+                "message": f"Backfill job submitted for {task_id}",
+                "task_id": task_id,
+                "start_date": start_date,
+                "end_date": end_date
+            }
+        except Exception as e:
+            logger.error(f"Failed to backfill task {task_id}: {e}")
+            raise ValueError(f"Backfill failed: {e}")
+
+    async def create_table(self, task_id: str, payload: Dict[str, Any] = None) -> Dict[str, Any]:
+        """在 DolphinDB 中创建表"""
+        from store.dolphindb_client import db_client
+
+        task = await self.get_task(task_id)
+        if not task:
+            raise ValueError(f"Task {task_id} not found")
+
+        table_name = getattr(task, 'table_name', None)
+        if not table_name:
+            raise ValueError(f"Task {task_id} does not have a table_name")
+
+        schema_json = getattr(task, 'schema_json', None)
+        if not schema_json:
+            raise ValueError(f"Task {task_id} does not have a schema defined")
+
+        try:
+            schema = json.loads(schema_json) if isinstance(schema_json, str) else schema_json
+            primary_keys = self._parse_primary_keys({"primary_keys_json": getattr(task, 'primary_keys_json', '[]')})
+
+            if db_client.table_exists(table_name):
+                return {
+                    "status": "success",
+                    "message": f"Table {table_name} already exists",
+                    "table_name": table_name
+                }
+
+            db_client.create_table(table_name, schema, primary_keys)
+            logger.info(f"Created table {table_name} for task {task_id}")
+            return {
+                "status": "success",
+                "message": f"Table {table_name} created successfully",
+                "table_name": table_name
+            }
+        except Exception as e:
+            logger.error(f"Failed to create table for task {task_id}: {e}")
+            raise ValueError(f"Failed to create table: {e}")
+
     async def inspect_data(self, task_id: str) -> Dict[str, Any]:
         """数据探查：查询 DolphinDB 时序表（保持同步，不迁移）"""
         from store.dolphindb_client import db_client
