@@ -32,8 +32,8 @@ def sync_task(task_id: str, start_date: Optional[str] = None, end_date: Optional
         params["end_date"] = end_date
 
     resp = httpx.post(
-        f"{_API_BASE}/data/sync/task/{task_id}",
-        params=params,
+        f"{_API_BASE}/tasks/sync/{task_id}/execute",
+        json=params,
         timeout=_HTTP_TIMEOUT,
     )
     resp.raise_for_status()
@@ -142,7 +142,7 @@ def sync_all_data(start_date: Optional[str] = None, end_date: Optional[str] = No
     logger.info(f"开始全量数据同步: {start_date} → {end_date}")
 
     # 获取所有启用的任务列表
-    resp = httpx.get(f"{_API_BASE}/data/sync/tasks", timeout=30)
+    resp = httpx.get(f"{_API_BASE}/tasks/sync", timeout=30)
     resp.raise_for_status()
     tasks_data = resp.json()
     task_list = tasks_data.get("tasks", [])

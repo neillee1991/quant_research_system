@@ -167,14 +167,10 @@ export const productionApi = {
 
   // 指数股票池管理
   listIndexPools: () => api.get('/factor/index-pool/list'),
-  getIndexPool: (indexCode: string, tradeDate?: string) =>
-    api.get(`/factor/index-pool/${indexCode}`, { params: { trade_date: tradeDate } }),
   batchUploadIndexPool: (data: { index_code: string; index_name?: string; description?: string; data: any[] }) =>
     api.post('/factor/index-pool/batch-upload', data),
   csvUploadIndexPool: (data: { index_code: string; index_name?: string; description?: string; csv_content: string }) =>
     api.post('/factor/index-pool/csv-upload', data),
-  deleteIndexPool: (indexCode: string) => api.delete(`/factor/index-pool/${indexCode}`),
-  downloadIndexPoolTemplate: () => api.get('/factor/index-pool/template', { responseType: 'text' }),
 
   // Alphalens 分析 API
   runAlphalensAnalysis: (data: {

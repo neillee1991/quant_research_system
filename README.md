@@ -172,6 +172,22 @@ python -m flows.serve
 - ✅ GZip 压缩（响应减少60-80%）
 - ✅ VectorBT 向量化回测
 
+## 📚 文档导航
+
+完整文档请查看 [docs/INDEX.md](docs/INDEX.md)
+
+| 文档 | 用途 |
+|------|------|
+| [docs/SETUP.md](docs/SETUP.md) | 开发环境快速设置 |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 系统架构详解 |
+| [docs/DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md) | 开发规范和最佳实践 |
+| [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | 常见问题解决 |
+| [docs/API_REFERENCE.md](docs/API_REFERENCE.md) | REST API 文档 |
+| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | 生产环境部署 |
+| [docs/SECURITY_HARDENING_REPORT.md](docs/SECURITY_HARDENING_REPORT.md) | 安全加固报告 |
+
+---
+
 ## 开发指南
 
 ### 后端开发

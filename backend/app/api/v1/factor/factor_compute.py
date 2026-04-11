@@ -30,7 +30,6 @@ from app.services.task_runner import TaskRunner, tracked_task
 router = APIRouter()
 factor_service = FactorComputeService(db_client)
 
-
 # ==================== Pydantic Models ====================
 
 class PreprocessOptions(BaseModel):
@@ -41,7 +40,6 @@ class PreprocessOptions(BaseModel):
     new_stock_days: int = 60            # 新股排除天数
     mark_limit: bool = True             # 标记一字涨跌停
 
-
 class ProductionRunRequest(BaseModel):
     """生产任务运行请求"""
     factor_id: str
@@ -51,7 +49,6 @@ class ProductionRunRequest(BaseModel):
     end_date: Optional[str] = None
     preprocess: Optional[PreprocessOptions] = None
 
-
 class BatchRunRequest(BaseModel):
     """批量运行请求"""
     factor_ids: List[str]
@@ -59,7 +56,6 @@ class BatchRunRequest(BaseModel):
     start_date: Optional[str] = None
     end_date: Optional[str] = None
     preprocess: Optional[PreprocessOptions] = None
-
 
 class FactorTestRequest(BaseModel):
     """因子测试请求"""
@@ -70,7 +66,6 @@ class FactorTestRequest(BaseModel):
     depends_on: List[str] = ["sync_daily_data"]
     preprocess: Optional[Dict[str, Any]] = None
     lookback_days: int = 60  # 向前回溯天数，用于自动计算数据加载起始日期
-
 
 # ==================== API Endpoints ====================
 
@@ -96,7 +91,6 @@ async def _run_factor_background(
     )
     logger.info(f"Factor {factor_id} computation completed: run_id={run_id}, success={result.success}, rows={result.rows}")
     return result
-
 
 @router.post("/factor/run")
 async def run_production(
@@ -144,7 +138,6 @@ async def run_production(
         logger.error(f"Failed to start factor computation: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @router.post("/factor/batch-run")
 async def batch_run_production(
     req: BatchRunRequest,
@@ -190,95 +183,6 @@ async def batch_run_production(
     except Exception as e:
         logger.error(f"Failed to start batch computation: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/factor/status/{run_id}")
-async def get_run_status(
-    run_id: str,
-    current_user: User = Depends(get_current_active_user)
-):
-    """查询因子计算任务状态（使用统一 task_runs 表）"""
-    from scheduler.db import DatabasePool
-
-    try:
-        row = await DatabasePool.fetchrow(
-            "SELECT * FROM task_runs WHERE run_id = $1 ORDER BY started_at DESC LIMIT 1",
-            run_id,
-        )
-
-        if not row:
-            raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
-
-        record = dict(row)
-        for field in ["created_at", "updated_at", "started_at", "finished_at"]:
-            if record.get(field):
-                record[field] = str(record[field])
-
-        return {"status": "success", "data": record}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to get run status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/factor/history")
-async def get_production_history(
-    factor_id: Optional[str] = None,
-    limit: int = 20,
-    start_date: Optional[str] = Query(None, description="开始日期 YYYYMMDD"),
-    end_date: Optional[str] = Query(None, description="结束日期 YYYYMMDD"),
-    current_user: User = Depends(get_current_active_user)
-):
-    """获取生产运行历史（使用统一 task_runs 表）"""
-    from scheduler.db import DatabasePool
-
-    try:
-        where_conditions = ["task_type = 'factor'"]
-        params: list = []
-        idx = 1
-
-        if factor_id:
-            where_conditions.append(f"task_id = ${idx}")
-            params.append(factor_id)
-            idx += 1
-
-        if start_date:
-            if not DateUtils.validate_yyyymmdd(start_date):
-                raise HTTPException(status_code=400, detail="start_date must be YYYYMMDD")
-            where_conditions.append(f"started_at::date >= ${idx}::date")
-            params.append(f"{start_date[:4]}-{start_date[4:6]}-{start_date[6:8]}")
-            idx += 1
-
-        if end_date:
-            if not DateUtils.validate_yyyymmdd(end_date):
-                raise HTTPException(status_code=400, detail="end_date must be YYYYMMDD")
-            where_conditions.append(f"started_at::date <= ${idx}::date")
-            params.append(f"{end_date[:4]}-{end_date[4:6]}-{end_date[6:8]}")
-            idx += 1
-
-        params.append(limit)
-        where_clause = " AND ".join(where_conditions)
-
-        rows = await DatabasePool.fetch(
-            f"SELECT * FROM task_runs WHERE {where_clause} ORDER BY started_at DESC LIMIT ${idx}",
-            *params,
-        )
-
-        data = []
-        for row in rows:
-            r = dict(row)
-            for field in ["created_at", "updated_at", "started_at", "finished_at"]:
-                if r.get(field):
-                    r[field] = str(r[field])
-            data.append(r)
-
-        return {"status": "success", "data": data}
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
 
 @router.post("/factor/factors/test")
 async def test_factor_code(

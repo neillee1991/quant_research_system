@@ -15,13 +15,11 @@ router = APIRouter()
 _job_status: dict[str, dict] = {}
 _JOB_TTL_SECONDS = 3600  # expire entries after 1 hour
 
-
 def _evict_expired_jobs():
     now = time.time()
     expired = [jid for jid, v in list(_job_status.items()) if now - v.get("_ts", now) > _JOB_TTL_SECONDS]
     for jid in expired:
         del _job_status[jid]
-
 
 class MLTrainRequest(BaseModel):
     ts_code: str
@@ -29,7 +27,6 @@ class MLTrainRequest(BaseModel):
     end_date: str = "20241231"
     feature_cols: Optional[list[str]] = None
     task: str = "full"  # "automl" | "optimize" | "full"
-
 
 def _run_ml_job(job_id: str, ts_code: str, start: str, end: str,
                 feature_cols: list[str] | None, task: str):
@@ -56,7 +53,6 @@ def _run_ml_job(job_id: str, ts_code: str, start: str, end: str,
         logger.error(f"ML job {job_id} failed: {e}")
         _job_status[job_id] = {"status": "failed", "result": str(e), "_ts": time.time()}
 
-
 @router.post("/ml/train")
 def start_ml_train(req: MLTrainRequest, background_tasks: BackgroundTasks):
     """Start an ML training job in the background."""
@@ -69,16 +65,6 @@ def start_ml_train(req: MLTrainRequest, background_tasks: BackgroundTasks):
         req.feature_cols, req.task
     )
     return {"job_id": job_id, "status": "queued"}
-
-
-@router.get("/ml/status/{job_id}")
-def get_ml_status(job_id: str):
-    """Poll ML job status."""
-    if job_id not in _job_status:
-        raise HTTPException(status_code=404, detail="Job not found")
-    entry = _job_status[job_id]
-    return {"status": entry["status"], "result": entry["result"]}
-
 
 @router.get("/ml/weights")
 def get_best_weights():

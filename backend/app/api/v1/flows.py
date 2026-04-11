@@ -20,11 +20,9 @@ from scheduler.repository import FlowRunRepository
 
 router = APIRouter()
 
-
 class BackfillRequest(BaseModel):
     start_date: str
     end_date: str
-
 
 # ==================== API Endpoints ====================
 
@@ -38,7 +36,6 @@ def list_flows(
     except Exception as e:
         logger.error(f"Failed to list flows: {e}")
         raise HTTPException(status_code=500, detail="Failed to list flows")
-
 
 @router.get("/flows/{name}", response_model=FlowConfigInDB)
 def get_flow(name: str):
@@ -54,7 +51,6 @@ def get_flow(name: str):
         logger.error(f"Failed to get flow {name}: {e}")
         raise HTTPException(status_code=500, detail="Failed to get flow")
 
-
 @router.post("/flows", response_model=FlowConfigInDB)
 def create_flow(config: FlowConfigCreate):
     """Create a new flow configuration"""
@@ -66,7 +62,6 @@ def create_flow(config: FlowConfigCreate):
         logger.error(f"Failed to create flow: {e}")
         raise HTTPException(status_code=500, detail="Failed to create flow")
 
-
 @router.put("/flows/{name}", response_model=FlowConfigInDB)
 def update_flow(name: str, config: FlowConfigUpdate):
     """Update a flow configuration"""
@@ -77,7 +72,6 @@ def update_flow(name: str, config: FlowConfigUpdate):
     except Exception as e:
         logger.error(f"Failed to update flow {name}: {e}")
         raise HTTPException(status_code=500, detail="Failed to update flow")
-
 
 @router.delete("/flows/{name}")
 def delete_flow(name: str, hard: bool = Query(default=False, description="Hard delete (permanently remove)")):
@@ -93,34 +87,6 @@ def delete_flow(name: str, hard: bool = Query(default=False, description="Hard d
     except Exception as e:
         logger.error(f"Failed to delete flow {name}: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete flow")
-
-
-@router.post("/flows/{name}/run")
-async def run_flow(
-    name: str,
-    target_date: Optional[str] = Query(None, description="Target date YYYYMMDD (override date offset)"),
-    background_tasks: BackgroundTasks = None,
-):
-    """Run a flow immediately (legacy endpoint, uses scheduler)"""
-    try:
-        scheduler = get_scheduler()
-        flow_run_id = await scheduler.trigger_flow_manual(name, target_date)
-
-        if not flow_run_id:
-            raise HTTPException(status_code=404, detail=f"Flow '{name}' not found")
-
-        return {
-            "status": "success",
-            "message": f"Flow '{name}' triggered",
-            "flow_run_id": flow_run_id,
-            "target_date": target_date,
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to run flow {name}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to run flow")
-
 
 @router.post("/flows/{name}/trigger")
 async def trigger_flow(
@@ -146,7 +112,6 @@ async def trigger_flow(
         logger.error(f"Failed to trigger flow {name}: {e}")
         raise HTTPException(status_code=500, detail="Failed to trigger flow")
 
-
 @router.post("/flows/{name}/backfill")
 async def backfill_flow(name: str, body: BackfillRequest, background_tasks: BackgroundTasks):
     """回溯模式：按交易日串行触发多个 FlowRun（后台执行）"""
@@ -170,8 +135,6 @@ async def backfill_flow(name: str, body: BackfillRequest, background_tasks: Back
     except Exception as e:
         logger.error(f"Failed to backfill flow {name}: {e}")
         raise HTTPException(status_code=500, detail="Failed to start backfill")
-
-
 
 @router.get("/flows/{name}/runs/{flow_run_id}")
 async def get_flow_run_detail(name: str, flow_run_id: str):
@@ -237,7 +200,6 @@ async def get_flow_run_detail(name: str, flow_run_id: str):
         logger.error(f"Failed to get flow run detail {flow_run_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to get flow run detail")
 
-
 @router.get("/flows/{name}/runs")
 async def list_flow_runs(
     name: str,
@@ -271,7 +233,6 @@ async def list_flow_runs(
     except Exception as e:
         logger.error(f"Failed to list flow runs for {name}: {e}")
         raise HTTPException(status_code=500, detail="Failed to list flow runs")
-
 
 # ==================== Dependency Inference ====================
 

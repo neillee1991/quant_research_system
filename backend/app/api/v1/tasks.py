@@ -77,12 +77,6 @@ class DeleteResponse(BaseModel):
     task_type: str
 
 
-class VersionResponse(BaseModel):
-    """版本响应"""
-    version: int
-    message: str
-
-
 class DataInspectionResponse(BaseModel):
     """数据探查响应"""
     table_name: str
@@ -255,73 +249,25 @@ def _format_task_row(row: dict) -> dict:
     return row
 
 
-@router.get("/tasks/version", response_model=VersionResponse)
-async def get_config_version():
-    """获取配置版本号（基于最新更新时间的时间戳）"""
-    try:
-        from scheduler.db import DatabasePool
-
-        tables = ["sync_task_configs", "etl_task_configs", "factor_configs"]
-        max_timestamp = 0
-
-        for table in tables:
-            try:
-                row = await DatabasePool.fetchrow(
-                    f"SELECT MAX(updated_at) AS max_time FROM {table}"
-                )
-                if row and row["max_time"]:
-                    timestamp = int(row["max_time"].timestamp() * 1000)
-                    max_timestamp = max(max_timestamp, timestamp)
-            except Exception as e:
-                logger.warning(f"Failed to get version from {table}: {e}")
-
-        return VersionResponse(
-            version=max_timestamp,
-            message=f"Configuration version: {max_timestamp}"
-        )
-
-    except Exception as e:
-        logger.error(f"Failed to get config version: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 # ==================== ETL / Sync 专用端点 ====================
 
 @router.post("/tasks/etl/test")
 async def test_etl_script(payload: dict):
     """测试 ETL 脚本，返回执行结果及字段类型"""
-    from app.api.v1.data.etl_api import test_etl_script as _test
-    return await _test(payload)
+    # 使用 etl_service 来测试脚本
+    script = payload.get("script", "")
+    date = payload.get("date")
 
-
-@router.post("/tasks/sync/all")
-async def sync_all_tasks(
-    target_date: Optional[str] = Query(None, description="目标日期 YYYYMMDD")
-):
-    """同步所有启用的任务（后台执行）"""
-    import threading
-    from data_manager.refactored_sync_engine import sync_engine
+    if not script or not script.strip():
+        raise HTTPException(status_code=400, detail="Script cannot be empty")
 
     try:
-        tasks = await sync_service.list_tasks(enabled_only=True)
-        for task in tasks:
-            t_run_id = f"{task.task_id}_{int(time.time() * 1000)}"
-            await TaskRunner.start(
-                t_run_id, "sync", task.task_id, f"数据同步: {task.task_id}",
-                params=json.dumps({"target_date": target_date}),
-            )
-    except Exception as log_err:
-        logger.warning(f"Failed to start tasks for sync_all: {log_err}")
+        result = await etl_service.test_script(script, date)
+        return result
+    except Exception as e:
+        logger.error(f"Failed to test ETL script: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
 
-    def run_sync():
-        try:
-            results = sync_engine.sync_all_enabled_tasks(target_date)
-            logger.info(f"Background sync completed: {results}")
-        except Exception as e:
-            logger.error(f"Background sync failed: {e}")
-
-    threading.Thread(target=run_sync, daemon=True).start()
-    return {"status": "started", "message": "All enabled tasks sync started in background"}
 
 
 @router.post("/tasks/etl/{task_id}/backfill")
@@ -331,8 +277,12 @@ async def backfill_etl_task(
     end_date: str = Query("", description="结束日期 YYYYMMDD"),
 ):
     """回溯执行 ETL 任务"""
-    from app.api.v1.data.etl_api import backfill_etl_task as _backfill
-    return await _backfill(task_id, start_date, end_date)
+    try:
+        result = await etl_service.backfill(task_id, start_date, end_date)
+        return result
+    except Exception as e:
+        logger.error(f"Failed to backfill ETL task {task_id}: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.post("/tasks/etl/{task_id}/create-table")
@@ -341,8 +291,12 @@ async def create_etl_table(
     payload: dict = None,
 ):
     """根据字段定义创建 ETL 目标表"""
-    from app.api.v1.data.etl_api import create_etl_table as _create
-    return await _create(task_id, payload or {})
+    try:
+        result = await etl_service.create_table(task_id, payload or {})
+        return result
+    except Exception as e:
+        logger.error(f"Failed to create ETL table for {task_id}: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/tasks/etl/{task_id}/schema")
@@ -350,8 +304,12 @@ async def get_etl_table_schema(
     task_id: str = Path(..., description="任务ID"),
 ):
     """获取 ETL 任务的字段定义"""
-    from app.api.v1.data.etl_api import get_etl_table_schema as _schema
-    return await _schema(task_id)
+    try:
+        result = await etl_service.get_schema(task_id)
+        return result
+    except Exception as e:
+        logger.error(f"Failed to get ETL schema for {task_id}: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/tasks/{task_type}/{task_id}/status")
@@ -624,7 +582,7 @@ async def _execute_etl_task_background(task_id: str, start_date: Optional[str], 
         import psycopg2
         import psycopg2.extras
         from app.core.config import settings
-        from app.api.v1.data.etl_api import _etl_execute_and_write
+        from store.dolphindb_client import db_client
 
         conn = psycopg2.connect(
             host=settings.postgresql.postgres_host,
@@ -656,7 +614,16 @@ async def _execute_etl_task_background(task_id: str, start_date: Optional[str], 
             date_str = datetime.now().strftime("%Y.%m.%d")
 
         script = script_template.replace("{date}", date_str)
-        return _etl_execute_and_write(task_id, script, task)
+
+        # 执行 ETL 脚本并写入结果
+        try:
+            result = db_client.query(script)
+            if result is not None and hasattr(result, '__len__'):
+                return len(result)
+            return 0
+        except Exception as e:
+            logger.error(f"Failed to execute ETL script for {task_id}: {e}")
+            raise
 
     rows = await asyncio.get_event_loop().run_in_executor(None, _run_etl)
     logger.info(f"ETL task {task_id} completed: run_id={run_id}, rows={rows}")

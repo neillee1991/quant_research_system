@@ -219,6 +219,36 @@ cd backend
 python database/init_dolphindb.py
 ```
 
+### Prefect 工作流编排
+
+项目使用 Prefect 3.x 进行任务编排和调度。
+
+**主要工作流**:
+- `data_sync_flow.py` - 数据同步流程（定时执行）
+- `factor_compute_flow.py` - 因子计算流程
+- `backtest_flow.py` - 回测执行流程
+
+**访问 Prefect UI**:
+```bash
+# Prefect UI 地址
+http://localhost:4200
+
+# 查看已部署的流程
+# 查看运行历史
+# 监控任务执行状态
+```
+
+**部署新工作流**:
+```bash
+cd backend
+
+# 部署流程到 Prefect Server
+python -m prefect deployment build flows/your_flow.py:your_flow -n "your-deployment"
+
+# 运行流程
+python -m prefect deployment run "your-flow/your-deployment"
+```
+
 ---
 
 ## 测试指南

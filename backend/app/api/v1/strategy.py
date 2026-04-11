@@ -15,10 +15,8 @@ from store.dolphindb_client import db_client
 
 router = APIRouter()
 
-
 class BacktestRequest(BaseModel):
     graph: dict[str, Any]
-
 
 class SimpleBacktestRequest(BaseModel):
     ts_code: str
@@ -29,13 +27,11 @@ class SimpleBacktestRequest(BaseModel):
     slippage_rate: float = 0.0001
     initial_capital: float = 1_000_000.0
 
-
 def _load_data(ts_code: str, start: str, end: str):
     return db_client.query(
         "SELECT * FROM sync_daily_data WHERE ts_code=%s AND trade_date>=%s AND trade_date<=%s ORDER BY trade_date",
         [ts_code, start, end],
     )
-
 
 @tracked_task("backtest", task_id_kwarg="task_id")
 async def _run_backtest_background(task_id: str, graph: dict, run_id: str):
@@ -70,7 +66,6 @@ async def _run_backtest_background(task_id: str, graph: dict, run_id: str):
         "extra": {"result": {"type": "table", "table": "backtest_results"}},
     }
 
-
 @router.post("/strategy/backtest/async")
 async def backtest_async(request: dict, background_tasks: BackgroundTasks):
     """异步回测 - 立即返回 run_id，后台执行，结果持久化到 backtest_results 表"""
@@ -91,26 +86,6 @@ async def backtest_async(request: dict, background_tasks: BackgroundTasks):
     )
 
     return {"run_id": run_id, "task_id": task_id, "status": "running"}
-
-
-@router.get("/strategy/backtest/history")
-async def get_backtest_history(limit: int = Query(default=20, le=100)):
-    """查询回测历史（从 PostgreSQL task_runs 表）"""
-    from scheduler.db import DatabasePool
-
-    rows = await DatabasePool.fetch(
-        "SELECT * FROM task_runs WHERE task_type = 'backtest' ORDER BY started_at DESC LIMIT $1",
-        limit,
-    )
-    tasks = []
-    for row in rows:
-        r = dict(row)
-        for field in ["started_at", "finished_at"]:
-            if field in r and r[field]:
-                r[field] = str(r[field])
-        tasks.append(r)
-    return {"tasks": tasks, "total": len(tasks)}
-
 
 @router.get("/strategy/backtest/{run_id}/result")
 async def get_backtest_result(run_id: str):
@@ -134,7 +109,6 @@ async def get_backtest_result(run_id: str):
         "created_at": str(r.get("created_at", "")),
     }
 
-
 @router.post("/strategy/backtest")
 def run_backtest(req: BacktestRequest):
     """Run a backtest from a React Flow graph JSON."""
@@ -148,9 +122,3 @@ def run_backtest(req: BacktestRequest):
         logger.error(f"Backtest error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
-@router.get("/strategy/operators")
-def list_operators():
-    """Return available operator definitions for the frontend node palette."""
-    from engine.parser.flow_parser import OPERATOR_REGISTRY
-    return {"operators": OPERATOR_REGISTRY}

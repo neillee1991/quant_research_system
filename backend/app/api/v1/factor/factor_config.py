@@ -13,7 +13,6 @@ from app.core.cache import api_cache
 
 router = APIRouter()
 
-
 # ==================== Pydantic Models ====================
 
 class DataFieldMapping(BaseModel):
@@ -23,10 +22,8 @@ class DataFieldMapping(BaseModel):
     column_name: str = ""
     extra_config: str = "{}"
 
-
 class DataConfigUpdateRequest(BaseModel):
     mappings: List[DataFieldMapping]
-
 
 class IndexPoolBatchUploadRequest(BaseModel):
     index_code: str
@@ -34,13 +31,11 @@ class IndexPoolBatchUploadRequest(BaseModel):
     description: str = ""
     data: List[Dict[str, Any]]
 
-
 class IndexPoolCSVUploadRequest(BaseModel):
     index_code: str
     index_name: str = ""
     description: str = ""
     csv_content: str
-
 
 # ==================== Data Config Endpoints ====================
 
@@ -65,7 +60,6 @@ async def get_data_config():
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @router.put("/factor/data-config")
 async def update_data_config(req: DataConfigUpdateRequest):
@@ -94,7 +88,6 @@ async def update_data_config(req: DataConfigUpdateRequest):
         return {"status": "success", "message": f"已更新 {len(req.mappings)} 条配置"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @router.get("/factor/data-config/resolved")
 async def get_resolved_data_config():
@@ -137,7 +130,6 @@ async def get_resolved_data_config():
         return response
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @router.get("/factor/available-tables")
 async def get_available_tables():
@@ -199,7 +191,6 @@ async def get_available_tables():
         return response
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 
 # ==================== Index Pool Endpoints ====================
 
@@ -271,7 +262,6 @@ async def batch_upload_index_pool(req: IndexPoolBatchUploadRequest):
         logger.error(f"Failed to upload index pool: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @router.post("/factor/index-pool/csv-upload")
 async def csv_upload_index_pool(req: IndexPoolCSVUploadRequest):
     """CSV 上传指数成分股"""
@@ -303,7 +293,6 @@ async def csv_upload_index_pool(req: IndexPoolCSVUploadRequest):
         logger.error(f"Failed to parse CSV: {e}")
         raise HTTPException(status_code=500, detail=f"CSV 解析失败: {str(e)}")
 
-
 @router.get("/factor/index-pool/list")
 async def list_index_pools():
     """列出所有指数股票池（PostgreSQL index_configs）"""
@@ -328,7 +317,6 @@ async def list_index_pools():
         logger.error(f"Failed to list index pools: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @router.get("/factor/index-pool/template")
 async def get_index_pool_template():
     """获取指数成分股上传模板（CSV 格式）"""
@@ -340,75 +328,6 @@ async def get_index_pool_template():
             "description": "CSV 格式模板，包含 trade_date（交易日期）、ts_code（股票代码）、weight（权重，可选）"
         }
     }
-
-
-@router.get("/factor/index-pool/{index_code}")
-async def get_index_pool_detail(index_code: str, trade_date: Optional[str] = None):
-    """获取指定指数的成分股详情（metadata from PG, constituents from DolphinDB）"""
-    from scheduler.db import DatabasePool
-
-    try:
-        row = await DatabasePool.fetchrow(
-            "SELECT * FROM index_configs WHERE index_code = $1", index_code
-        )
-        if not row:
-            raise HTTPException(status_code=404, detail=f"未找到指数 {index_code}")
-
-        metadata = dict(row)
-        for ts_field in ["created_at", "updated_at"]:
-            if metadata.get(ts_field):
-                metadata[ts_field] = str(metadata[ts_field])
-        if metadata.get("latest_date"):
-            metadata["latest_date"] = str(metadata["latest_date"])
-
-        if not trade_date:
-            trade_date = metadata.get("latest_date")
-            if not trade_date:
-                return {"status": "success", "data": {"metadata": metadata, "constituents": [], "trade_date": None}}
-
-        # index_constituents 是时序数据，保留在 DolphinDB
-        constituents_df = db_client.query("""
-            SELECT ts_code, weight
-            FROM index_constituents
-            WHERE index_code = %s AND trade_date = %s
-            ORDER BY weight DESC
-        """, (index_code, trade_date))
-
-        constituents = constituents_df.to_dicts() if not constituents_df.is_empty() else []
-        return {"status": "success", "data": {"metadata": metadata, "constituents": constituents, "trade_date": trade_date}}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to get index pool detail: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.delete("/factor/index-pool/{index_code}")
-async def delete_index_pool(index_code: str):
-    """删除指定指数及其所有成分股数据"""
-    from scheduler.db import DatabasePool
-
-    try:
-        # index_constituents 在 DolphinDB
-        db_client.execute(
-            "DELETE FROM index_constituents WHERE index_code = %s", (index_code,)
-        )
-        # index_configs 在 PostgreSQL
-        await DatabasePool.execute(
-            "DELETE FROM index_configs WHERE index_code = $1", index_code
-        )
-        logger.info(f"Deleted index pool: {index_code}")
-        return {"status": "success", "message": f"成功删除指数 {index_code}"}
-    except Exception as e:
-        logger.error(f"Failed to delete index pool: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# ==================== DataFrame Schema Preview ====================
-
-class DataFrameSchemaRequest(BaseModel):
-    depends_on: List[str]
-
 
 @router.post("/factor/dataframe-schema")
 async def get_dataframe_schema(req: DataFrameSchemaRequest):

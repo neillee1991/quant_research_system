@@ -133,6 +133,20 @@ docker-compose restart prefect-server
 
 ## 查询性能问题
 
+### 分区策略
+
+`factor_values` 表采用三维组合分区：
+- **HASH(factor_id, 20)** - 按因子 ID 分散
+- **RANGE(trade_date, 季度)** - 按交易日期按季度分区
+- **HASH(ts_code, 10)** - 按股票代码分散
+
+总分区数：20 × 120 × 10 = 24,000 个分区
+
+**查询优化效果**:
+- 按股票查询（时序）：裁剪到 ~10 个分区
+- 按日期查询（横截面）：裁剪到 ~200 个分区
+- 按因子查询（全量）：裁剪到 ~1200 个分区
+
 ### 分区性能测试
 
 ```bash
@@ -156,6 +170,12 @@ python scripts/performance/test_partition_performance.py
 cd backend
 python scripts/performance/optimize_factor_values_partition.py
 ```
+
+脚本会自动：
+1. 备份现有数据
+2. 删除旧表
+3. 创建优化分区表
+4. 恢复数据
 
 ---
 

@@ -48,12 +48,12 @@ class TestAuthProtection:
 
     def test_list_sync_tasks_requires_auth(self):
         """测试同步任务列表需要认证"""
-        response = client.get("/api/v1/data/sync/tasks")
+        response = client.get("/api/v1/tasks/sync")
         assert response.status_code != 200
 
     def test_list_etl_tasks_requires_auth(self):
         """测试ETL任务列表需要认证"""
-        response = client.get("/api/v1/data/etl/tasks")
+        response = client.get("/api/v1/tasks/etl")
         assert response.status_code != 200
 
     def test_tasks_endpoint_requires_auth(self):

@@ -16,7 +16,6 @@ router = APIRouter()
 
 _SAFE_FACTOR_ID_RE = re.compile(r'^[a-zA-Z0-9_\-]+$')
 
-
 # ==================== Pydantic Models ====================
 
 class FactorCreateRequest(BaseModel):
@@ -30,7 +29,6 @@ class FactorCreateRequest(BaseModel):
     code: Optional[str] = None
     align_calendar: bool = False
 
-
 class FactorUpdateRequest(BaseModel):
     description: Optional[str] = None
     category: Optional[str] = None
@@ -40,18 +38,15 @@ class FactorUpdateRequest(BaseModel):
     params: Optional[Dict[str, Any]] = None
     align_calendar: Optional[bool] = None
 
-
 class FactorCodeUpdateRequest(BaseModel):
     filename: str
     code: str
-
 
 # ==================== Helper Functions ====================
 
 def _validate_factor_id(factor_id: str):
     if not _SAFE_FACTOR_ID_RE.match(factor_id):
         raise HTTPException(status_code=400, detail=f"Invalid factor_id: '{factor_id}'")
-
 
 # ==================== API Endpoints ====================
 
@@ -127,7 +122,6 @@ async def list_registered_factors():
     api_cache.set("production:factors", result, ttl=60)
     return result
 
-
 @router.post("/factor/factors")
 async def create_factor(req: FactorCreateRequest):
     """创建新因子（写入 PostgreSQL factor_configs）"""
@@ -159,7 +153,6 @@ async def create_factor(req: FactorCreateRequest):
     except Exception as e:
         logger.error(f"Create factor failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @router.put("/factor/factors/{factor_id}")
 async def update_factor(factor_id: str, req: FactorUpdateRequest):
@@ -208,7 +201,6 @@ async def update_factor(factor_id: str, req: FactorUpdateRequest):
         logger.error(f"Update factor failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @router.delete("/factor/factors/{factor_id}")
 async def delete_factor(factor_id: str, delete_data: bool = False):
     """删除因子元数据，可选删除因子值数据"""
@@ -231,31 +223,6 @@ async def delete_factor(factor_id: str, delete_data: bool = False):
         logger.error(f"Delete factor failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
-@router.get("/factor/factors/{factor_id}/logs")
-async def get_factor_logs(factor_id: str, limit: int = 20):
-    """获取因子运行日志（PostgreSQL task_runs 表）"""
-    from scheduler.db import DatabasePool
-
-    try:
-        rows = await DatabasePool.fetch(
-            "SELECT * FROM task_runs WHERE task_type = 'factor' AND task_id = $1 "
-            "ORDER BY started_at DESC LIMIT $2",
-            factor_id, limit,
-        )
-        logs = []
-        for row in rows:
-            r = dict(row)
-            for ts_field in ["started_at", "finished_at"]:
-                if ts_field in r and r[ts_field]:
-                    r[ts_field] = str(r[ts_field])
-            logs.append(r)
-        return {"status": "success", "data": logs}
-    except Exception as e:
-        logger.error(f"Failed to get factor logs: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 @router.get("/factor/factors/{factor_id}/code")
 async def get_factor_code(factor_id: str):
     """获取因子源代码（从 PostgreSQL factor_configs 读取）"""
@@ -274,7 +241,6 @@ async def get_factor_code(factor_id: str):
         logger.warning(f"Failed to read code from database: {e}")
 
     raise HTTPException(status_code=404, detail=f"因子 {factor_id} 的源代码未找到")
-
 
 @router.put("/factor/factors/{factor_id}/code")
 async def update_factor_code(factor_id: str, req: FactorCodeUpdateRequest):
@@ -299,7 +265,6 @@ async def update_factor_code(factor_id: str, req: FactorCodeUpdateRequest):
     except Exception as e:
         logger.error(f"Update factor code failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @router.get("/factor/factors/{factor_id}/data")
 async def get_factor_data(
@@ -348,7 +313,6 @@ async def get_factor_data(
             return {"status": "success", "data": [], "total": 0}
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @router.get("/factor/factors/{factor_id}/stats")
 async def get_factor_stats(factor_id: str):
     """获取因子统计摘要（DolphinDB factor_values，时序数据）"""
@@ -396,77 +360,3 @@ async def get_factor_stats(factor_id: str):
             return {"status": "success", "data": None}
         raise HTTPException(status_code=500, detail=str(e))
 
-
-@router.get("/factor/factors/{factor_id}/missing-dates")
-async def get_factor_missing_dates(factor_id: str):
-    """检查因子数据缺失的交易日（DolphinDB factor_values + sync_trade_cal）"""
-    try:
-        actual_dates_df = db_client.query("""
-            SELECT DISTINCT trade_date FROM factor_values
-            WHERE factor_id = %s ORDER BY trade_date
-        """, (factor_id,))
-
-        if actual_dates_df.is_empty():
-            return {"status": "success", "data": {"missing_dates": [], "total_missing": 0, "has_data": False}}
-
-        def _fmt(d) -> str:
-            s = str(d)
-            if 'T' in s:
-                return s.split('T')[0].replace('-', '')
-            if '-' in s and len(s) >= 10:
-                return s[:10].replace('-', '')
-            if ' ' in s:
-                return s.split(' ')[0].replace('-', '')
-            return s
-
-        actual_dates = sorted(set(_fmt(d) for d in actual_dates_df["trade_date"].to_list()))
-        if not actual_dates:
-            return {"status": "success", "data": {"missing_dates": [], "total_missing": 0, "has_data": False}}
-
-        min_date, max_date = actual_dates[0], actual_dates[-1]
-
-        trade_cal_df = db_client.query("""
-            SELECT cal_date FROM sync_trade_cal
-            WHERE is_open = 1 AND cal_date >= %s AND cal_date <= %s ORDER BY cal_date
-        """, (min_date, max_date))
-
-        if trade_cal_df.is_empty():
-            return {
-                "status": "success",
-                "data": {
-                    "missing_dates": [], "total_missing": 0, "has_data": True,
-                    "warning": "交易日历表为空，无法检查完整性",
-                    "actual_days": len(actual_dates),
-                    "date_range": {
-                        "min": f"{min_date[:4]}-{min_date[4:6]}-{min_date[6:]}",
-                        "max": f"{max_date[:4]}-{max_date[4:6]}-{max_date[6:]}",
-                    }
-                }
-            }
-
-        all_trade_dates = set(_fmt(d) for d in trade_cal_df["cal_date"].to_list())
-        missing = sorted(all_trade_dates - set(actual_dates))
-        formatted_missing = [
-            f"{d[:4]}-{d[4:6]}-{d[6:]}" if len(d) == 8 and d.isdigit() else d
-            for d in missing
-        ]
-
-        return {
-            "status": "success",
-            "data": {
-                "missing_dates": formatted_missing,
-                "total_missing": len(formatted_missing),
-                "expected_days": len(all_trade_dates),
-                "actual_days": len(actual_dates),
-                "has_data": True,
-                "date_range": {
-                    "min": f"{min_date[:4]}-{min_date[4:6]}-{min_date[6:]}",
-                    "max": f"{max_date[:4]}-{max_date[4:6]}-{max_date[6:]}",
-                }
-            }
-        }
-    except Exception as e:
-        logger.error(f"Failed to check missing dates: {e}")
-        if "does not exist" in str(e):
-            return {"status": "success", "data": {"missing_dates": [], "total_missing": 0, "has_data": False}}
-        raise HTTPException(status_code=500, detail=str(e))

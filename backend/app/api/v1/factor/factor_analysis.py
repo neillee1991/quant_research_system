@@ -23,7 +23,6 @@ from app.services.task_runner import TaskRunner, tracked_task
 router = APIRouter()
 analyzer = FactorAnalyzer(db_client)
 
-
 # ==================== Helper Functions ====================
 
 def _enhance_analysis_record(record: Dict[str, Any]) -> Dict[str, Any]:
@@ -49,7 +48,6 @@ def _enhance_analysis_record(record: Dict[str, Any]) -> Dict[str, Any]:
 
     return result
 
-
 # ==================== Pydantic Models ====================
 
 class AnalysisRequest(BaseModel):
@@ -68,7 +66,6 @@ class AnalysisRequest(BaseModel):
     winsorize: bool = False
     winsorize_lower: float = 0.01
     winsorize_upper: float = 0.99
-
 
 # ==================== 后台任务辅助函数 ====================
 
@@ -100,7 +97,6 @@ async def _create_pending_task(task_id: str, req: AnalysisRequest) -> None:
         config_json, "pending", task_id, dt.now(),
     )
 
-
 async def _update_task_status(task_id: str, status: str, error: Optional[str] = None) -> None:
     """更新 factor_analysis_results 任务状态"""
     from scheduler.db import DatabasePool
@@ -115,7 +111,6 @@ async def _update_task_status(task_id: str, status: str, error: Optional[str] = 
             "UPDATE factor_analysis_results SET task_status = $2 WHERE task_id = $1",
             task_id, status,
         )
-
 
 async def _save_analysis_result(task_id: str, factor_id: str, results: Dict[str, Any]) -> None:
     """保存分析结果到 PostgreSQL factor_analysis_results"""
@@ -164,7 +159,6 @@ async def _save_analysis_result(task_id: str, factor_id: str, results: Dict[str,
     )
     logger.info(f"Analysis record saved: task_id={task_id}")
 
-
 @tracked_task("analysis", task_id_kwarg="factor_id")
 async def _run_analysis_background(task_id: str, req: AnalysisRequest, run_id: str = None, factor_id: str = None):
     """后台执行分析，更新 task_status"""
@@ -191,7 +185,6 @@ async def _run_analysis_background(task_id: str, req: AnalysisRequest, run_id: s
     await _save_analysis_result(task_id, req.factor_id, results)
     return {"extra": {"result_id": task_id, "table": "factor_analysis_results"}}
 
-
 # ==================== API Endpoints ====================
 
 @router.post("/factor/analysis/alphalens", response_model=dict)
@@ -213,7 +206,6 @@ async def submit_analysis(req: AnalysisRequest, background_tasks: BackgroundTask
         "data": {"task_id": task_id, "factor_id": req.factor_id, "status": "pending"}
     }
 
-
 @router.get("/factor/analysis/status/{task_id}")
 async def get_analysis_status(task_id: str):
     """查询分析任务状态"""
@@ -221,7 +213,6 @@ async def get_analysis_status(task_id: str):
     if not status:
         raise HTTPException(status_code=404, detail=f"任务 {task_id} 不存在")
     return {"status": "success", "data": status}
-
 
 @router.get("/factor/analysis/{factor_id}/latest")
 async def get_latest_alphalens_analysis(factor_id: str):
@@ -250,7 +241,6 @@ async def get_latest_alphalens_analysis(factor_id: str):
         logger.error(f"Failed to get latest analysis: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @router.get("/factor/analysis/{factor_id}/detail/{analysis_id}")
 async def get_alphalens_analysis_by_id(factor_id: str, analysis_id: str):
     """按 task_id 获取指定 Alphalens 分析结果"""
@@ -276,35 +266,6 @@ async def get_alphalens_analysis_by_id(factor_id: str, analysis_id: str):
     except Exception as e:
         logger.error(f"Failed to get analysis by id: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/factor/analysis/{factor_id}/history")
-async def get_analysis_history(
-    factor_id: str,
-    limit: int = Query(20, ge=1, le=100),
-    offset: int = Query(0, ge=0),
-):
-    """获取因子分析历史（从 PostgreSQL task_runs 表查询）"""
-    from scheduler.db import DatabasePool
-
-    try:
-        rows = await DatabasePool.fetch("""
-            SELECT * FROM task_runs
-            WHERE task_type = 'analysis' AND task_id = $1
-            ORDER BY started_at DESC LIMIT $2
-        """, factor_id, limit)
-        records = []
-        for row in rows:
-            r = dict(row)
-            for field in ["started_at", "finished_at"]:
-                if r.get(field):
-                    r[field] = str(r[field])
-            records.append(r)
-        return {"status": "success", "data": {"records": records, "total": len(records)}}
-    except Exception as e:
-        logger.error(f"Failed to get analysis history: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
 
 @router.delete("/factor/analysis/{factor_id}/detail/{analysis_id}")
 async def delete_alphalens_analysis_by_id(factor_id: str, analysis_id: str):
@@ -338,7 +299,6 @@ async def delete_alphalens_analysis_by_id(factor_id: str, analysis_id: str):
     except Exception as e:
         logger.error(f"Failed to delete analysis: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @router.get("/factor/analysis/trading-days")
 async def get_trading_days(start: str, end: str):

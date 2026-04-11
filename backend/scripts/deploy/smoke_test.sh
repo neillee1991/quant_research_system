@@ -121,7 +121,7 @@ test_get_daily_data() {
 }
 
 test_get_sync_tasks() {
-    test_api "获取同步任务列表" "GET" "/data/sync/tasks" "200"
+    test_api "获取同步任务列表" "GET" "/tasks/sync" "200"
 }
 
 # 3. 因子 API 测试
