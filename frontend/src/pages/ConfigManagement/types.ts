@@ -1,8 +1,10 @@
 export enum ConfigType {
   SYNC_TASKS = 'sync_tasks',
   ETL_TASKS = 'etl_tasks',
-  FACTOR_METADATA = 'factor_metadata',
-  FACTOR_DATA_CONFIG = 'factor_data_config'
+  FACTOR_METADATA = 'factor_metadata',    // 向后兼容
+  FACTOR_CONFIGS = 'factor_configs',      // 新表名
+  FACTOR_DATA_CONFIG = 'factor_data_config',  // 向后兼容
+  FACTOR_FIELD_MAPPINGS = 'factor_field_mappings'  // 新表名
 }
 
 export enum ImportMode {

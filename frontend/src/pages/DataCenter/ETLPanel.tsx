@@ -55,10 +55,11 @@ export const ETLPanel: React.FC<ETLPanelProps> = ({
 
   const formatDate = (dateStr: string | null | undefined): string => {
     if (!dateStr) return '-';
-    if (typeof dateStr === 'string' && dateStr.length === 8) {
-      return `${dateStr.slice(0, 4)}-${dateStr.slice(4, 6)}-${dateStr.slice(6, 8)}`;
+    const dateString = String(dateStr);
+    if (typeof dateString === 'string' && dateString.length === 8) {
+      return `${dateString.slice(0, 4)}-${dateString.slice(4, 6)}-${dateString.slice(6, 8)}`;
     }
-    return String(dateStr).slice(0, 10);
+    return dateString.slice(0, 10);
   };
 
   const etlTaskColumns = [
@@ -163,7 +164,7 @@ export const ETLPanel: React.FC<ETLPanelProps> = ({
                 fontSize: '12px',
               }}
             >
-              {v.slice(0, 16)}
+              {String(v).slice(0, 16)}
             </div>
           </Tooltip>
         );

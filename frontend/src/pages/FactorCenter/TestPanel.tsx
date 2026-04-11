@@ -1,3 +1,4 @@
+import { notify } from '../../utils/notify';
 /**
  * 因子代码测试面板
  */
@@ -34,11 +35,11 @@ const TestPanel: React.FC<TestPanelProps> = ({ code, dependsOn, preprocess, look
 
   const handleTest = async (): Promise<void> => {
     if (!code.trim()) {
-      message.warning('请先编写因子代码');
+      notify.warning('请先编写因子代码');
       return;
     }
     if (!dateRange[0] || !dateRange[1]) {
-      message.warning('请选择测试日期范围');
+      notify.warning('请选择测试日期范围');
       return;
     }
 

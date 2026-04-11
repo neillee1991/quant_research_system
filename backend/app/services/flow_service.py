@@ -62,12 +62,12 @@ class FlowService:
                     if enabled_only:
                         cur.execute(
                             "SELECT name, description, cron, tags, enabled, date_offset_days, tasks, updated_at "
-                            "FROM flow_config WHERE enabled = true ORDER BY updated_at DESC"
+                            "FROM flow_configs WHERE enabled = true ORDER BY updated_at DESC"
                         )
                     else:
                         cur.execute(
                             "SELECT name, description, cron, tags, enabled, date_offset_days, tasks, updated_at "
-                            "FROM flow_config ORDER BY updated_at DESC"
+                            "FROM flow_configs ORDER BY updated_at DESC"
                         )
                     rows = cur.fetchall()
 
@@ -96,7 +96,7 @@ class FlowService:
         try:
             with get_db_connection() as conn:
                 with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                    cur.execute("SELECT * FROM flow_config WHERE name = %s", (name,))
+                    cur.execute("SELECT * FROM flow_configs WHERE name = %s", (name,))
                     row = cur.fetchone()
 
             if not row:
@@ -121,7 +121,7 @@ class FlowService:
                 with conn.cursor() as cur:
                     cur.execute(
                         """
-                        INSERT INTO flow_config
+                        INSERT INTO flow_configs
                         (name, description, cron, tags, tasks, enabled, date_offset_days,
                          version, created_at, updated_at)
                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
@@ -186,7 +186,7 @@ class FlowService:
 
             with get_db_connection() as conn:
                 with conn.cursor() as cur:
-                    cur.execute(f"UPDATE flow_config SET {set_clause} WHERE name = %s", params)
+                    cur.execute(f"UPDATE flow_configs SET {set_clause} WHERE name = %s", params)
                 conn.commit()
 
             logger.info(f"Updated flow: {name}")
@@ -211,13 +211,13 @@ class FlowService:
                     if soft_delete:
                         # Soft delete: just disable
                         cur.execute(
-                            "UPDATE flow_config SET enabled = false, updated_at = %s WHERE name = %s",
+                            "UPDATE flow_configs SET enabled = false, updated_at = %s WHERE name = %s",
                             (now, name)
                         )
                         logger.info(f"Disabled (soft deleted) flow: {name}")
                     else:
                         # Hard delete
-                        cur.execute("DELETE FROM flow_config WHERE name = %s", (name,))
+                        cur.execute("DELETE FROM flow_configs WHERE name = %s", (name,))
                         logger.info(f"Hard deleted flow: {name}")
                 conn.commit()
 

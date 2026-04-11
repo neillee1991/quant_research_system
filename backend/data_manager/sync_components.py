@@ -29,81 +29,54 @@ class SyncConfigManager:
     ⚠️ 已废弃：此类仅用于向后兼容
     新代码请直接使用 app.services.task_service.sync_service
 
-    内部使用 TaskService 实现，保持原有接口不变
+    使用 psycopg2（同步）直接查询 PostgreSQL，避免 asyncpg 事件循环问题
     """
 
     def __init__(self, config_path: Optional[str] = None):
-        """
-        初始化配置管理器
-
-        Args:
-            config_path: 保留参数用于兼容，实际不再使用
-        """
-        # 发出废弃警告
         warnings.warn(
             "SyncConfigManager is deprecated. Use app.services.task_service.sync_service instead.",
             DeprecationWarning,
             stacklevel=2
         )
 
-        # 延迟导入避免循环依赖
-        from app.services.task_service import sync_service
-        self._service = sync_service
+    def _query(self, sql: str, params: tuple = ()) -> List[Dict[str, Any]]:
+        """使用 psycopg2 同步查询 PostgreSQL"""
+        import psycopg2
+        import psycopg2.extras
+        conn = psycopg2.connect(
+            host=settings.postgresql.postgres_host,
+            port=settings.postgresql.postgres_port,
+            dbname=settings.postgresql.postgres_db,
+            user=settings.postgresql.postgres_user,
+            password=settings.postgresql.postgres_password,
+        )
+        try:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(sql, params)
+                return [dict(row) for row in cur.fetchall()]
+        finally:
+            conn.close()
+
+    def _row_to_task(self, row: Dict[str, Any]):
+        from app.models.base_task import SyncTaskConfig
+        return SyncTaskConfig(**row)
 
     def get_task(self, task_id: str) -> Dict[str, Any]:
-        """
-        获取任务配置
-
-        Args:
-            task_id: 任务ID
-
-        Returns:
-            任务配置字典（JSON 字段已解析）
-
-        Raises:
-            SyncTaskNotFoundError: 任务不存在
-        """
-        task = self._service.get_task(task_id)
-        if not task:
+        rows = self._query("SELECT * FROM sync_task_configs WHERE task_id = %s", (task_id,))
+        if not rows:
             raise SyncTaskNotFoundError(task_id)
-        return task.to_dict_with_parsed_json()
+        return self._row_to_task(rows[0]).to_dict_with_parsed_json()
 
     def get_all_tasks(self) -> List[Dict[str, Any]]:
-        """
-        获取所有任务
-
-        Returns:
-            任务配置列表（JSON 字段已解析）
-        """
-        tasks = self._service.list_tasks(enabled_only=False)
-        return [task.to_dict_with_parsed_json() for task in tasks]
+        rows = self._query("SELECT * FROM sync_task_configs")
+        return [self._row_to_task(r).to_dict_with_parsed_json() for r in rows]
 
     def get_enabled_tasks(self) -> List[Dict[str, Any]]:
-        """
-        获取所有启用的任务
-
-        Returns:
-            启用的任务配置列表（JSON 字段已解析）
-        """
-        tasks = self._service.list_tasks(enabled_only=True)
-        return [task.to_dict_with_parsed_json() for task in tasks]
-        """
-        获取所有启用的任务
-
-        Returns:
-            启用的任务配置列表
-        """
-        tasks = self._service.list_tasks(enabled_only=True)
-        return [task.model_dump() for task in tasks]
+        rows = self._query("SELECT * FROM sync_task_configs WHERE enabled = true")
+        return [self._row_to_task(r).to_dict_with_parsed_json() for r in rows]
 
     def reload(self) -> None:
-        """
-        重新加载配置
-
-        注意：TaskService 不使用缓存，此方法保留仅用于兼容
-        """
-        # TaskService 每次都从数据库读取，无需重载
-        pass
+        pass  # 无缓存，无需重载
 
     def get_global_config(self) -> Dict[str, Any]:
         """
@@ -179,15 +152,30 @@ class SyncLogManager:
             return None
 
     def _get_task_config(self, task_id: str) -> Optional[Dict[str, Any]]:
-        """从 sync_task_config 获取任务配置"""
+        """从 sync_task_configs 获取任务配置（psycopg2 同步查询）"""
         try:
-            sql = "SELECT table_name, date_field FROM sync_task_config WHERE task_id = %s"
-            result = self.repository.query(sql, params=(task_id,))
-            if not result.is_empty():
-                return result.to_dicts()[0]
+            import psycopg2
+            import psycopg2.extras
+            conn = psycopg2.connect(
+                host=settings.postgresql.postgres_host,
+                port=settings.postgresql.postgres_port,
+                dbname=settings.postgresql.postgres_db,
+                user=settings.postgresql.postgres_user,
+                password=settings.postgresql.postgres_password,
+            )
+            try:
+                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                    cur.execute("SELECT * FROM sync_task_configs WHERE task_id = %s", (task_id,))
+                    row = cur.fetchone()
+                    if row:
+                        from app.models.base_task import SyncTaskConfig
+                        return SyncTaskConfig(**dict(row)).to_dict_with_parsed_json()
+                    return None
+            finally:
+                conn.close()
         except Exception as e:
             logger.warning(f"Failed to get task config for {task_id}: {e}")
-        return None
+            return None
 
     def _format_date(self, date_val: Any) -> Optional[str]:
         """格式化日期值为 YYYYMMDD 字符串"""

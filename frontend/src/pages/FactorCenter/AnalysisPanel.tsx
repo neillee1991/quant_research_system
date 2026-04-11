@@ -17,17 +17,19 @@ import FactorFlowDrawer from './FactorFlowDrawer';
 import TaskLogTable from '../../components/TaskLogTable';
 
 /** 统一日期格式化：YYYYMMDD 或 datetime 字符串 → YYYY-MM-DD */
-const formatDate = (d: string) => {
-  if (!d) return d;
-  if (/^\d{8}$/.test(d)) return `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}`;
-  return d.slice(0, 10); // 截断时间部分
+const formatDate = (d: string | null | undefined) => {
+  if (!d) return '-';
+  const dateStr = String(d);
+  if (/^\d{8}$/.test(dateStr)) return `${dateStr.slice(0, 4)}-${dateStr.slice(4, 6)}-${dateStr.slice(6, 8)}`;
+  return dateStr.slice(0, 10); // 截断时间部分
 };
 
 /** 从任意日期字符串提取 YYYYMMDD */
-const toYYYYMMDD = (d: string): string => {
+const toYYYYMMDD = (d: string | null | undefined): string => {
   if (!d) return '';
-  if (/^\d{8}$/.test(d)) return d;
-  return d.slice(0, 10).replace(/-/g, '');
+  const dateStr = String(d);
+  if (/^\d{8}$/.test(dateStr)) return dateStr;
+  return dateStr.slice(0, 10).replace(/-/g, '');
 };
 
 /** 加载交易日 Set，用于过滤非交易日 */
@@ -151,10 +153,10 @@ const PeriodPanel: React.FC<{ period: number; analysisResult: any; isFirstPeriod
           <div>
             <div style={{ color: 'var(--text-muted)', fontSize: 11, marginBottom: 6 }}>Pearson IC</div>
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-              <StatCard label="IC 均值" value={icRow.ic_mean?.toFixed(4)} color={icRow.ic_mean > 0 ? 'var(--color-gain)' : 'var(--color-loss)'} />
+              <StatCard label="IC 均值" value={icRow.ic_mean?.toFixed(4)} color={icRow.ic_mean != null && icRow.ic_mean > 0 ? 'var(--color-gain)' : 'var(--color-loss)'} />
               <StatCard label="IC 标准差" value={icRow.ic_std?.toFixed(4)} color="var(--text-primary)" />
-              <StatCard label="ICIR" value={icRow.ic_ir?.toFixed(4)} color={Math.abs(icRow.ic_ir) > 0.5 ? 'var(--color-primary)' : 'var(--text-primary)'} />
-              <StatCard label="IC 胜率" value={`${(icRow.ic_win_rate * 100).toFixed(1)}%`} color={icRow.ic_win_rate > 0.5 ? 'var(--color-gain)' : 'var(--text-primary)'} />
+              <StatCard label="ICIR" value={icRow.ic_ir?.toFixed(4)} color={icRow.ic_ir != null && Math.abs(icRow.ic_ir) > 0.5 ? 'var(--color-primary)' : 'var(--text-primary)'} />
+              <StatCard label="IC 胜率" value={icRow.ic_win_rate != null ? `${(icRow.ic_win_rate * 100).toFixed(1)}%` : '-'} color={icRow.ic_win_rate != null && icRow.ic_win_rate > 0.5 ? 'var(--color-gain)' : 'var(--text-primary)'} />
               <StatCard label="t 统计量" value={icRow.t_stat?.toFixed(3)} color={Math.abs(icRow.t_stat ?? 0) > 1.96 ? 'var(--color-gain)' : 'var(--text-secondary)'} />
               <StatCard label="p 值" value={`${icRow.p_value?.toFixed(4)}${sigLabel(icRow.p_value)}`} color={icRow.p_value < 0.05 ? 'var(--color-gain)' : 'var(--text-secondary)'} />
               <StatCard label="样本数" value={String(icRow.n_obs ?? '-')} color="var(--text-primary)" />
@@ -165,13 +167,13 @@ const PeriodPanel: React.FC<{ period: number; analysisResult: any; isFirstPeriod
                   <>
                     <StatCard
                       label="年化 Alpha"
-                      value={`${(abRow.ann_alpha * 100).toFixed(2)}%`}
+                      value={abRow.ann_alpha != null ? `${(abRow.ann_alpha * 100).toFixed(2)}%` : '-'}
                       color={abRow.ann_alpha > 0 ? 'var(--color-gain)' : 'var(--color-loss)'}
                     />
                     <StatCard
                       label="Beta"
                       value={abRow.beta?.toFixed(3)}
-                      color={Math.abs(abRow.beta) < 0.1 ? 'var(--color-gain)' : 'var(--text-secondary)'}
+                      color={abRow.beta != null && Math.abs(abRow.beta) < 0.1 ? 'var(--color-gain)' : 'var(--text-secondary)'}
                     />
                   </>
                 );
@@ -182,9 +184,9 @@ const PeriodPanel: React.FC<{ period: number; analysisResult: any; isFirstPeriod
             <div>
               <div style={{ color: 'var(--text-muted)', fontSize: 11, marginBottom: 6 }}>Rank IC (Spearman)</div>
               <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                <StatCard label="Rank IC 均值" value={rankIcRow.ic_mean?.toFixed(4)} color={rankIcRow.ic_mean > 0 ? 'var(--color-gain)' : 'var(--color-loss)'} />
-                <StatCard label="Rank ICIR" value={rankIcRow.ic_ir?.toFixed(4)} color={Math.abs(rankIcRow.ic_ir) > 0.5 ? 'var(--color-primary)' : 'var(--text-primary)'} />
-                <StatCard label="Rank IC 胜率" value={`${(rankIcRow.ic_win_rate * 100).toFixed(1)}%`} color={rankIcRow.ic_win_rate > 0.5 ? 'var(--color-gain)' : 'var(--text-primary)'} />
+                <StatCard label="Rank IC 均值" value={rankIcRow.ic_mean?.toFixed(4)} color={rankIcRow.ic_mean != null && rankIcRow.ic_mean > 0 ? 'var(--color-gain)' : 'var(--color-loss)'} />
+                <StatCard label="Rank ICIR" value={rankIcRow.ic_ir?.toFixed(4)} color={rankIcRow.ic_ir != null && Math.abs(rankIcRow.ic_ir) > 0.5 ? 'var(--color-primary)' : 'var(--text-primary)'} />
+                <StatCard label="Rank IC 胜率" value={rankIcRow.ic_win_rate != null ? `${(rankIcRow.ic_win_rate * 100).toFixed(1)}%` : '-'} color={rankIcRow.ic_win_rate != null && rankIcRow.ic_win_rate > 0.5 ? 'var(--color-gain)' : 'var(--text-primary)'} />
                 <StatCard label="t 统计量" value={rankIcRow.t_stat?.toFixed(3)} color={Math.abs(rankIcRow.t_stat ?? 0) > 1.96 ? 'var(--color-gain)' : 'var(--text-secondary)'} />
                 <StatCard label="p 值" value={`${rankIcRow.p_value?.toFixed(4)}${sigLabel(rankIcRow.p_value)}`} color={rankIcRow.p_value < 0.05 ? 'var(--color-gain)' : 'var(--text-secondary)'} />
               </div>

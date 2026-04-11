@@ -5,7 +5,7 @@
  * with consistent error handling and type safety.
  */
 
-import { message } from 'antd';
+import { notify } from '../utils/notify';
 import type {
   BaseTaskConfig,
   TaskType,
@@ -59,7 +59,6 @@ export class TaskService<T extends BaseTaskConfig> {
 
       return [] as T[];
     } catch (error: any) {
-      message.error(`加载${this.getTaskTypeName()}列表失败: ${error.message}`);
       throw error;
     }
   }
@@ -78,7 +77,6 @@ export class TaskService<T extends BaseTaskConfig> {
       const data = await response.json();
       return data as T;
     } catch (error: any) {
-      message.error(`加载${this.getTaskTypeName()}详情失败: ${error.message}`);
       throw error;
     }
   }
@@ -102,10 +100,10 @@ export class TaskService<T extends BaseTaskConfig> {
       }
 
       const data = await response.json();
-      message.success(`${this.getTaskTypeName()}创建成功`);
+      notify.success(`${this.getTaskTypeName()}创建成功`);
       return data as T;
     } catch (error: any) {
-      message.error(`创建${this.getTaskTypeName()}失败: ${error.message}`);
+      notify.error(`创建${this.getTaskTypeName()}失败: ${error.message}`);
       throw error;
     }
   }
@@ -130,10 +128,10 @@ export class TaskService<T extends BaseTaskConfig> {
       }
 
       const data = await response.json();
-      message.success(`${this.getTaskTypeName()}更新成功`);
+      notify.success(`${this.getTaskTypeName()}更新成功`);
       return data as T;
     } catch (error: any) {
-      message.error(`更新${this.getTaskTypeName()}失败: ${error.message}`);
+      notify.error(`更新${this.getTaskTypeName()}失败: ${error.message}`);
       throw error;
     }
   }
@@ -152,9 +150,9 @@ export class TaskService<T extends BaseTaskConfig> {
         throw new Error(error.detail || `HTTP ${response.status}`);
       }
 
-      message.success(`${this.getTaskTypeName()}删除成功`);
+      notify.success(`${this.getTaskTypeName()}删除成功`);
     } catch (error: any) {
-      message.error(`删除${this.getTaskTypeName()}失败: ${error.message}`);
+      notify.error(`删除${this.getTaskTypeName()}失败: ${error.message}`);
       throw error;
     }
   }

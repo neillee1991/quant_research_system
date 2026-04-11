@@ -5,11 +5,12 @@ DAG 执行器
 from typing import List, Dict, Any, Set, Optional
 from collections import deque
 import asyncio
+import uuid
 from datetime import datetime
 
 from app.core.logger import logger
 from .models import FlowRun, TaskRun, FlowStatus, TaskStatus, TriggerType
-from .repository import FlowRunRepository, TaskRunRepository
+from .repository import FlowRunRepository
 from .submitter import TaskSubmitter
 
 
@@ -66,6 +67,7 @@ class DAGExecutor:
         执行 Flow
         """
         logger.info(f"开始执行 Flow: {flow_run.flow_name}, flow_run_id={flow_run.id}")
+        logger.info(f"Tasks type: {type(tasks)}, first task: {tasks[0] if tasks else 'no tasks'}")
 
         # 更新 FlowRun 状态为 running
         await FlowRunRepository.update_status(flow_run.id, FlowStatus.RUNNING)
@@ -87,7 +89,7 @@ class DAGExecutor:
 
                 # 并行执行层内任务
                 layer_tasks = [
-                    self._execute_task(flow_run.id, task_map[task_id])
+                    self._execute_task(flow_run.id, flow_run.target_date, task_map[task_id])
                     for task_id in layer
                 ]
                 results = await asyncio.gather(*layer_tasks, return_exceptions=True)
@@ -117,54 +119,42 @@ class DAGExecutor:
             )
             return False
 
-    async def _execute_task(self, flow_run_id: int, task: Dict[str, Any]) -> bool:
+    async def _execute_task(self, flow_run_id: int, target_date: Optional[str], task: Dict[str, Any]) -> bool:
         """执行单个 Task"""
         task_id = task["id"]
         task_type = task["type"]
 
-        logger.info(f"执行任务: {task_type}/{task_id}")
+        # 预生成 run_id，传给 submitter → HTTP 请求 → TaskRunner，实现单条记录
+        run_id = f"{task_id}_{uuid.uuid4().hex[:8]}"
+        logger.info(f"执行任务: {task_type}/{task_id}, target_date={target_date}, run_id={run_id}")
 
-        # 创建 TaskRun
         task_run = TaskRun(
+            run_id=run_id,
             flow_run_id=flow_run_id,
             task_id=task_id,
             task_type=task_type,
+            target_date=target_date,
             status=TaskStatus.PENDING,
         )
-        task_run_id = await TaskRunRepository.create(task_run)
-        task_run.id = task_run_id
-
-        # 更新状态为 running
-        await TaskRunRepository.update_status(task_run_id, TaskStatus.RUNNING)
 
         try:
             if task_type == "flow":
-                # 嵌套 Flow：递归执行子 Flow
                 flow_name = task.get("flow_name")
                 if not flow_name:
                     raise ValueError("flow 类型任务必须指定 flow_name")
                 success = await self._execute_subflow(flow_run_id, flow_name)
             else:
-                # 普通任务：通过 HTTP 提交
                 success = await self.submitter.submit_task(task_run)
 
-            # 更新最终状态
             if success:
-                await TaskRunRepository.update_status(task_run_id, TaskStatus.SUCCESS)
                 logger.info(f"任务执行成功: {task_type}/{task_id}")
             else:
-                await TaskRunRepository.update_status(
-                    task_run_id, TaskStatus.FAILED, "任务执行失败"
-                )
                 logger.error(f"任务执行失败: {task_type}/{task_id}")
 
             return success
 
         except Exception as e:
             logger.error(f"任务执行异常: {task_type}/{task_id}, {e}", exc_info=True)
-            await TaskRunRepository.update_status(
-                task_run_id, TaskStatus.FAILED, str(e)
-            )
             return False
 
     async def _execute_subflow(self, parent_flow_run_id: int, flow_name: str) -> bool:

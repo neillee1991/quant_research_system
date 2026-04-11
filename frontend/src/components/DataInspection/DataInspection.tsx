@@ -1,3 +1,4 @@
+import { notify } from '../../utils/notify';
 /**
  * 数据探查组件
  * 用于检查任务表的数据完整性
@@ -58,7 +59,7 @@ export const DataInspection: React.FC<DataInspectionProps> = ({ taskType, taskId
       setShowResult(true);
     } catch (error) {
       console.error('Data inspection failed:', error);
-      message.error('数据探查失败');
+      notify.error('数据探查失败');
     } finally {
       setLoading(false);
     }

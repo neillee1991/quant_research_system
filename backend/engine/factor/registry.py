@@ -165,78 +165,86 @@ def discover_factors(factors_dir: str = None, db_client=None, force_refresh: boo
 
 
 def load_factors_from_db(db_client):
-    """从数据库加载因子定义并注册到内存
+    """从 PostgreSQL factor_configs 加载因子定义并注册到内存
 
-    Args:
-        db_client: DolphinDB 客户端实例
+    使用 psycopg2（同步）查询 PostgreSQL，避免在同步上下文中调用 asyncpg。
+    db_client 参数保留以兼容旧调用方，实际不再使用。
     """
     import json
     import logging
+    import psycopg2
+    import psycopg2.extras
 
     logger = logging.getLogger(__name__)
 
     try:
-        df = db_client.query("""
-            SELECT factor_id, description, category, compute_mode,
-                   storage_target, depends_on, params, code
-            FROM factor_metadata
-            WHERE code IS NOT NULL AND code != ''
-            ORDER BY factor_id
-        """)
+        from app.core.config import settings
+        conn = psycopg2.connect(
+            host=settings.postgresql.postgres_host,
+            port=settings.postgresql.postgres_port,
+            dbname=settings.postgresql.postgres_db,
+            user=settings.postgresql.postgres_user,
+            password=settings.postgresql.postgres_password,
+        )
+        with conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute("""
+                    SELECT factor_id, description, category, compute_mode,
+                           storage_target, depends_on, params, code, align_calendar
+                    FROM factor_configs
+                    WHERE code IS NOT NULL AND code != ''
+                    ORDER BY factor_id
+                """)
+                rows = cur.fetchall()
+        conn.close()
+    except Exception as e:
+        logger.error(f"Failed to query factor_configs from PostgreSQL: {e}")
+        return
 
-        if df.is_empty():
-            logger.info("No factors found in database")
-            return
+    if not rows:
+        logger.info("No factors found in factor_configs")
+        return
 
-        loaded_count = 0
-        for row in df.to_dicts():
-            factor_id = row["factor_id"]
-            code = row.get("code", "")
+    loaded_count = 0
+    for row in rows:
+        factor_id = row["factor_id"]
+        code = row.get("code", "")
 
-            if not code:
+        if not code:
+            continue
+
+        try:
+            depends_on = json.loads(row.get("depends_on") or "[]")
+            params = json.loads(row.get("params") or "{}")
+
+            namespace = {}
+            exec(code, namespace)
+
+            compute_func = None
+            for name, obj in namespace.items():
+                if callable(obj) and (name.startswith("compute") or name == "main"):
+                    compute_func = obj
+                    break
+
+            if compute_func is None:
+                logger.warning(f"Factor {factor_id}: no compute function found in code")
                 continue
 
-            try:
-                # 解析 depends_on (JSON 数组)
-                depends_on = json.loads(row.get("depends_on") or "[]")
+            storage_config = StorageConfig(target=row.get("storage_target") or "factor_values")
+            _factor_registry[factor_id] = FactorDefinition(
+                factor_id=factor_id,
+                description=row.get("description") or "",
+                func=compute_func,
+                depends_on=depends_on,
+                category=row.get("category") or "custom",
+                params=params,
+                compute_mode=row.get("compute_mode") or "incremental",
+                storage=storage_config,
+                align_calendar=bool(row.get("align_calendar", False)),
+            )
+            loaded_count += 1
 
-                # 解析 params (JSON 对象)
-                params = json.loads(row.get("params") or "{}")
+        except Exception as e:
+            logger.error(f"Failed to load factor {factor_id} from database: {e}")
 
-                # 编译代码并提取计算函数
-                namespace = {}
-                exec(code, namespace)
-
-                # 查找计算函数
-                compute_func = None
-                for name, obj in namespace.items():
-                    if callable(obj) and (name.startswith("compute") or name == "main"):
-                        compute_func = obj
-                        break
-
-                if compute_func is None:
-                    logger.warning(f"Factor {factor_id}: no compute function found in code")
-                    continue
-
-                # 注册到内存
-                storage_config = StorageConfig(target=row.get("storage_target") or "factor_values")
-                _factor_registry[factor_id] = FactorDefinition(
-                    factor_id=factor_id,
-                    description=row.get("description") or "",
-                    func=compute_func,
-                    depends_on=depends_on,
-                    category=row.get("category") or "custom",
-                    params=params,
-                    compute_mode=row.get("compute_mode") or "incremental",
-                    storage=storage_config,
-                    align_calendar=bool(row.get("align_calendar", False)),
-                )
-                loaded_count += 1
-
-            except Exception as e:
-                logger.error(f"Failed to load factor {factor_id} from database: {e}")
-
-        logger.info(f"Loaded {loaded_count} factors from database")
-
-    except Exception as e:
-        logger.error(f"Failed to load factors from database: {e}")
+    logger.info(f"Loaded {loaded_count} factors from factor_configs (PostgreSQL)")

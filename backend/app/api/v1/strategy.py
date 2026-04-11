@@ -4,7 +4,6 @@ import uuid
 from datetime import datetime
 from typing import Any, Optional
 
-import polars as pl
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 from pydantic import BaseModel
 
@@ -31,7 +30,7 @@ class SimpleBacktestRequest(BaseModel):
     initial_capital: float = 1_000_000.0
 
 
-def _load_data(ts_code: str, start: str, end: str) -> pl.DataFrame:
+def _load_data(ts_code: str, start: str, end: str):
     return db_client.query(
         "SELECT * FROM sync_daily_data WHERE ts_code=%s AND trade_date>=%s AND trade_date<=%s ORDER BY trade_date",
         [ts_code, start, end],
@@ -39,8 +38,10 @@ def _load_data(ts_code: str, start: str, end: str) -> pl.DataFrame:
 
 
 @tracked_task("backtest", task_id_kwarg="task_id")
-def _run_backtest_background(task_id: str, graph: dict, run_id: str):
-    """后台执行回测"""
+async def _run_backtest_background(task_id: str, graph: dict, run_id: str):
+    """后台执行回测，结果写入 PostgreSQL backtest_results"""
+    from scheduler.db import DatabasePool
+
     parser = FlowParser(df_loader=_load_data)
     result = parser.parse_and_run(graph)
 
@@ -48,16 +49,21 @@ def _run_backtest_background(task_id: str, graph: dict, run_id: str):
     equity_curve = result.get("equity_curve", [])
     trades = result.get("trades", result.get("trades_sample", []))
 
-    record = pl.DataFrame({
-        "run_id": [run_id],
-        "task_id": [task_id],
-        "task_name": [task_id],
-        "metrics_json": [json.dumps(metrics, default=str)],
-        "equity_curve_json": [json.dumps(equity_curve, default=str)],
-        "trades_json": [json.dumps(trades, default=str)],
-        "created_at": [datetime.now()],
-    })
-    db_client.upsert("backtest_results", record, key_columns=["run_id"])
+    await DatabasePool.execute("""
+        INSERT INTO backtest_results
+          (run_id, task_id, task_name, metrics_json, equity_curve_json, trades_json, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        ON CONFLICT (run_id) DO UPDATE SET
+          metrics_json      = EXCLUDED.metrics_json,
+          equity_curve_json = EXCLUDED.equity_curve_json,
+          trades_json       = EXCLUDED.trades_json
+    """,
+        run_id, task_id, task_id,
+        json.dumps(metrics, default=str),
+        json.dumps(equity_curve, default=str),
+        json.dumps(trades, default=str),
+        datetime.now(),
+    )
 
     return {
         "rows": len(equity_curve),
@@ -74,8 +80,8 @@ async def backtest_async(request: dict, background_tasks: BackgroundTasks):
     task_id = f"{name}_{uuid.uuid4().hex[:8]}"
     run_id = f"{task_id}_{int(time.time() * 1000)}"
 
-    TaskRunner.start(run_id, "backtest", task_id, f"回测: {name}",
-                     params=json.dumps({"name": name}))
+    await TaskRunner.start(run_id, "backtest", task_id, f"回测: {name}",
+                           params=json.dumps({"name": name}))
 
     background_tasks.add_task(
         _run_backtest_background,
@@ -88,44 +94,45 @@ async def backtest_async(request: dict, background_tasks: BackgroundTasks):
 
 
 @router.get("/strategy/backtest/history")
-def get_backtest_history(limit: int = Query(default=20, le=100)):
-    """查询回测历史（从 task_runs 表）"""
-    df = db_client.query(
-        "SELECT * FROM task_runs WHERE task_type = 'backtest' ORDER BY started_at DESC LIMIT %s",
-        (limit,),
+async def get_backtest_history(limit: int = Query(default=20, le=100)):
+    """查询回测历史（从 PostgreSQL task_runs 表）"""
+    from scheduler.db import DatabasePool
+
+    rows = await DatabasePool.fetch(
+        "SELECT * FROM task_runs WHERE task_type = 'backtest' ORDER BY started_at DESC LIMIT $1",
+        limit,
     )
     tasks = []
-    if not df.is_empty():
-        for row in df.to_dicts():
-            for field in ["started_at", "finished_at"]:
-                if field in row and row[field]:
-                    row[field] = str(row[field])
-            tasks.append(row)
+    for row in rows:
+        r = dict(row)
+        for field in ["started_at", "finished_at"]:
+            if field in r and r[field]:
+                r[field] = str(r[field])
+        tasks.append(r)
     return {"tasks": tasks, "total": len(tasks)}
 
 
 @router.get("/strategy/backtest/{run_id}/result")
-def get_backtest_result(run_id: str):
-    """查询回测结果"""
-    df = db_client.query(
-        "SELECT * FROM backtest_results WHERE run_id = %s", (run_id,)
+async def get_backtest_result(run_id: str):
+    """查询回测结果（从 PostgreSQL backtest_results 表）"""
+    from scheduler.db import DatabasePool
+
+    row = await DatabasePool.fetchrow(
+        "SELECT * FROM backtest_results WHERE run_id = $1", run_id
     )
-    if df.is_empty():
+    if not row:
         raise HTTPException(status_code=404, detail=f"Result not found for run_id: {run_id}")
 
-    row = df.to_dicts()[0]
+    r = dict(row)
     return {
-        "run_id": row["run_id"],
-        "task_id": row["task_id"],
-        "task_name": row["task_name"],
-        "metrics": json.loads(row["metrics_json"] or "{}"),
-        "equity_curve": json.loads(row["equity_curve_json"] or "[]"),
-        "trades_sample": json.loads(row["trades_json"] or "[]"),
-        "created_at": str(row.get("created_at", "")),
+        "run_id": r["run_id"],
+        "task_id": r["task_id"],
+        "task_name": r["task_name"],
+        "metrics": json.loads(r.get("metrics_json") or "{}"),
+        "equity_curve": json.loads(r.get("equity_curve_json") or "[]"),
+        "trades_sample": json.loads(r.get("trades_json") or "[]"),
+        "created_at": str(r.get("created_at", "")),
     }
-
-
-
 
 
 @router.post("/strategy/backtest")

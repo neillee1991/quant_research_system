@@ -11,7 +11,7 @@ import { BaseTaskDrawer } from '../../components/TaskDrawer/BaseTaskDrawer';
 import {
   EditOutlined, SaveOutlined, CodeOutlined, DatabaseOutlined, SearchOutlined, BarChartOutlined,
 } from '@ant-design/icons';
-import { useMessage } from '../../hooks/useMessage';
+import { notify } from '../../utils/notify';
 import { useTaskLogs } from '../../hooks/useTaskLogs';
 import Editor from '@monaco-editor/react';
 import { productionApi, DEFAULT_PREPROCESS } from '../../api';
@@ -25,7 +25,6 @@ import QuantDatePicker from '../../components/QuantDatePicker';
 import TaskLogTable from '../../components/TaskLogTable';
 
 const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, onClose, onSaved }) => {
-  const message = useMessage();
   const { mode } = useThemeStore();
   const factorId = factor?.factor_id;
   const [activeTab, setActiveTab] = useState<string>('edit');
@@ -74,9 +73,8 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
       const formatted = await formatCode(editedCode, 'python');
       setEditedCode(formatted);
       setCodeChanged(true);
-      message.success('代码格式化成功');
     } catch (error: any) {
-      message.error(error.message || '格式化失败');
+      notify.error(error.message || '格式化失败');
     }
   };
 
@@ -172,7 +170,7 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
     setEditSaving(true);
     try {
       if (!factorId) {
-        message.error('因子ID不能为空');
+        notify.error('因子ID不能为空');
         return;
       }
       const newParams = {
@@ -183,12 +181,12 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
       const values = { description: editDesc, category: editCategory, compute_mode: editComputeMode, depends_on: editDependsOn, params: newParams, align_calendar: editAlignCalendar };
       console.log('[FactorDrawer] 保存预处理配置:', ppEdit);
       await productionApi.updateFactor(factorId, values);
-      message.success('保存成功');
+      notify.success('保存成功');
       onSaved();
     } catch (e: any) {
       const errorMessage = e.response?.data?.detail || '保存失败';
       console.error('Failed to save factor:', e);
-      message.error(errorMessage);
+      notify.error(errorMessage);
     }
     setEditSaving(false);
   };
@@ -199,12 +197,12 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
     setCodeSaving(true);
     try {
       await productionApi.updateFactorCode(factorId, code.filename, editedCode);
-      message.success('代码已保存');
+      notify.success('代码已保存');
       setCodeChanged(false);
     } catch (e: any) {
       const errorMessage = e.response?.data?.detail || '保存失败';
       console.error('Failed to save code:', e);
-      message.error(errorMessage);
+      notify.error(errorMessage);
     }
     setCodeSaving(false);
   };

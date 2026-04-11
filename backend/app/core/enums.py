@@ -33,10 +33,14 @@ class FactorCategory(str, Enum):
 class TableName:
     """数据库表名常量"""
     FACTOR_VALUES = "factor_values"
-    FACTOR_METADATA = "factor_metadata"
-    FACTOR_DATA_CONFIG = "factor_data_config"
-    SYNC_TASK_CONFIG = "sync_task_config"
-    ETL_TASK_CONFIG = "etl_task_config"
+    FACTOR_METADATA = "factor_metadata"  # 向后兼容旧值
+    FACTOR_CONFIGS = "factor_configs"      # 新表名
+    FACTOR_DATA_CONFIG = "factor_data_config"  # 向后兼容旧值
+    FACTOR_FIELD_MAPPINGS = "factor_field_mappings"  # 新表名
+    SYNC_TASK_CONFIG = "sync_task_config"  # 向后兼容旧值
+    SYNC_TASK_CONFIGS = "sync_task_configs"  # 新表名
+    ETL_TASK_CONFIG = "etl_task_config"  # 向后兼容旧值
+    ETL_TASK_CONFIGS = "etl_task_configs"  # 新表名
     SYNC_STOCK_BASIC = "sync_stock_basic"
     SYNC_DAILY_DATA = "sync_daily_data"
     SYNC_DAILY_BASIC = "sync_daily_basic"

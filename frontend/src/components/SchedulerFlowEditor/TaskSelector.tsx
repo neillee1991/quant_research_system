@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Checkbox, Spin, Button, message, Typography } from 'antd';
+import { Checkbox, Spin, Button, Typography } from 'antd';
+import { notify } from '../../utils/notify';
 import { dataApi, productionApi, TaskConfig, flowApi } from '../../api';
 
 const { Text } = Typography;
@@ -95,7 +96,7 @@ const TaskSelector: React.FC<TaskSelectorProps> = ({ selectedTasks, onChange }) 
           loading={inferring}
           onClick={async () => {
             if (selectedTasks.length === 0) {
-              message.warning('请先选择任务');
+              notify.warning('请先选择任务');
               return;
             }
             setInferring(true);
@@ -107,10 +108,10 @@ const TaskSelector: React.FC<TaskSelectorProps> = ({ selectedTasks, onChange }) 
               console.log('Inferred tasks:', res.data.tasks);
               console.log('Inferred tasks with deps:', res.data.tasks.map((t: any) => ({ id: t.id, type: t.type, depends_on: t.depends_on })));
               onChange(res.data.tasks);
-              message.success('依赖关系识别成功');
+              notify.success('依赖关系识别成功');
             } catch (e) {
               console.error('Failed to infer dependencies:', e);
-              message.error('识别依赖关系失败');
+              notify.error('识别依赖关系失败');
             } finally {
               setInferring(false);
             }

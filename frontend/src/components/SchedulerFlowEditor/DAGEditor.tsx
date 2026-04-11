@@ -48,7 +48,16 @@ const nodeStyles = {
     fontSize: 12,
     fontWeight: 500,
   },
-};
+  flow: {
+    background: 'linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%)',
+    color: 'white',
+    border: 'none',
+    borderRadius: 8,
+    padding: '8px 16px',
+    fontSize: 12,
+    fontWeight: 500,
+  },
+} as Record<string, any>;
 
 // 计算层级的辅助函数
 const calculateLevels = (taskList: TaskConfig[]) => {

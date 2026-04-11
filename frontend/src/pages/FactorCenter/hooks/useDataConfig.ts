@@ -3,7 +3,7 @@
  */
 
 import { useState, useCallback, useEffect } from 'react';
-import { message } from 'antd';
+import { notify } from '../../../utils/notify';
 import { productionApi, dataApi } from '../../../api';
 import type { DataFieldMapping } from '../../../types';
 
@@ -23,7 +23,6 @@ export const useDataConfig = () => {
       setChanged(false);
     } catch (error) {
       console.error('Failed to load data config:', error);
-      message.error('加载数据配置失败');
     } finally {
       setLoading(false);
     }
@@ -66,11 +65,11 @@ export const useDataConfig = () => {
     setSaving(true);
     try {
       await productionApi.updateDataConfig(mappings as any);
-      message.success('配置已保存');
+      notify.success('配置已保存');
       setChanged(false);
     } catch (error: any) {
       const errorMessage = error.response?.data?.detail || '保存失败';
-      message.error(errorMessage);
+      notify.error(errorMessage);
       throw error;
     } finally {
       setSaving(false);

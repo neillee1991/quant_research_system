@@ -6,7 +6,6 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
-import polars as pl
 
 from store.dolphindb_client import db_client
 from app.core.logger import logger
@@ -18,7 +17,6 @@ router = APIRouter()
 # ==================== Pydantic Models ====================
 
 class DataFieldMapping(BaseModel):
-    """数据字段映射"""
     field_key: str
     description: str = ""
     table_name: str = ""
@@ -27,20 +25,17 @@ class DataFieldMapping(BaseModel):
 
 
 class DataConfigUpdateRequest(BaseModel):
-    """数据配置更新请求"""
     mappings: List[DataFieldMapping]
 
 
 class IndexPoolBatchUploadRequest(BaseModel):
-    """批量上传指数成分股请求"""
     index_code: str
     index_name: str = ""
     description: str = ""
-    data: List[Dict[str, Any]]  # [{"trade_date": "20240101", "ts_code": "000001.SZ", "weight": 0.05}]
+    data: List[Dict[str, Any]]
 
 
 class IndexPoolCSVUploadRequest(BaseModel):
-    """CSV 上传请求"""
     index_code: str
     index_name: str = ""
     description: str = ""
@@ -51,14 +46,21 @@ class IndexPoolCSVUploadRequest(BaseModel):
 
 @router.get("/factor/data-config")
 async def get_data_config():
-    """获取所有字段映射配置"""
+    """获取所有字段映射配置（PostgreSQL factor_field_mappings）"""
+    from scheduler.db import DatabasePool
+
     cached = api_cache.get("production:data-config")
     if cached is not None:
         return cached
     try:
-        df = db_client.query("SELECT * FROM factor_data_config ORDER BY field_key")
-        rows = df.to_dicts() if not df.is_empty() else []
-        result = {"status": "success", "data": rows}
+        rows = await DatabasePool.fetch(
+            "SELECT * FROM factor_field_mappings ORDER BY field_key"
+        )
+        data = [dict(r) for r in rows]
+        for r in data:
+            if r.get("updated_at"):
+                r["updated_at"] = str(r["updated_at"])
+        result = {"status": "success", "data": data}
         api_cache.set("production:data-config", result, ttl=120)
         return result
     except Exception as e:
@@ -67,19 +69,28 @@ async def get_data_config():
 
 @router.put("/factor/data-config")
 async def update_data_config(req: DataConfigUpdateRequest):
-    """批量更新字段映射配置"""
+    """批量更新字段映射配置（PostgreSQL factor_field_mappings）"""
+    from scheduler.db import DatabasePool
+
     try:
         now = datetime.now()
-        update_df = pl.DataFrame({
-            "field_key": [m.field_key for m in req.mappings],
-            "description": [m.description for m in req.mappings],
-            "table_name": [m.table_name for m in req.mappings],
-            "column_name": [m.column_name for m in req.mappings],
-            "extra_config": [m.extra_config for m in req.mappings],
-            "updated_at": [now] * len(req.mappings),
-        })
-        db_client.upsert("factor_data_config", update_df, ["field_key"])
+        for m in req.mappings:
+            await DatabasePool.execute("""
+                INSERT INTO factor_field_mappings
+                  (field_key, description, table_name, column_name, extra_config, updated_at)
+                VALUES ($1,$2,$3,$4,$5,$6)
+                ON CONFLICT (field_key) DO UPDATE SET
+                  description  = EXCLUDED.description,
+                  table_name   = EXCLUDED.table_name,
+                  column_name  = EXCLUDED.column_name,
+                  extra_config = EXCLUDED.extra_config,
+                  updated_at   = EXCLUDED.updated_at
+            """,
+                m.field_key, m.description, m.table_name,
+                m.column_name, m.extra_config, now,
+            )
         api_cache.invalidate("production:data-config")
+        api_cache.invalidate("production:data-config:resolved")
         return {"status": "success", "message": f"已更新 {len(req.mappings)} 条配置"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -87,43 +98,39 @@ async def update_data_config(req: DataConfigUpdateRequest):
 
 @router.get("/factor/data-config/resolved")
 async def get_resolved_data_config():
-    """返回简化的 field_key → source_label + values 字典，供前端注解显示
+    """返回简化的 field_key → source_label 字典，供前端注解显示"""
+    from scheduler.db import DatabasePool
 
-    注意：只返回 factor_data_config 中配置的特殊字段
-    depends_on 表的字段会自动可用，不需要在这里配置
-    """
     cached = api_cache.get("production:data-config:resolved")
     if cached is not None:
         return cached
     try:
-        df = db_client.query("SELECT field_key, table_name, column_name, extra_config FROM factor_data_config")
+        rows = await DatabasePool.fetch(
+            "SELECT field_key, table_name, column_name, extra_config FROM factor_field_mappings"
+        )
         result = {}
-        if not df.is_empty():
-            for row in df.to_dicts():
-                fk = row["field_key"]
-                tbl = row.get("table_name", "") or ""
-                col = row.get("column_name", "") or ""
-                extra = row.get("extra_config", "{}") or "{}"
-                values = None
-                if tbl and col:
-                    source_label = f"{tbl}.{col}"
-                elif extra != "{}":
-                    try:
-                        cfg = json.loads(extra)
-                        mode = cfg.get("mode", "")
-                        if mode == "infer_from_gaps":
-                            source_label = "从交易日缺失推断"
-                        elif mode == "compute_from_ohlcv":
-                            source_label = "从OHLCV计算"
-                        else:
-                            source_label = "未配置"
-                    except Exception as e:
-                        logger.debug(f"解析数据源配置失败: {e}")
+        for row in rows:
+            fk = row["field_key"]
+            tbl = row.get("table_name", "") or ""
+            col = row.get("column_name", "") or ""
+            extra = row.get("extra_config", "{}") or "{}"
+            if tbl and col:
+                source_label = f"{tbl}.{col}"
+            elif extra != "{}":
+                try:
+                    cfg = json.loads(extra)
+                    mode = cfg.get("mode", "")
+                    if mode == "infer_from_gaps":
+                        source_label = "从交易日缺失推断"
+                    elif mode == "compute_from_ohlcv":
+                        source_label = "从OHLCV计算"
+                    else:
                         source_label = "未配置"
-                else:
+                except Exception:
                     source_label = "未配置"
-
-                result[fk] = {"source_label": source_label, "values": values}
+            else:
+                source_label = "未配置"
+            result[fk] = {"source_label": source_label, "values": None}
 
         response = {"status": "success", "data": result}
         api_cache.set("production:data-config:resolved", response, ttl=120)
@@ -134,53 +141,56 @@ async def get_resolved_data_config():
 
 @router.get("/factor/available-tables")
 async def get_available_tables():
-    """获取所有可用的数据表（sync任务表 + ETL任务表 + 因子表）"""
+    """获取所有可用的数据表（sync/etl/factor，均从 PostgreSQL 查询）"""
+    from scheduler.db import DatabasePool
+
     cached = api_cache.get("production:available-tables")
     if cached is not None:
         return cached
     try:
         tables = []
 
-        # 获取所有 sync 任务表
         try:
-            sync_df = db_client.query("SELECT task_id, table_name, description FROM sync_task_config WHERE enabled = true ORDER BY task_id")
-            if not sync_df.is_empty():
-                for row in sync_df.to_dicts():
-                    tables.append({
-                        "value": row["table_name"],
-                        "label": row["table_name"],
-                        "description": row.get("description", "") or f"同步任务: {row['task_id']}",
-                        "type": "sync"
-                    })
+            rows = await DatabasePool.fetch(
+                "SELECT task_id, table_name, description FROM sync_task_configs "
+                "WHERE enabled = true ORDER BY task_id"
+            )
+            for row in rows:
+                tables.append({
+                    "value": row["table_name"],
+                    "label": row["table_name"],
+                    "description": row.get("description", "") or f"同步任务: {row['task_id']}",
+                    "type": "sync",
+                })
         except Exception as e:
             logger.warning(f"Failed to load sync tasks: {e}")
 
-        # 获取所有 ETL 任务表
         try:
-            etl_df = db_client.query("SELECT task_id, table_name, description FROM etl_task_config WHERE enabled = true ORDER BY task_id")
-            if not etl_df.is_empty():
-                for row in etl_df.to_dicts():
-                    tables.append({
-                        "value": row["table_name"],
-                        "label": row["table_name"],
-                        "description": row.get("description", "") or f"ETL任务: {row['task_id']}",
-                        "type": "etl"
-                    })
+            rows = await DatabasePool.fetch(
+                "SELECT task_id, table_name, description FROM etl_task_configs "
+                "WHERE enabled = true ORDER BY task_id"
+            )
+            for row in rows:
+                tables.append({
+                    "value": row["table_name"],
+                    "label": row["table_name"],
+                    "description": row.get("description", "") or f"ETL任务: {row['task_id']}",
+                    "type": "etl",
+                })
         except Exception as e:
             logger.warning(f"Failed to load ETL tasks: {e}")
 
-        # 获取所有因子表（factor_values 作为可依赖的数据源）
         try:
-            # 从 factor_metadata 获取所有因子（去重）
-            factor_df = db_client.query("SELECT DISTINCT factor_id, description FROM factor_metadata ORDER BY factor_id")
-            if not factor_df.is_empty():
-                for row in factor_df.to_dicts():
-                    tables.append({
-                        "value": f"factor:{row['factor_id']}",  # 使用 factor: 前缀区分
-                        "label": row['factor_id'],  # 不显示"因子:"前缀
-                        "description": row.get("description", "") or "因子数据",
-                        "type": "factor"
-                    })
+            rows = await DatabasePool.fetch(
+                "SELECT DISTINCT factor_id, description FROM factor_configs ORDER BY factor_id"
+            )
+            for row in rows:
+                tables.append({
+                    "value": f"factor:{row['factor_id']}",
+                    "label": row["factor_id"],
+                    "description": row.get("description", "") or "因子数据",
+                    "type": "factor",
+                })
         except Exception as e:
             logger.warning(f"Failed to load factors: {e}")
 
@@ -195,68 +205,56 @@ async def get_available_tables():
 
 @router.post("/factor/index-pool/batch-upload")
 async def batch_upload_index_pool(req: IndexPoolBatchUploadRequest):
-    """批量上传指数成分股（JSON 格式）
+    """批量上传指数成分股（index_constituents → DolphinDB，index_configs → PostgreSQL）"""
+    from scheduler.db import DatabasePool
+    import polars as pl
 
-    请求示例:
-    {
-        "index_code": "000300.SH",
-        "index_name": "沪深300",
-        "description": "沪深300指数成分股",
-        "data": [
-            {"trade_date": "20240101", "ts_code": "000001.SZ", "weight": 0.05},
-            {"trade_date": "20240101", "ts_code": "000002.SZ", "weight": 0.03}
-        ]
-    }
-    """
     try:
         if not req.data:
             raise HTTPException(status_code=400, detail="数据不能为空")
 
-        # 验证数据格式
         required_fields = ["trade_date", "ts_code"]
         for item in req.data:
             for field in required_fields:
                 if field not in item:
                     raise HTTPException(status_code=400, detail=f"缺少必需字段: {field}")
 
-        # 添加 index_code 到每条记录
         for item in req.data:
             item["index_code"] = req.index_code
             if "weight" not in item:
                 item["weight"] = 0.0
 
-        # 转换为 DataFrame
+        # index_constituents 是时序数据，保留在 DolphinDB
         constituents_df = pl.DataFrame(req.data)
-
-        # 插入成分股数据
         db_client.upsert(
             "index_constituents",
             constituents_df,
             key_columns=["trade_date", "ts_code", "index_code"]
         )
 
-        # 更新或插入元数据
         latest_date = constituents_df["trade_date"].max()
-        stock_count = constituents_df.filter(pl.col("trade_date") == latest_date)["ts_code"].n_unique()
+        stock_count = constituents_df.filter(
+            pl.col("trade_date") == latest_date
+        )["ts_code"].n_unique()
 
-        metadata_df = pl.DataFrame({
-            "index_code": [req.index_code],
-            "index_name": [req.index_name],
-            "description": [req.description],
-            "stock_count": [stock_count],
-            "latest_date": [latest_date],
-            "created_at": [datetime.now()],
-            "updated_at": [datetime.now()]
-        })
-
-        db_client.upsert(
-            "index_metadata",
-            metadata_df,
-            key_columns=["index_code"]
+        # index_configs (metadata) → PostgreSQL
+        now = datetime.now()
+        await DatabasePool.execute("""
+            INSERT INTO index_configs
+              (index_code, index_name, description, stock_count, latest_date, created_at, updated_at)
+            VALUES ($1,$2,$3,$4,$5,$6,$7)
+            ON CONFLICT (index_code) DO UPDATE SET
+              index_name  = EXCLUDED.index_name,
+              description = EXCLUDED.description,
+              stock_count = EXCLUDED.stock_count,
+              latest_date = EXCLUDED.latest_date,
+              updated_at  = EXCLUDED.updated_at
+        """,
+            req.index_code, req.index_name, req.description,
+            stock_count, latest_date, now, now,
         )
 
         logger.info(f"Uploaded {len(req.data)} records for index {req.index_code}")
-
         return {
             "status": "success",
             "message": f"成功上传 {len(req.data)} 条成分股数据",
@@ -264,10 +262,9 @@ async def batch_upload_index_pool(req: IndexPoolBatchUploadRequest):
                 "index_code": req.index_code,
                 "records_count": len(req.data),
                 "stock_count": stock_count,
-                "latest_date": latest_date
+                "latest_date": latest_date,
             }
         }
-
     except HTTPException:
         raise
     except Exception as e:
@@ -277,42 +274,29 @@ async def batch_upload_index_pool(req: IndexPoolBatchUploadRequest):
 
 @router.post("/factor/index-pool/csv-upload")
 async def csv_upload_index_pool(req: IndexPoolCSVUploadRequest):
-    """CSV 上传指数成分股
-
-    CSV 格式要求:
-    trade_date,ts_code,weight
-    20240101,000001.SZ,0.05
-    20240101,000002.SZ,0.03
-    """
+    """CSV 上传指数成分股"""
     try:
-        # 解析 CSV
         csv_file = io.StringIO(req.csv_content)
         reader = csv.DictReader(csv_file)
         data = []
-
         for row in reader:
             if "trade_date" not in row or "ts_code" not in row:
                 raise HTTPException(status_code=400, detail="CSV 必须包含 trade_date 和 ts_code 列")
-
             data.append({
                 "trade_date": row["trade_date"],
                 "ts_code": row["ts_code"],
                 "weight": float(row.get("weight", 0.0))
             })
-
         if not data:
             raise HTTPException(status_code=400, detail="CSV 文件为空")
 
-        # 调用批量上传逻辑
         batch_req = IndexPoolBatchUploadRequest(
             index_code=req.index_code,
             index_name=req.index_name,
             description=req.description,
-            data=data
+            data=data,
         )
-
         return await batch_upload_index_pool(batch_req)
-
     except HTTPException:
         raise
     except Exception as e:
@@ -322,29 +306,25 @@ async def csv_upload_index_pool(req: IndexPoolCSVUploadRequest):
 
 @router.get("/factor/index-pool/list")
 async def list_index_pools():
-    """列出所有指数股票池"""
+    """列出所有指数股票池（PostgreSQL index_configs）"""
+    from scheduler.db import DatabasePool
+
     try:
-        df = db_client.query("""
-            SELECT index_code, index_name, description, stock_count, latest_date, created_at, updated_at
-            FROM index_metadata
-            ORDER BY index_code
-        """)
-
-        if df.is_empty():
-            return {"status": "success", "data": []}
-
-        records = df.to_dicts()
-        for record in records:
-            if "created_at" in record and record["created_at"]:
-                record["created_at"] = str(record["created_at"])
-            if "updated_at" in record and record["updated_at"]:
-                record["updated_at"] = str(record["updated_at"])
-
+        rows = await DatabasePool.fetch(
+            "SELECT index_code, index_name, description, stock_count, latest_date, "
+            "created_at, updated_at FROM index_configs ORDER BY index_code"
+        )
+        records = []
+        for row in rows:
+            r = dict(row)
+            for ts_field in ["created_at", "updated_at"]:
+                if r.get(ts_field):
+                    r[ts_field] = str(r[ts_field])
+            if r.get("latest_date"):
+                r["latest_date"] = str(r["latest_date"])
+            records.append(r)
         return {"status": "success", "data": records}
-
     except Exception as e:
-        if "does not exist" in str(e):
-            return {"status": "success", "data": []}
         logger.error(f"Failed to list index pools: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -364,41 +344,29 @@ async def get_index_pool_template():
 
 @router.get("/factor/index-pool/{index_code}")
 async def get_index_pool_detail(index_code: str, trade_date: Optional[str] = None):
-    """获取指定指数的成分股详情
+    """获取指定指数的成分股详情（metadata from PG, constituents from DolphinDB）"""
+    from scheduler.db import DatabasePool
 
-    Args:
-        index_code: 指数代码，如 '000300.SH'
-        trade_date: 交易日期（可选），如 '20240101'。不指定则返回最新日期的成分股
-    """
     try:
-        # 查询元数据
-        metadata_df = db_client.query("""
-            SELECT * FROM index_metadata WHERE index_code = %s
-        """, (index_code,))
-
-        if metadata_df.is_empty():
+        row = await DatabasePool.fetchrow(
+            "SELECT * FROM index_configs WHERE index_code = $1", index_code
+        )
+        if not row:
             raise HTTPException(status_code=404, detail=f"未找到指数 {index_code}")
 
-        metadata = metadata_df.to_dicts()[0]
-        if "created_at" in metadata and metadata["created_at"]:
-            metadata["created_at"] = str(metadata["created_at"])
-        if "updated_at" in metadata and metadata["updated_at"]:
-            metadata["updated_at"] = str(metadata["updated_at"])
+        metadata = dict(row)
+        for ts_field in ["created_at", "updated_at"]:
+            if metadata.get(ts_field):
+                metadata[ts_field] = str(metadata[ts_field])
+        if metadata.get("latest_date"):
+            metadata["latest_date"] = str(metadata["latest_date"])
 
-        # 确定查询日期
         if not trade_date:
             trade_date = metadata.get("latest_date")
             if not trade_date:
-                return {
-                    "status": "success",
-                    "data": {
-                        "metadata": metadata,
-                        "constituents": [],
-                        "trade_date": None
-                    }
-                }
+                return {"status": "success", "data": {"metadata": metadata, "constituents": [], "trade_date": None}}
 
-        # 查询成分股
+        # index_constituents 是时序数据，保留在 DolphinDB
         constituents_df = db_client.query("""
             SELECT ts_code, weight
             FROM index_constituents
@@ -407,16 +375,7 @@ async def get_index_pool_detail(index_code: str, trade_date: Optional[str] = Non
         """, (index_code, trade_date))
 
         constituents = constituents_df.to_dicts() if not constituents_df.is_empty() else []
-
-        return {
-            "status": "success",
-            "data": {
-                "metadata": metadata,
-                "constituents": constituents,
-                "trade_date": trade_date
-            }
-        }
-
+        return {"status": "success", "data": {"metadata": metadata, "constituents": constituents, "trade_date": trade_date}}
     except HTTPException:
         raise
     except Exception as e:
@@ -427,24 +386,19 @@ async def get_index_pool_detail(index_code: str, trade_date: Optional[str] = Non
 @router.delete("/factor/index-pool/{index_code}")
 async def delete_index_pool(index_code: str):
     """删除指定指数及其所有成分股数据"""
+    from scheduler.db import DatabasePool
+
     try:
-        # 删除成分股数据
+        # index_constituents 在 DolphinDB
         db_client.execute(
             "DELETE FROM index_constituents WHERE index_code = %s", (index_code,)
         )
-
-        # 删除元数据
-        db_client.execute(
-            "DELETE FROM index_metadata WHERE index_code = %s", (index_code,)
+        # index_configs 在 PostgreSQL
+        await DatabasePool.execute(
+            "DELETE FROM index_configs WHERE index_code = $1", index_code
         )
-
         logger.info(f"Deleted index pool: {index_code}")
-
-        return {
-            "status": "success",
-            "message": f"成功删除指数 {index_code}"
-        }
-
+        return {"status": "success", "message": f"成功删除指数 {index_code}"}
     except Exception as e:
         logger.error(f"Failed to delete index pool: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -453,16 +407,12 @@ async def delete_index_pool(index_code: str):
 # ==================== DataFrame Schema Preview ====================
 
 class DataFrameSchemaRequest(BaseModel):
-    """DataFrame schema 预览请求"""
     depends_on: List[str]
 
 
 @router.post("/factor/dataframe-schema")
 async def get_dataframe_schema(req: DataFrameSchemaRequest):
-    """根据依赖的数据源，返回预期的 DataFrame schema（列名和类型）
-
-    用于在因子编辑页面展示用户选择的数据依赖会产生什么样的 DataFrame
-    """
+    """根据依赖的数据源，返回预期的 DataFrame schema（列名和类型）"""
     try:
         if not req.depends_on:
             return {"status": "success", "data": {"columns": []}}
@@ -470,61 +420,42 @@ async def get_dataframe_schema(req: DataFrameSchemaRequest):
         columns = []
         seen_columns = set()
 
-        # 固定列：ts_code 和 trade_date（所有表都有）
         columns.append({"name": "ts_code", "type": "SYMBOL", "source": "所有表", "description": "股票代码"})
         columns.append({"name": "trade_date", "type": "DATE", "source": "所有表", "description": "交易日期"})
-        seen_columns.add("ts_code")
-        seen_columns.add("trade_date")
+        seen_columns.update(["ts_code", "trade_date"])
 
         for dep in req.depends_on:
-            # 处理因子依赖
             if dep.startswith("factor:"):
                 factor_id = dep[7:]
-                col_name = factor_id
-                if col_name not in seen_columns:
+                if factor_id not in seen_columns:
                     columns.append({
-                        "name": col_name,
-                        "type": "Float64",
-                        "source": f"因子: {factor_id}",
-                        "description": "因子值"
+                        "name": factor_id, "type": "Float64",
+                        "source": f"因子: {factor_id}", "description": "因子值"
                     })
-                    seen_columns.add(col_name)
+                    seen_columns.add(factor_id)
             else:
-                # 处理表依赖（sync/etl 任务表）
                 try:
-                    # 查询 DolphinDB 表的原始 schema
                     schema_df = db_client.query(
                         f"SELECT name, typeString FROM schema(loadTable('dfs://quant', '{dep}')).colDefs"
                     )
-
                     if not schema_df.is_empty():
                         for row in schema_df.to_dicts():
                             col_name = row["name"]
-                            col_type = row["typeString"]
-
                             if col_name in ["ts_code", "trade_date"]:
-                                continue  # 跳过已添加的固定列
-
+                                continue
                             if col_name not in seen_columns:
                                 columns.append({
-                                    "name": col_name,
-                                    "type": col_type,  # 使用 DolphinDB 原始类型
-                                    "source": dep,
-                                    "description": ""
+                                    "name": col_name, "type": row["typeString"],
+                                    "source": dep, "description": ""
                                 })
                                 seen_columns.add(col_name)
                             else:
-                                # 列名冲突，会被重命名
-                                renamed = f"{col_name}_{dep}"
                                 columns.append({
-                                    "name": renamed,
-                                    "type": col_type,
-                                    "source": dep,
-                                    "description": f"重命名（原: {col_name}）"
+                                    "name": f"{col_name}_{dep}", "type": row["typeString"],
+                                    "source": dep, "description": f"重命名（原: {col_name}）"
                                 })
                 except Exception as e:
                     logger.warning(f"Failed to get schema for {dep}: {e}")
-                    # 表不存在或查询失败，跳过
                     continue
 
         return {
@@ -535,7 +466,6 @@ async def get_dataframe_schema(req: DataFrameSchemaRequest):
                 "note": "实际列名可能因数据源冲突而自动重命名"
             }
         }
-
     except Exception as e:
         logger.error(f"Failed to get dataframe schema: {e}")
         raise HTTPException(status_code=500, detail=str(e))

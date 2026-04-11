@@ -659,10 +659,10 @@ const TradingViewChart: React.FC<TradingViewChartProps> = ({ data, buyPoints = [
                 <span style={{ display: 'inline-flex', gap: 4 }}><span style={{ color: 'var(--text-tertiary)' }}>C</span><span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{d.close?.toFixed(2)}</span></span>
                 {d.open && <span style={{ display: 'inline-flex', gap: 4 }}><span style={{ color: chg >= 0 ? 'var(--color-gain)' : 'var(--color-loss)', fontWeight: 600 }}>{chg >= 0 ? '+' : ''}{chg.toFixed(2)}%</span></span>}
                 {d.indicators?.map((ind: any) => (
-                  <span key={ind.name} style={{ display: 'inline-flex', gap: 4 }}><span style={{ color: ind.color, fontWeight: 500 }}>{ind.name}: {ind.value.toFixed(2)}</span></span>
+                  <span key={ind.name} style={{ display: 'inline-flex', gap: 4 }}><span style={{ color: ind.color, fontWeight: 500 }}>{ind.name}: {ind.value?.toFixed(2)}</span></span>
                 ))}
                 {subCrosshairData.length > 0 && subCrosshairData.map((ind) => (
-                  <span key={ind.name} style={{ display: 'inline-flex', gap: 4 }}><span style={{ color: ind.color, fontWeight: 500 }}>{ind.name}: {ind.value.toFixed(2)}</span></span>
+                  <span key={ind.name} style={{ display: 'inline-flex', gap: 4 }}><span style={{ color: ind.color, fontWeight: 500 }}>{ind.name}: {ind.value?.toFixed(2)}</span></span>
                 ))}
               </>
             );

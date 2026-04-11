@@ -1,3 +1,4 @@
+import { notify } from '../../utils/notify';
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   Modal,
@@ -63,7 +64,6 @@ const FlowEditor: React.FC<FlowEditorProps> = ({ visible, flowName, onClose, onS
           setFlow(res.data);
         })
         .catch(e => {
-          message.error('加载 Flow 失败');
           console.error(e);
         })
         .finally(() => setLoading(false));
@@ -73,6 +73,9 @@ const FlowEditor: React.FC<FlowEditorProps> = ({ visible, flowName, onClose, onS
   }, [visible, flowName]);
 
   const cronDescription = useMemo(() => {
+    if (!flow.cron) {
+      return '手动触发（无定时调度）';
+    }
     try {
       return cronstrue.toString(flow.cron, { locale: 'zh_CN' });
     } catch {
@@ -82,11 +85,7 @@ const FlowEditor: React.FC<FlowEditorProps> = ({ visible, flowName, onClose, onS
 
   const handleSave = async () => {
     if (!flow.name.trim()) {
-      message.warning('请输入 Flow 名称');
-      return;
-    }
-    if (!flow.cron.trim()) {
-      message.warning('请输入 Cron 表达式');
+      notify.warning('请输入 Flow 名称');
       return;
     }
 
@@ -94,15 +93,15 @@ const FlowEditor: React.FC<FlowEditorProps> = ({ visible, flowName, onClose, onS
     try {
       if (isEdit) {
         await flowApi.update(flowName!, flow);
-        message.success('Flow 更新成功');
+        notify.success('Flow 更新成功');
       } else {
         await flowApi.create(flow);
-        message.success('Flow 创建成功');
+        notify.success('Flow 创建成功');
       }
       onSaved();
       onClose();
     } catch (e: any) {
-      message.error(e?.response?.data?.detail || '保存失败');
+      notify.error(e?.response?.data?.detail || '保存失败');
     } finally {
       setSaving(false);
     }

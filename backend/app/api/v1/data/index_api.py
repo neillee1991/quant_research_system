@@ -11,12 +11,12 @@ from typing import List, Optional
 from datetime import datetime
 from fastapi import APIRouter, Query, HTTPException
 from pydantic import BaseModel, Field
-import polars as pl
 
 from app.core.logger import logger
 from store.dolphindb_client import db_client
 from app.services.task_service import sync_service
 from app.models.base_task import SyncTaskConfig
+from scheduler.db import DatabasePool
 
 
 router = APIRouter()
@@ -410,23 +410,18 @@ async def get_user_preference():
     使用固定的 "default" 用户，因为没有用户系统
     """
     try:
-        # 查询用户偏好
-        df = db_client.query(
-            "SELECT user_id, index_table, filter_config FROM user_sync_preference WHERE user_id = %s",
-            ("default",)
+        row = await DatabasePool.fetchrow(
+            "SELECT user_id, index_table, filter_config FROM user_preferences WHERE user_id = $1",
+            "default"
         )
 
-        if df.is_empty():
-            # 如果没有配置，返回默认值
+        if row is None:
             logger.warning("No user preference found, returning default")
             return UserSyncPreferenceResponse(
                 user_id="default",
                 index_basic_table="sync_index_basic"
             )
 
-        row = df.to_dicts()[0]
-
-        # 解析 filter_config JSON 字符串
         filter_config = None
         raw_filter = row.get("filter_config")
         if raw_filter:
@@ -465,8 +460,6 @@ async def save_user_preference(request: UserSyncPreference):
         if not index_table.replace("_", "").isalnum():
             raise HTTPException(status_code=400, detail="表名只能包含字母、数字和下划线")
 
-        now = datetime.now()
-
         # 序列化 filter_config
         filter_config_json = ""
         if request.filter_config is not None:
@@ -474,34 +467,18 @@ async def save_user_preference(request: UserSyncPreference):
                 [f.model_dump() for f in request.filter_config], ensure_ascii=False
             )
 
-        # 检查是否已存在配置
-        check_df = db_client.query(
-            "SELECT user_id FROM user_sync_preference WHERE user_id = %s",
-            ("default",)
+        await DatabasePool.execute(
+            """
+            INSERT INTO user_preferences (user_id, index_table, filter_config, created_at, updated_at)
+            VALUES ($1, $2, $3, NOW(), NOW())
+            ON CONFLICT (user_id) DO UPDATE SET
+                index_table = EXCLUDED.index_table,
+                filter_config = EXCLUDED.filter_config,
+                updated_at = NOW()
+            """,
+            "default", index_table, filter_config_json or ""
         )
-
-        if check_df.is_empty():
-            # 插入新配置
-            data = {
-                "user_id": "default",
-                "index_table": index_table,
-                "filter_config": filter_config_json or "",
-                "created_at": now,
-                "updated_at": now,
-            }
-            db_client.upsert("user_sync_preference", pl.DataFrame([data]), ["user_id"])
-            logger.info(f"Created user preference for default user: index_table={index_table}")
-        else:
-            # 更新现有配置 - 使用upsert代替UPDATE语句
-            data = {
-                "user_id": "default",
-                "index_table": index_table,
-                "filter_config": filter_config_json or "",
-                "created_at": check_df.to_dicts()[0].get("created_at", now),
-                "updated_at": now,
-            }
-            db_client.upsert("user_sync_preference", pl.DataFrame([data]), ["user_id"])
-            logger.info(f"Updated user preference for default user: index_table={index_table}")
+        logger.info(f"Saved user preference for default user: index_table={index_table}")
 
         return UserSyncPreferenceResponse(
             user_id="default",

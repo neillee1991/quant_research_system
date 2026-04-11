@@ -1,3 +1,4 @@
+import { notify } from '../../utils/notify';
 /**
  * 数据中心主页面 - 重构后的版本
  * 使用统一任务管理架构
@@ -152,7 +153,7 @@ const DataCenter: React.FC = () => {
       ]);
     } catch (error) {
       console.error('Failed to load initial data:', error);
-      message.error('加载初始数据失败');
+      notify.error('加载初始数据失败');
     }
   }, [syncTasksHook.loadTasks, etlTasksHook.loadTasks, dataQueryHook.loadTables, message]);
 

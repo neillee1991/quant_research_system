@@ -1,3 +1,4 @@
+import { notify } from '../../utils/notify';
 /**
  * 同步任务配置抽屉组件
  * 匹配原始实现：可视化编辑 + JSON编辑 + 历史调度
@@ -203,7 +204,7 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
       setShowInspection(true);
     } catch (error) {
       console.error('Data inspection failed:', error);
-      message.error('数据探查失败');
+      notify.error('数据探查失败');
     } finally {
       setInspectionLoading(false);
     }
@@ -246,7 +247,7 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
         jsonEditorRef.current.setValue(formatted);
       }
     } catch (error) {
-      message.error('JSON 格式无效');
+      notify.error('JSON 格式无效');
     }
   };
 
@@ -259,7 +260,7 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
 
       if (isNew) {
         await dataApi.createSyncTask(configToSave);
-        message.success(`任务 ${configToSave.task_id} 创建成功`);
+        notify.success(`任务 ${configToSave.task_id} 创建成功`);
         onSave();
         onClose();
       } else {
@@ -379,15 +380,15 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
           return;
         }
 
-        message.success(`任务 ${configToSave.task_id} 更新成功`);
+        notify.success(`任务 ${configToSave.task_id} 更新成功`);
         onSave();
         onClose();
       }
     } catch (error: any) {
       if (error instanceof SyntaxError) {
-        message.error('JSON 格式无效');
+        notify.error('JSON 格式无效');
       } else {
-        message.error(error.response?.data?.detail || '保存配置失败');
+        notify.error(error.response?.data?.detail || '保存配置失败');
       }
     }
   };

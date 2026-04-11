@@ -1,12 +1,10 @@
 """
 Seed Data Manager
-Applies seed data from JSON configuration files to the database
+Applies seed data from JSON configuration files to PostgreSQL
 """
 import json
 from datetime import datetime
 from typing import Any
-
-import polars as pl
 
 from app.core.logger import logger
 
@@ -14,248 +12,211 @@ from .loader import SeedDataLoader
 
 
 class SeedDataManager:
-    """数据初始化管理器（配置文件版本）"""
+    """数据初始化管理器（PostgreSQL 版本）"""
 
-    def __init__(
-        self,
-        db_client: Any,
-        loader: SeedDataLoader | None = None,
-    ) -> None:
-        """
-        初始化数据种子管理器
-
-        Args:
-            db_client: DolphinDB 客户端
-            loader: 种子数据加载器（可选，默认创建新实例）
-        """
-        self.db_client = db_client
+    def __init__(self, loader: SeedDataLoader | None = None) -> None:
         self.loader = loader or SeedDataLoader()
 
-    def seed_all(self) -> None:
+    async def seed_all(self) -> None:
         """执行所有 seed 操作"""
         logger.info("Starting seed data initialization...")
-        self.seed_sync_task_config()
-        self.seed_etl_task_config()
-        self.seed_factor_data_config()
-        self.seed_factor_metadata()
-        self.seed_user_sync_preference()
-        self.seed_flow_config()
+        await self.seed_sync_task_configs()
+        await self.seed_etl_task_configs()
+        await self.seed_factor_field_mappings()
+        await self.seed_factor_configs()
+        await self.seed_user_preferences()
+        await self.seed_flow_configs()
         logger.info("Seed data initialization completed")
 
-    def seed_sync_task_config(self) -> None:
-        """
-        如果 sync_task_config 表为空，则写入默认同步任务定义
-        仅在首次启动时生效，后续可通过 API 增删改
-        """
+    async def seed_sync_task_configs(self) -> None:
+        """如果 sync_task_configs 表为空，则写入默认同步任务定义"""
+        from scheduler.db import DatabasePool
+
         try:
-            count = self.db_client.query("SELECT count(*) as cnt FROM sync_task_config")
-            if not count.is_empty() and count["cnt"][0] > 0:
-                logger.info("sync_task_config 已有数据，跳过 seed")
+            row = await DatabasePool.fetchrow("SELECT COUNT(*) AS cnt FROM sync_task_configs")
+            if row and row["cnt"] > 0:
+                logger.info("sync_task_configs 已有数据，跳过 seed")
                 return
         except Exception as e:
-            logger.debug(f"检查 sync_task_config 数据失败（表可能刚创建）: {e}")
-            # 表可能刚创建，继续 seed
+            logger.debug(f"检查 sync_task_configs 失败（表可能刚创建）: {e}")
 
-        now = datetime.now()
         tasks = self.loader.load_sync_tasks()
-
         if not tasks:
             logger.warning("No sync tasks found in config, skipping seed")
             return
 
-        seed_df = pl.DataFrame({
-            "task_id": [t["task_id"] for t in tasks],
-            "api_name": [t["api_name"] for t in tasks],
-            "description": [t["description"] for t in tasks],
-            "sync_type": [t["sync_type"] for t in tasks],
-            "params_json": [json.dumps(t["params"], ensure_ascii=False) for t in tasks],
-            "date_field": [t.get("date_field", "") for t in tasks],
-            "primary_keys_json": [json.dumps(t["primary_keys"]) for t in tasks],
-            "table_name": [t["table_name"] for t in tasks],
-            "schema_json": [json.dumps(t["schema"], ensure_ascii=False) for t in tasks],
-            "enabled": [True] * len(tasks),
-            "api_limit": [t.get("api_limit", 5000) for t in tasks],
-            "created_at": [now] * len(tasks),
-            "updated_at": [now] * len(tasks),
-        })
-
-        self.db_client.upsert("sync_task_config", seed_df, ["task_id"])
+        now = datetime.now()
+        for t in tasks:
+            await DatabasePool.execute("""
+                INSERT INTO sync_task_configs
+                  (task_id, api_name, description, sync_type, params_json,
+                   date_field, primary_keys_json, table_name, schema_json,
+                   enabled, api_limit, created_at, updated_at)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+                ON CONFLICT (task_id) DO NOTHING
+            """,
+                t["task_id"], t["api_name"], t["description"], t["sync_type"],
+                json.dumps(t["params"], ensure_ascii=False),
+                t.get("date_field", ""),
+                json.dumps(t["primary_keys"]),
+                t["table_name"],
+                json.dumps(t["schema"], ensure_ascii=False),
+                True, t.get("api_limit", 5000), now, now,
+            )
         logger.info(f"已写入 {len(tasks)} 条默认同步任务配置")
 
-    def seed_etl_task_config(self) -> None:
-        """
-        如果 etl_task_config 表为空，则写入默认 ETL 任务定义
-        仅在首次启动时生效，后续可通过 API 增删改
-        """
+    async def seed_etl_task_configs(self) -> None:
+        """如果 etl_task_configs 表为空，则写入默认 ETL 任务定义"""
+        from scheduler.db import DatabasePool
+
         try:
-            count = self.db_client.query("SELECT count(*) as cnt FROM etl_task_config")
-            if not count.is_empty() and count["cnt"][0] > 0:
-                logger.info("etl_task_config 已有数据，跳过 seed")
+            row = await DatabasePool.fetchrow("SELECT COUNT(*) AS cnt FROM etl_task_configs")
+            if row and row["cnt"] > 0:
+                logger.info("etl_task_configs 已有数据，跳过 seed")
                 return
         except Exception as e:
-            logger.warning(
-                f"检查 etl_task_config 表时出错（可能表不存在，将继续 seed）: {e}"
-            )
+            logger.warning(f"检查 etl_task_configs 失败（可能表不存在，将继续 seed）: {e}")
 
-        now = datetime.now()
         tasks = self.loader.load_etl_tasks()
-
         if not tasks:
             logger.warning("No ETL tasks found in config, skipping seed")
             return
 
-        # 替换脚本中的数据库路径模板
-        db_meta = self.db_client._db_path
-        db_ts = "dfs://quant_ts"
-
-        for task in tasks:
-            if "script" in task:
-                task["script"] = task["script"].format(db_meta=db_meta, db_ts=db_ts)
-
-        seed_df = pl.DataFrame({
-            "task_id": [t["task_id"] for t in tasks],
-            "description": [t["description"] for t in tasks],
-            "script": [t["script"] for t in tasks],
-            "sync_type": [t.get("sync_type", "full") for t in tasks],
-            "date_field": [t.get("date_field", "") for t in tasks],
-            "primary_keys_json": [json.dumps(t.get("primary_keys", [])) for t in tasks],
-            "table_name": [t["table_name"] for t in tasks],
-            "schema_json": [json.dumps(t.get("schema", {}), ensure_ascii=False) for t in tasks],
-            "enabled": [True] * len(tasks),
-            "created_at": [now] * len(tasks),
-            "updated_at": [now] * len(tasks),
-        })
-
-        self.db_client.upsert("etl_task_config", seed_df, ["task_id"])
+        now = datetime.now()
+        for t in tasks:
+            await DatabasePool.execute("""
+                INSERT INTO etl_task_configs
+                  (task_id, description, script, sync_type, date_field,
+                   primary_keys_json, table_name, schema_json, enabled,
+                   created_at, updated_at)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+                ON CONFLICT (task_id) DO NOTHING
+            """,
+                t["task_id"], t["description"], t["script"],
+                t.get("sync_type", "full"), t.get("date_field", ""),
+                json.dumps(t.get("primary_keys", [])),
+                t["table_name"],
+                json.dumps(t.get("schema", {}), ensure_ascii=False),
+                True, now, now,
+            )
         logger.info(f"已写入 {len(tasks)} 条默认 ETL 任务配置")
 
-    def seed_factor_data_config(self) -> None:
-        """
-        如果 factor_data_config 表为空，则写入默认字段映射
-        仅在首次启动时生效，后续可通过 API 修改
-        """
+    async def seed_factor_field_mappings(self) -> None:
+        """如果 factor_field_mappings 表为空，则写入默认字段映射"""
+        from scheduler.db import DatabasePool
+
         try:
-            count = self.db_client.query("SELECT count(*) as cnt FROM factor_data_config")
-            if not count.is_empty() and count["cnt"][0] > 0:
-                logger.info("factor_data_config 已有数据，跳过 seed")
+            row = await DatabasePool.fetchrow("SELECT COUNT(*) AS cnt FROM factor_field_mappings")
+            if row and row["cnt"] > 0:
+                logger.info("factor_field_mappings 已有数据，跳过 seed")
                 return
         except Exception as e:
-            logger.debug(f"检查 factor_data_config 数据失败（表可能刚创建）: {e}")
+            logger.debug(f"检查 factor_field_mappings 失败: {e}")
 
-        now = datetime.now()
         mappings = self.loader.load_factor_data_config()
-
         if not mappings:
             logger.warning("No factor data config found in config, skipping seed")
             return
 
-        seed_df = pl.DataFrame({
-            "field_key": [m["field_key"] for m in mappings],
-            "description": [m["description"] for m in mappings],
-            "table_name": [m["table_name"] for m in mappings],
-            "column_name": [m["column_name"] for m in mappings],
-            "extra_config": [json.dumps(m["extra_config"], ensure_ascii=False) for m in mappings],
-            "updated_at": [now] * len(mappings),
-        })
+        now = datetime.now()
+        for m in mappings:
+            await DatabasePool.execute("""
+                INSERT INTO factor_field_mappings
+                  (field_key, description, table_name, column_name, extra_config, updated_at)
+                VALUES ($1,$2,$3,$4,$5,$6)
+                ON CONFLICT (field_key) DO NOTHING
+            """,
+                m["field_key"], m["description"], m["table_name"],
+                m["column_name"],
+                json.dumps(m["extra_config"], ensure_ascii=False),
+                now,
+            )
+        logger.info(f"已写入 {len(mappings)} 条默认因子字段映射配置")
 
-        self.db_client.upsert("factor_data_config", seed_df, ["field_key"])
-        logger.info(f"已写入 {len(mappings)} 条默认因子数据配置")
+    async def seed_factor_configs(self) -> None:
+        """如果 factor_configs 表为空，则写入默认种子因子定义"""
+        from scheduler.db import DatabasePool
 
-    def seed_factor_metadata(self) -> None:
-        """
-        如果 factor_metadata 表为空，则写入默认种子因子定义
-        仅在首次启动时生效，后续可通过 API 增删改
-        """
         try:
-            count = self.db_client.query("SELECT count(*) as cnt FROM factor_metadata")
-            if not count.is_empty() and count["cnt"][0] > 0:
-                logger.info("factor_metadata 已有数据，跳过 seed")
+            row = await DatabasePool.fetchrow("SELECT COUNT(*) AS cnt FROM factor_configs")
+            if row and row["cnt"] > 0:
+                logger.info("factor_configs 已有数据，跳过 seed")
                 return
         except Exception:
             pass
 
-        now = datetime.now()
         factors = self.loader.load_factor_metadata()
-
         if not factors:
             logger.warning("No factor metadata found in config, skipping seed")
             return
 
-        seed_df = pl.DataFrame({
-            "factor_id": [f["factor_id"] for f in factors],
-            "description": [f["description"] for f in factors],
-            "category": [f["category"] for f in factors],
-            "compute_mode": [f["compute_mode"] for f in factors],
-            "storage_target": [f["storage_target"] for f in factors],
-            "depends_on": [json.dumps(f["depends_on"]) for f in factors],
-            "params": [json.dumps(f["params"]) for f in factors],
-            "code": [f["code"] for f in factors],
-            "created_at": [now] * len(factors),
-            "updated_at": [now] * len(factors),
-        })
-
-        self.db_client.upsert("factor_metadata", seed_df, ["factor_id"])
+        now = datetime.now()
+        for f in factors:
+            await DatabasePool.execute("""
+                INSERT INTO factor_configs
+                  (factor_id, description, category, compute_mode, storage_target,
+                   depends_on, params, code, created_at, updated_at)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+                ON CONFLICT (factor_id) DO NOTHING
+            """,
+                f["factor_id"], f["description"], f["category"],
+                f["compute_mode"], f["storage_target"],
+                json.dumps(f["depends_on"]),
+                json.dumps(f["params"]),
+                f["code"], now, now,
+            )
         logger.info(f"已写入 {len(factors)} 条默认因子定义")
 
-    def seed_user_sync_preference(self) -> None:
-        """
-        如果 user_sync_preference 表为空，则写入默认用户同步偏好配置
-        仅在首次启动时生效，后续可通过 API 修改
-        """
+    async def seed_user_preferences(self) -> None:
+        """如果 user_preferences 表为空，则写入默认用户同步偏好配置"""
+        from scheduler.db import DatabasePool
+
         try:
-            count = self.db_client.query("SELECT count(*) as cnt FROM user_sync_preference")
-            if not count.is_empty() and count["cnt"][0] > 0:
-                logger.info("user_sync_preference 已有数据，跳过 seed")
+            row = await DatabasePool.fetchrow("SELECT COUNT(*) AS cnt FROM user_preferences")
+            if row and row["cnt"] > 0:
+                logger.info("user_preferences 已有数据，跳过 seed")
                 return
         except Exception:
             pass
 
         now = datetime.now()
-        default_preference = {
-            "user_id": "default",
-            "index_table": "sync_index_basic",
-            "created_at": now,
-            "updated_at": now,
-        }
-
-        seed_df = pl.DataFrame([default_preference])
-        self.db_client.upsert("user_sync_preference", seed_df, ["user_id"])
+        await DatabasePool.execute("""
+            INSERT INTO user_preferences (user_id, index_table, created_at, updated_at)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (user_id) DO NOTHING
+        """, "default", "sync_index_basic", now, now)
         logger.info("已写入默认用户同步偏好配置")
 
-    def seed_flow_config(self) -> None:
-        """
-        如果 flow_config 表为空，则写入默认 flow 配置
-        仅在首次启动时生效，后续可通过 API 增删改
-        """
+    async def seed_flow_configs(self) -> None:
+        """如果 flow_configs 表为空，则写入默认 flow 配置"""
+        from scheduler.db import DatabasePool
+        from .seed_flow_config import DEFAULT_FLOWS
+
         try:
-            count = self.db_client.query("SELECT count(*) as cnt FROM flow_config")
-            if not count.is_empty() and count["cnt"][0] > 0:
-                logger.info("flow_config 已有数据，跳过 seed")
+            row = await DatabasePool.fetchrow("SELECT COUNT(*) AS cnt FROM flow_configs")
+            if row and row["cnt"] > 0:
+                logger.info("flow_configs 已有数据，跳过 seed")
                 return
         except Exception as e:
-            logger.debug(f"检查 flow_config 数据失败（表可能刚创建）: {e}")
-            # 表可能刚创建，继续 seed
-
-        now = datetime.now()
-        from .seed_flow_config import DEFAULT_FLOWS
-        import json
+            logger.debug(f"检查 flow_configs 失败: {e}")
 
         if not DEFAULT_FLOWS:
             logger.warning("No flows found in DEFAULT_FLOWS, skipping seed")
             return
 
-        seed_df = pl.DataFrame({
-            "name": [f["name"] for f in DEFAULT_FLOWS],
-            "description": [f["description"] for f in DEFAULT_FLOWS],
-            "cron": [f["cron"] for f in DEFAULT_FLOWS],
-            "tags": [json.dumps(f["tags"], ensure_ascii=False) for f in DEFAULT_FLOWS],
-            "enabled": [f["enabled"] for f in DEFAULT_FLOWS],
-            "date_offset_days": [f["date_offset_days"] for f in DEFAULT_FLOWS],
-            "tasks": [json.dumps(f["tasks"], ensure_ascii=False) for f in DEFAULT_FLOWS],
-            "created_at": [now] * len(DEFAULT_FLOWS),
-            "updated_at": [now] * len(DEFAULT_FLOWS),
-            "version": [1] * len(DEFAULT_FLOWS),
-        })
-
-        self.db_client.upsert("flow_config", seed_df, ["name"])
+        now = datetime.now()
+        for f in DEFAULT_FLOWS:
+            await DatabasePool.execute("""
+                INSERT INTO flow_configs
+                  (name, description, cron, tags, enabled, date_offset_days,
+                   tasks, created_at, updated_at, version)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+                ON CONFLICT (name) DO NOTHING
+            """,
+                f["name"], f["description"], f["cron"],
+                json.dumps(f["tags"], ensure_ascii=False),
+                f["enabled"], f["date_offset_days"],
+                json.dumps(f["tasks"], ensure_ascii=False),
+                now, now, 1,
+            )
         logger.info(f"已写入 {len(DEFAULT_FLOWS)} 条默认 flow 配置")

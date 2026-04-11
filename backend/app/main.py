@@ -21,32 +21,43 @@ async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     logger.info("Starting application...")
 
+    # 初始化 PostgreSQL 连接池（必须在调度器和 seed 之前）
+    from scheduler.db import init_db, close_db
+    await init_db()
+    logger.info("PostgreSQL 连接池已初始化")
+
     # 启动调度器
     from scheduler.core import get_scheduler
     scheduler = get_scheduler()
     await scheduler.start()
     logger.info("调度器已启动")
 
-    # 动态创建缺失的维度表（使用全局单例，避免重复连接）
+    # 动态创建缺失的 DolphinDB 维度表（只保留时序数据表）
     try:
         db_client.ensure_meta_tables()
     except Exception as e:
         logger.error(f"创建维度表失败: {e}")
         raise  # 表结构创建失败应该终止启动
 
-    # Seed 数据（失败不影响启动）
+    # Seed 数据到 PostgreSQL（失败不影响启动）
     try:
-        seed_loader = SeedDataLoader()
-        seed_manager = SeedDataManager(db_client=db_client, loader=seed_loader)
-        seed_manager.seed_all()
-        logger.info("Seed data initialization completed")
+        seed_manager = SeedDataManager(loader=SeedDataLoader())
+        await seed_manager.seed_all()
     except Exception as e:
         logger.error(f"Seed 数据失败: {e}", exc_info=True)
+
+    # 预加载因子字段映射缓存
+    try:
+        from engine.factor.data_config import DataConfigLoader
+        _data_config = DataConfigLoader(db_client)
+        await _data_config.refresh()
+    except Exception as e:
+        logger.warning(f"预加载因子字段映射缓存失败: {e}")
 
     # 清理僵尸任务：重启后所有 running 记录必然已中断
     try:
         from app.services.task_runner import TaskRunner
-        cleaned = TaskRunner.cleanup_stale(reason="server restart")
+        cleaned = await TaskRunner.cleanup_stale(reason="server restart")
         if cleaned > 0:
             logger.info(f"Cleaned up {cleaned} stale running tasks on startup")
     except Exception as e:
@@ -55,9 +66,10 @@ async def lifespan(app: FastAPI):
     yield
 
     logger.info("Shutting down application...")
-    # 停止调度器
     await scheduler.stop()
     logger.info("调度器已停止")
+    await close_db()
+    logger.info("PostgreSQL 连接池已关闭")
 
 
 def create_app() -> FastAPI:

@@ -3,7 +3,7 @@
  * 为所有任务类型提供统一的状态管理和操作接口
  */
 import { useState, useCallback, useMemo } from 'react';
-import { message } from 'antd';
+import { notify } from '../utils/notify';
 import type { TaskTypeConfig, GenericTaskStatus } from '../config/taskTypes';
 import { useTaskLogs } from './useTaskLogs';
 
@@ -79,7 +79,6 @@ export function useTasks<TTask, TStatus extends GenericTaskStatus, TRunParams ex
       setTaskStatuses(statuses);
     } catch (error) {
       console.error(`Failed to load ${config.type} tasks:`, error);
-      message.error(`加载 ${config.label} 失败`);
     } finally {
       setIsLoading(false);
     }
@@ -102,14 +101,14 @@ export function useTasks<TTask, TStatus extends GenericTaskStatus, TRunParams ex
     setRunningTasks((prev) => new Set(prev).add(taskId));
     try {
       await config.api.runTask(taskId, params);
-      message.success(`${config.label} ${taskId} 已启动`);
+      notify.success(`${config.label} ${taskId} 已启动`);
       setTimeout(() => {
         loadLogs();
         loadTaskStatus(taskId);
       }, 2000);
       return true;
     } catch (error: any) {
-      message.error(`${config.label} ${taskId} 启动失败: ${error.response?.data?.detail || error.message}`);
+      notify.error(`${config.label} ${taskId} 启动失败: ${error.response?.data?.detail || error.message}`);
       return false;
     } finally {
       setRunningTasks((prev) => {
@@ -145,15 +144,15 @@ export function useTasks<TTask, TStatus extends GenericTaskStatus, TRunParams ex
       setRunningTasks((prev) => new Set(prev).add(taskId));
     });
 
-    message.info(`开始执行 ${taskIds.length} 个 ${config.label}`);
+    notify.info(`开始执行 ${taskIds.length} 个 ${config.label}`);
 
     // 执行全量任务
     for (const taskId of fullIds) {
       try {
         await config.api.runTask(taskId, params);
-        message.success(`${config.label} ${taskId} 执行成功`);
+        notify.success(`${config.label} ${taskId} 执行成功`);
       } catch (error: any) {
-        message.error(`${config.label} ${taskId} 执行失败: ${error.response?.data?.detail || error.message}`);
+        notify.error(`${config.label} ${taskId} 执行失败: ${error.response?.data?.detail || error.message}`);
       }
     }
 
@@ -161,9 +160,9 @@ export function useTasks<TTask, TStatus extends GenericTaskStatus, TRunParams ex
     for (const taskId of incrementalIds) {
       try {
         await config.api.runTask(taskId, params);
-        message.success(`${config.label} ${taskId} 执行成功`);
+        notify.success(`${config.label} ${taskId} 执行成功`);
       } catch (error: any) {
-        message.error(`${config.label} ${taskId} 执行失败: ${error.response?.data?.detail || error.message}`);
+        notify.error(`${config.label} ${taskId} 执行失败: ${error.response?.data?.detail || error.message}`);
       }
     }
 
@@ -186,15 +185,15 @@ export function useTasks<TTask, TStatus extends GenericTaskStatus, TRunParams ex
   // 删除任务
   const deleteTask = useCallback(async (taskId: string, dropTable = true) => {
     if (!config.api.deleteTask) {
-      message.warning('删除功能未实现');
+      notify.warning('删除功能未实现');
       return;
     }
     try {
       await config.api.deleteTask(taskId, dropTable);
-      message.success(`${config.label} ${taskId} 已删除`);
+      notify.success(`${config.label} ${taskId} 已删除`);
       await loadTasks();
     } catch (error: any) {
-      message.error(`删除任务失败: ${error.response?.data?.detail || error.message}`);
+      notify.error(`删除任务失败: ${error.response?.data?.detail || error.message}`);
       throw error;
     }
   }, [config, loadTasks]);

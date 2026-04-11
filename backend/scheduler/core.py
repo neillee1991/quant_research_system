@@ -177,15 +177,70 @@ class Scheduler:
 
         return flow_run_id
 
+    async def _get_flow_config(self, flow_name: str) -> Optional[Dict[str, Any]]:
+        """获取 Flow 配置"""
+        return await FlowRepository.get_by_name(flow_name)
+
     async def trigger_flow_manual(self, flow_name: str,
                                  target_date: Optional[str] = None) -> Optional[int]:
-        """手动触发 Flow（外部 API 调用）"""
+        """手动触发 Flow（单次，外部 API 调用）"""
         flow = await FlowRepository.get_by_name(flow_name)
         if not flow:
             logger.error(f"Flow 不存在: {flow_name}")
             return None
 
         return await self._trigger_flow(flow, TriggerType.MANUAL, target_date)
+
+    async def backfill_flow(self, flow_name: str, start_date: str, end_date: str) -> List[int]:
+        """回溯模式：按交易日串行触发多个 FlowRun"""
+        flow = await FlowRepository.get_by_name(flow_name)
+        if not flow:
+            logger.error(f"Flow 不存在: {flow_name}")
+            return []
+
+        # 获取交易日列表
+        from app.core.utils import TradingCalendar
+        from store.dolphindb_client import db_client
+        cal = TradingCalendar.get_instance(db_client)
+        if cal.is_loaded:
+            dates = cal.get_trading_days(start_date, end_date)
+        else:
+            # 降级：按自然日
+            dates = []
+            cur = datetime.strptime(start_date, "%Y%m%d")
+            end = datetime.strptime(end_date, "%Y%m%d")
+            while cur <= end:
+                dates.append(cur.strftime("%Y%m%d"))
+                cur += timedelta(days=1)
+
+        if not dates:
+            logger.warning(f"回溯日期范围内无交易日: {start_date} ~ {end_date}")
+            return []
+
+        logger.info(f"开始回溯 Flow: {flow_name}, 共 {len(dates)} 个交易日 ({start_date} ~ {end_date})")
+
+        # 串行触发，每天等待完成再触发下一天
+        flow_run_ids = []
+        tasks = flow.get("tasks", [])
+        for date_str in dates:
+            flow_run = FlowRun(
+                flow_name=flow_name,
+                status=FlowStatus.PENDING,
+                trigger_type=TriggerType.MANUAL,
+                target_date=date_str,
+                scheduled_at=datetime.now(),
+            )
+            flow_run_id = await FlowRunRepository.create(flow_run)
+            flow_run.id = flow_run_id
+            flow_run_ids.append(flow_run_id)
+
+            logger.info(f"回溯执行: {flow_name} @ {date_str} (flow_run_id={flow_run_id})")
+            success = await self._executor.execute_flow(flow_run, tasks)
+            if not success:
+                logger.error(f"回溯在 {date_str} 失败，继续执行后续日期")
+
+        logger.info(f"回溯完成: {flow_name}, 完成 {len(flow_run_ids)} 天")
+        return flow_run_ids
 
 
 # 全局调度器实例

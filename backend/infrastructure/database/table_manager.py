@@ -15,11 +15,10 @@ class TableManager:
     """DolphinDB 表管理器"""
 
     # 元数据表集合（维度表，存储在 meta 数据库）
+    # 注意：配置表已迁移到 PostgreSQL，此集合仅保留仍在 DolphinDB 的维度表
     _META_TABLES = frozenset({
-        "stock_basic", "factor_metadata",
-        "factor_analysis",
-        "sync_task_config", "etl_task_config", "factor_data_config", "trade_cal",
-        "index_metadata", "user_sync_preference", "flow_config"
+        "stock_basic",  # 待迁移（stocks）
+        "trade_cal",    # 待迁移（trading_calendar）
     })
 
     # TSDB 表集合（时间序列表，存储在 TSDB 数据库）

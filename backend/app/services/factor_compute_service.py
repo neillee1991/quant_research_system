@@ -291,7 +291,7 @@ class FactorComputeService:
             calc_end = end_date or target_date
         elif start_date:
             calc_start = start_date
-            calc_end = end_date or today
+            calc_end = end_date or start_date
         else:
             last_date = self._get_last_computed_date(factor_id)
             if last_date:
@@ -310,15 +310,36 @@ class FactorComputeService:
 
     def _get_factor_preprocess(self, factor_id: str) -> Dict[str, Any]:
         """从数据库获取因子的预处理配置"""
+        import json
+        import psycopg2
+        import psycopg2.extras
+        from app.core.config import settings
         try:
-            result = self.db.query(
-                "SELECT params FROM factor_metadata WHERE factor_id = %s",
-                (factor_id,)
+            conn = psycopg2.connect(
+                host=settings.postgresql.postgres_host,
+                port=settings.postgresql.postgres_port,
+                dbname=settings.postgresql.postgres_db,
+                user=settings.postgresql.postgres_user,
+                password=settings.postgresql.postgres_password,
             )
-            if not result.is_empty():
-                params = result["params"][0]
+            with conn:
+                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                    cur.execute(
+                        "SELECT params FROM factor_configs WHERE factor_id = %s",
+                        (factor_id,)
+                    )
+                    row = cur.fetchone()
+            conn.close()
+            if row:
+                params = row["params"]
                 if isinstance(params, dict):
                     return params.get("preprocess", {})
+                elif isinstance(params, str):
+                    try:
+                        params_dict = json.loads(params)
+                        return params_dict.get("preprocess", {})
+                    except json.JSONDecodeError:
+                        return {}
         except Exception as e:
             logger.debug(f"Failed to get factor preprocess from DB: {e}")
         return {}
@@ -345,28 +366,23 @@ class FactorComputeService:
         self, factor_id: str, definition: FactorDefinition, last_date: str, rows: int
     ):
         """更新因子元数据的 updated_at 时间戳"""
+        import psycopg2
+        from app.core.config import settings
         try:
-            # 读出完整行，只改 updated_at，避免 DolphinDB 按列位置插入时错位
-            existing = self.db.query(
-                "SELECT * FROM factor_metadata WHERE factor_id = %s", (factor_id,)
+            conn = psycopg2.connect(
+                host=settings.postgresql.postgres_host,
+                port=settings.postgresql.postgres_port,
+                dbname=settings.postgresql.postgres_db,
+                user=settings.postgresql.postgres_user,
+                password=settings.postgresql.postgres_password,
             )
-            if existing.is_empty():
-                return
-            row = existing.to_dicts()[0]
-            update_df = pl.DataFrame({
-                "factor_id": [row["factor_id"]],
-                "description": [row.get("description", "")],
-                "category": [row.get("category", "custom")],
-                "compute_mode": [row.get("compute_mode", "incremental")],
-                "storage_target": [row.get("storage_target", "factor_values")],
-                "depends_on": [row.get("depends_on", "[]")],
-                "params": [row.get("params", "{}")],
-                "code": [row.get("code", "")],
-                "enabled": [row.get("enabled", True)],
-                "created_at": [row.get("created_at", datetime.now())],
-                "updated_at": [datetime.now()],
-            })
-            self.db.upsert("factor_metadata", update_df, key_columns=["factor_id"])
+            with conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "UPDATE factor_configs SET updated_at = NOW() WHERE factor_id = %s",
+                        (factor_id,)
+                    )
+            conn.close()
         except Exception as e:
             logger.warning(f"Failed to update metadata: {e}")
 
@@ -517,26 +533,36 @@ class FactorComputeService:
         Returns:
             预处理配置字典
         """
+        import json
+        import psycopg2
+        import psycopg2.extras
+        from app.core.config import settings
         try:
-            result = self.db.query(
-                "SELECT params FROM factor_metadata WHERE factor_id = %s",
-                (factor_id,)
+            conn = psycopg2.connect(
+                host=settings.postgresql.postgres_host,
+                port=settings.postgresql.postgres_port,
+                dbname=settings.postgresql.postgres_db,
+                user=settings.postgresql.postgres_user,
+                password=settings.postgresql.postgres_password,
             )
-            if result.is_empty():
-                return {}
-
-            params = result["params"][0]
-            if isinstance(params, dict):
-                return params.get("preprocess", {})
-            elif isinstance(params, str):
-                import json
-                try:
-                    params_dict = json.loads(params)
-                    return params_dict.get("preprocess", {})
-                except json.JSONDecodeError:
-                    return {}
-            return {}
-
+            with conn:
+                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                    cur.execute(
+                        "SELECT params FROM factor_configs WHERE factor_id = %s",
+                        (factor_id,)
+                    )
+                    row = cur.fetchone()
+            conn.close()
+            if row:
+                params = row["params"]
+                if isinstance(params, dict):
+                    return params.get("preprocess", {})
+                elif isinstance(params, str):
+                    try:
+                        params_dict = json.loads(params)
+                        return params_dict.get("preprocess", {})
+                    except json.JSONDecodeError:
+                        return {}
         except Exception as e:
             logger.warning(f"Failed to load preprocess config for {factor_id}: {e}")
-            return {}
+        return {}

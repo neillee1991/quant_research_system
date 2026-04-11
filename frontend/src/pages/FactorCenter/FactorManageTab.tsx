@@ -1,3 +1,4 @@
+import { notify } from '../../utils/notify';
 /**
  * 因子管理标签页
  */
@@ -79,10 +80,9 @@ const FactorManageTab: React.FC = () => {
     try {
       const formatted = await formatCode(createCode, 'python');
       setCreateCode(formatted);
-      message.success('代码格式化成功');
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : '格式化失败';
-      message.error(errorMessage);
+      notify.error(errorMessage);
     }
   };
 
@@ -96,27 +96,27 @@ const FactorManageTab: React.FC = () => {
 
   const handleBatchRun = async (runMode: string, startDate?: string, endDate?: string): Promise<void> => {
     if (selectedRowKeys.length === 0) {
-      message.warning('请先勾选因子');
+      notify.warning('请先勾选因子');
       return;
     }
     setBatchLoading(true);
     try {
       const res = await productionApi.batchRunFactors(selectedRowKeys, runMode, startDate, endDate);
       const tasks = res.data?.data?.tasks || [];
-      message.success(`已提交 ${tasks.length} 个因子计算任务，后台执行中`);
+      notify.success(`已提交 ${tasks.length} 个因子计算任务，后台执行中`);
       setSelectedRowKeys([]);
       loadFactors();
       loadHistory();
     } catch (e: any) {
       const errorMessage = e.response?.data?.detail || '批量执行失败';
-      message.error(errorMessage);
+      notify.error(errorMessage);
     }
     setBatchLoading(false);
   };
 
   const handleCreate = async (): Promise<void> => {
     if (!createFactorId.trim()) {
-      message.warning('请输入因子ID');
+      notify.warning('请输入因子ID');
       return;
     }
     try {
@@ -132,7 +132,7 @@ const FactorManageTab: React.FC = () => {
         lookback_days: createLookbackDays,
       };
       await productionApi.createFactor({ ...values, params, code: createCode || undefined, align_calendar: createAlignCalendar });
-      message.success(`因子 ${values.factor_id} 创建成功`);
+      notify.success(`因子 ${values.factor_id} 创建成功`);
       setCreateModal(false);
       setCreateFactorId('');
       setCreateDesc('');
@@ -147,7 +147,7 @@ const FactorManageTab: React.FC = () => {
     } catch (e: any) {
       const errorMessage = e.response?.data?.detail || '创建失败';
       console.error('Failed to create factor:', e);
-      message.error(errorMessage);
+      notify.error(errorMessage);
     }
   };
 

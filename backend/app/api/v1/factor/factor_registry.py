@@ -5,7 +5,6 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
-import polars as pl
 
 from store.dolphindb_client import db_client
 from engine.factor.registry import list_factors, discover_factors, unregister_factor
@@ -21,7 +20,6 @@ _SAFE_FACTOR_ID_RE = re.compile(r'^[a-zA-Z0-9_\-]+$')
 # ==================== Pydantic Models ====================
 
 class FactorCreateRequest(BaseModel):
-    """因子创建请求"""
     factor_id: str
     description: str = ""
     category: str = "custom"
@@ -34,7 +32,6 @@ class FactorCreateRequest(BaseModel):
 
 
 class FactorUpdateRequest(BaseModel):
-    """因子更新请求"""
     description: Optional[str] = None
     category: Optional[str] = None
     compute_mode: Optional[str] = None
@@ -45,7 +42,6 @@ class FactorUpdateRequest(BaseModel):
 
 
 class FactorCodeUpdateRequest(BaseModel):
-    """因子代码更新请求"""
     filename: str
     code: str
 
@@ -53,7 +49,6 @@ class FactorCodeUpdateRequest(BaseModel):
 # ==================== Helper Functions ====================
 
 def _validate_factor_id(factor_id: str):
-    """验证因子 ID 格式"""
     if not _SAFE_FACTOR_ID_RE.match(factor_id):
         raise HTTPException(status_code=400, detail=f"Invalid factor_id: '{factor_id}'")
 
@@ -62,74 +57,66 @@ def _validate_factor_id(factor_id: str):
 
 @router.get("/factor/factors")
 async def list_registered_factors():
-    """列出所有因子（合并装饰器注册 + 数据库手动注册）"""
+    """列出所有因子（从 PostgreSQL factor_configs + DolphinDB factor_values 最新日期）"""
+    from scheduler.db import DatabasePool
+
     cached = api_cache.get("production:factors")
     if cached is not None:
         return cached
 
     discover_factors(db_client=db_client)
 
-    # 从数据库加载因子（不再从代码文件自动种子）
-    code_factors = {}  # 空字典，因为不再从代码加载
-
-    # 优化：使用单个查询获取元数据和最新日期（消除N+1查询）
-    db_meta = {}
+    db_meta: Dict[str, Any] = {}
     latest_dates: Dict[str, str] = {}
     last_computed: Dict[str, str] = {}
+
+    # factor_configs from PostgreSQL
     try:
-        # 先查 factor_metadata
-        meta_df = db_client.query("SELECT * FROM factor_metadata ORDER BY factor_id")
-        if not meta_df.is_empty():
-            for row in meta_df.to_dicts():
-                db_meta[row["factor_id"]] = row
-
-        # 再查 factor_values 的最新日期
-        try:
-            fv_df = db_client.query(
-                "SELECT factor_id, max(trade_date) AS latest_date FROM factor_values GROUP BY factor_id"
-            )
-            if not fv_df.is_empty():
-                for row in fv_df.to_dicts():
-                    date_val = row["latest_date"]
-                    if date_val:
-                        date_str = str(date_val)
-                        # 格式化日期：YYYYMMDD -> YYYY-MM-DD
-                        if len(date_str) == 8:
-                            latest_dates[row["factor_id"]] = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
-                        else:
-                            latest_dates[row["factor_id"]] = date_str
-        except Exception as e:
-            logger.debug(f"查询因子最新日期失败: {e}")
-
-        # 查询上次计算时间（从统一 task_runs 表）
-        try:
-            run_df = db_client.query(
-                "SELECT task_id, max(started_at) AS last_run FROM task_runs WHERE task_type = 'factor' AND status = 'success' GROUP BY task_id"
-            )
-            if not run_df.is_empty():
-                for row in run_df.to_dicts():
-                    last_computed[row["task_id"]] = str(row["last_run"]) if row.get("last_run") else None
-        except Exception as e:
-            logger.debug(f"查询因子上次计算时间失败: {e}")
+        rows = await DatabasePool.fetch("SELECT * FROM factor_configs ORDER BY factor_id")
+        for row in rows:
+            db_meta[row["factor_id"]] = dict(row)
     except Exception as e:
-        logger.debug(f"查询因子元数据失败: {e}")
+        logger.debug(f"查询 factor_configs 失败: {e}")
 
-    # 合并：只使用数据库中的因子
-    all_ids = set(db_meta.keys())
+    # factor_values latest dates from DolphinDB (time-series, stays)
+    try:
+        fv_df = db_client.query(
+            "SELECT factor_id, max(trade_date) AS latest_date FROM factor_values GROUP BY factor_id"
+        )
+        if not fv_df.is_empty():
+            for row in fv_df.to_dicts():
+                date_val = row["latest_date"]
+                if date_val:
+                    date_str = str(date_val)
+                    if len(date_str) == 8:
+                        latest_dates[row["factor_id"]] = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
+                    else:
+                        latest_dates[row["factor_id"]] = date_str
+    except Exception as e:
+        logger.debug(f"查询因子最新日期失败: {e}")
+
+    # last computed from PostgreSQL task_runs
+    try:
+        run_rows = await DatabasePool.fetch(
+            "SELECT task_id, MAX(started_at) AS last_run FROM task_runs "
+            "WHERE task_type = 'factor' AND status = 'success' GROUP BY task_id"
+        )
+        for row in run_rows:
+            last_computed[row["task_id"]] = str(row["last_run"]) if row.get("last_run") else None
+    except Exception as e:
+        logger.debug(f"查询因子上次计算时间失败: {e}")
+
     merged = []
-    for fid in sorted(all_ids):
-        meta = db_meta.get(fid, {})
-        db_params = safe_json_parse(meta.get("params"))
-        db_depends_on = safe_json_parse(meta.get("depends_on"), default=[])
-
+    for fid in sorted(db_meta.keys()):
+        meta = db_meta[fid]
         merged.append({
             "factor_id": fid,
             "description": meta.get("description", ""),
             "category": meta.get("category", "custom"),
             "compute_mode": meta.get("compute_mode", "incremental"),
-            "depends_on": db_depends_on,
+            "depends_on": safe_json_parse(meta.get("depends_on"), default=[]),
             "storage_target": meta.get("storage_target", "factor_values"),
-            "params": db_params,
+            "params": safe_json_parse(meta.get("params")),
             "align_calendar": bool(meta.get("align_calendar", False)),
             "latest_date": latest_dates.get(fid),
             "last_computed_at": last_computed.get(fid),
@@ -143,31 +130,28 @@ async def list_registered_factors():
 
 @router.post("/factor/factors")
 async def create_factor(req: FactorCreateRequest):
-    """创建新因子（写入数据库）"""
+    """创建新因子（写入 PostgreSQL factor_configs）"""
+    from scheduler.db import DatabasePool
+
     _validate_factor_id(req.factor_id)
     try:
-        existing = db_client.query(
-            "SELECT * FROM factor_metadata WHERE factor_id = %s", (req.factor_id,)
+        existing = await DatabasePool.fetchrow(
+            "SELECT factor_id FROM factor_configs WHERE factor_id = $1", req.factor_id
         )
-        if not existing.is_empty():
+        if existing:
             raise HTTPException(status_code=400, detail=f"因子 {req.factor_id} 已存在")
 
         now = datetime.now()
-        new_df = pl.DataFrame({
-            "factor_id": [req.factor_id],
-            "description": [req.description],
-            "category": [req.category],
-            "compute_mode": [req.compute_mode],
-            "storage_target": [req.storage_target],
-            "depends_on": [json.dumps(req.depends_on)],
-            "params": [json.dumps(req.params)],
-            "code": [req.code or ""],
-            "enabled": [True],
-            "align_calendar": [req.align_calendar],
-            "created_at": [now],
-            "updated_at": [now],
-        })
-        db_client.upsert("factor_metadata", new_df, ["factor_id"])
+        await DatabasePool.execute("""
+            INSERT INTO factor_configs
+              (factor_id, description, category, compute_mode, storage_target,
+               depends_on, params, code, enabled, align_calendar, created_at, updated_at)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+        """,
+            req.factor_id, req.description, req.category, req.compute_mode,
+            req.storage_target, json.dumps(req.depends_on), json.dumps(req.params),
+            req.code or "", True, req.align_calendar, now, now,
+        )
         api_cache.invalidate("production:factors")
         return {"status": "success", "data": {"factor_id": req.factor_id}}
     except HTTPException:
@@ -179,37 +163,43 @@ async def create_factor(req: FactorCreateRequest):
 
 @router.put("/factor/factors/{factor_id}")
 async def update_factor(factor_id: str, req: FactorUpdateRequest):
-    """更新因子元数据（直接更新）"""
+    """更新因子元数据（PostgreSQL factor_configs）"""
+    from scheduler.db import DatabasePool
+
     _validate_factor_id(factor_id)
     try:
-        existing = db_client.query(
-            "SELECT * FROM factor_metadata WHERE factor_id = %s", (factor_id,)
+        row = await DatabasePool.fetchrow(
+            "SELECT * FROM factor_configs WHERE factor_id = $1", factor_id
         )
-        if existing.is_empty():
+        if not row:
             raise HTTPException(status_code=404, detail=f"因子 {factor_id} 不存在")
 
-        row = existing.to_dicts()[0]
+        existing = dict(row)
         updates = req.model_dump(exclude_unset=True)
         now = datetime.now()
 
-        # 构建更新数据
-        update_df = pl.DataFrame({
-            "factor_id": [factor_id],
-            "description": [updates.get("description", row.get("description", ""))],
-            "category": [updates.get("category", row.get("category", "custom"))],
-            "compute_mode": [updates.get("compute_mode", row.get("compute_mode", "incremental"))],
-            "storage_target": [updates.get("storage_target", row.get("storage_target", "factor_values"))],
-            "depends_on": [json.dumps(updates["depends_on"]) if "depends_on" in updates else row.get("depends_on", "[]")],
-            "params": [json.dumps(updates["params"]) if "params" in updates else row.get("params", "{}")],
-            "code": [row.get("code", "")],
-            "enabled": [updates.get("enabled", row.get("enabled", True))],
-            "align_calendar": [updates.get("align_calendar", row.get("align_calendar", False))],
-            "created_at": [row.get("created_at", now)],
-            "updated_at": [now],
-        })
-
-        db_client.upsert("factor_metadata", update_df, ["factor_id"])
-
+        await DatabasePool.execute("""
+            UPDATE factor_configs SET
+              description    = $2,
+              category       = $3,
+              compute_mode   = $4,
+              storage_target = $5,
+              depends_on     = $6,
+              params         = $7,
+              align_calendar = $8,
+              updated_at     = $9
+            WHERE factor_id = $1
+        """,
+            factor_id,
+            updates.get("description", existing.get("description", "")),
+            updates.get("category", existing.get("category", "custom")),
+            updates.get("compute_mode", existing.get("compute_mode", "incremental")),
+            updates.get("storage_target", existing.get("storage_target", "factor_values")),
+            json.dumps(updates["depends_on"]) if "depends_on" in updates else existing.get("depends_on", "[]"),
+            json.dumps(updates["params"]) if "params" in updates else existing.get("params", "{}"),
+            updates.get("align_calendar", existing.get("align_calendar", False)),
+            now,
+        )
         api_cache.invalidate("production:factors")
         return {"status": "success", "data": {"factor_id": factor_id}}
     except HTTPException:
@@ -221,19 +211,19 @@ async def update_factor(factor_id: str, req: FactorUpdateRequest):
 
 @router.delete("/factor/factors/{factor_id}")
 async def delete_factor(factor_id: str, delete_data: bool = False):
-    """删除因子元数据和注册表条目，可选删除因子值数据"""
+    """删除因子元数据，可选删除因子值数据"""
+    from scheduler.db import DatabasePool
+
     _validate_factor_id(factor_id)
     try:
-        db_client.execute("DELETE FROM factor_metadata WHERE factor_id = %s", (factor_id,))
+        await DatabasePool.execute(
+            "DELETE FROM factor_configs WHERE factor_id = $1", factor_id
+        )
         if delete_data:
             db_client.execute("DELETE FROM factor_values WHERE factor_id = %s", (factor_id,))
 
-        # 从内存注册表中移除
         unregister_factor(factor_id)
         api_cache.invalidate("production:factors")
-
-        logger.debug(f"Cleared factor list cache after deleting {factor_id}")
-
         return {"status": "success", "data": {"factor_id": factor_id, "data_deleted": delete_data}}
     except HTTPException:
         raise
@@ -244,21 +234,22 @@ async def delete_factor(factor_id: str, delete_data: bool = False):
 
 @router.get("/factor/factors/{factor_id}/logs")
 async def get_factor_logs(factor_id: str, limit: int = 20):
-    """获取因子运行日志（使用统一 task_runs 表）"""
+    """获取因子运行日志（PostgreSQL task_runs 表）"""
+    from scheduler.db import DatabasePool
+
     try:
-        logs_df = db_client.query(
-            "SELECT * FROM task_runs WHERE task_type = 'factor' AND task_id = %s ORDER BY started_at DESC LIMIT %s",
-            (factor_id, limit)
+        rows = await DatabasePool.fetch(
+            "SELECT * FROM task_runs WHERE task_type = 'factor' AND task_id = $1 "
+            "ORDER BY started_at DESC LIMIT $2",
+            factor_id, limit,
         )
-        if logs_df.is_empty():
-            return {"status": "success", "data": []}
-
-        logs = logs_df.to_dicts()
-        for log in logs:
+        logs = []
+        for row in rows:
+            r = dict(row)
             for ts_field in ["started_at", "finished_at"]:
-                if ts_field in log and log[ts_field]:
-                    log[ts_field] = str(log[ts_field])
-
+                if ts_field in r and r[ts_field]:
+                    r[ts_field] = str(r[ts_field])
+            logs.append(r)
         return {"status": "success", "data": logs}
     except Exception as e:
         logger.error(f"Failed to get factor logs: {e}")
@@ -267,21 +258,18 @@ async def get_factor_logs(factor_id: str, limit: int = 20):
 
 @router.get("/factor/factors/{factor_id}/code")
 async def get_factor_code(factor_id: str):
-    """获取因子源代码（从数据库读取）"""
+    """获取因子源代码（从 PostgreSQL factor_configs 读取）"""
+    from scheduler.db import DatabasePool
+
     try:
-        df = db_client.query(
-            "SELECT code FROM factor_metadata WHERE factor_id = %s", (factor_id,)
+        row = await DatabasePool.fetchrow(
+            "SELECT code FROM factor_configs WHERE factor_id = $1", factor_id
         )
-        if not df.is_empty():
-            code = df["code"][0]
-            if code and code.strip():
-                return {
-                    "status": "success",
-                    "data": {
-                        "filename": f"{factor_id}.py",
-                        "code": code
-                    }
-                }
+        if row and row["code"] and row["code"].strip():
+            return {
+                "status": "success",
+                "data": {"filename": f"{factor_id}.py", "code": row["code"]}
+            }
     except Exception as e:
         logger.warning(f"Failed to read code from database: {e}")
 
@@ -290,36 +278,20 @@ async def get_factor_code(factor_id: str):
 
 @router.put("/factor/factors/{factor_id}/code")
 async def update_factor_code(factor_id: str, req: FactorCodeUpdateRequest):
-    """更新因子源代码（保存到数据库）"""
-    try:
-        # 检查因子是否存在
-        existing = db_client.query(
-            "SELECT * FROM factor_metadata WHERE factor_id = %s", (factor_id,)
-        )
+    """更新因子源代码（保存到 PostgreSQL factor_configs）"""
+    from scheduler.db import DatabasePool
 
-        if existing.is_empty():
+    try:
+        existing = await DatabasePool.fetchrow(
+            "SELECT factor_id FROM factor_configs WHERE factor_id = $1", factor_id
+        )
+        if not existing:
             raise HTTPException(status_code=404, detail=f"因子 {factor_id} 不存在")
 
-        # 更新代码字段
-        row = existing.to_dicts()[0]
-        now = datetime.now()
-
-        update_df = pl.DataFrame({
-            "factor_id": [factor_id],
-            "description": [row.get("description", "")],
-            "category": [row.get("category", "custom")],
-            "compute_mode": [row.get("compute_mode", "incremental")],
-            "storage_target": [row.get("storage_target", "factor_values")],
-            "depends_on": [row.get("depends_on", "[]")],
-            "params": [row.get("params", "{}")],
-            "code": [req.code],
-            "enabled": [row.get("enabled", True)],
-            "created_at": [row.get("created_at", now)],
-            "updated_at": [now],
-        })
-
-        db_client.upsert("factor_metadata", update_df, ["factor_id"])
-
+        await DatabasePool.execute(
+            "UPDATE factor_configs SET code = $2, updated_at = $3 WHERE factor_id = $1",
+            factor_id, req.code, datetime.now(),
+        )
         api_cache.invalidate("production:factors")
         return {"status": "success", "data": {"factor_id": factor_id}}
     except HTTPException:
@@ -337,7 +309,7 @@ async def get_factor_data(
     ts_code: Optional[str] = None,
     limit: int = 200,
 ):
-    """查询因子值数据（支持按日期/股票筛选）"""
+    """查询因子值数据（DolphinDB factor_values，时序数据）"""
     try:
         conditions = ["factor_id = %s"]
         params: list = [factor_id]
@@ -354,27 +326,19 @@ async def get_factor_data(
         params.append(limit)
 
         df = db_client.query(
-            f"SELECT ts_code, trade_date, factor_value FROM factor_values WHERE {where} ORDER BY trade_date DESC, ts_code LIMIT %s",
+            f"SELECT ts_code, trade_date, factor_value FROM factor_values "
+            f"WHERE {where} ORDER BY trade_date DESC, ts_code LIMIT %s",
             tuple(params),
         )
         data = []
         if not df.is_empty():
             for row in df.to_dicts():
-                # 格式化日期字段：处理多种日期格式
                 if row.get("trade_date"):
-                    date_val = row["trade_date"]
-                    # 如果是 datetime 对象，转换为字符串
-                    date_str = str(date_val)
-                    # 如果是 ISO 格式 (YYYY-MM-DDTHH:MM:SS)，只取日期部分
+                    date_str = str(row["trade_date"])
                     if 'T' in date_str:
                         row["trade_date"] = date_str.split('T')[0]
-                    # 如果是 YYYYMMDD 格式，转换为 YYYY-MM-DD
                     elif len(date_str) == 8 and date_str.isdigit():
                         row["trade_date"] = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
-                    # 如果已经是 YYYY-MM-DD 格式，保持不变
-                    elif len(date_str) == 10 and date_str[4] == '-' and date_str[7] == '-':
-                        row["trade_date"] = date_str
-                    # 其他格式，只取前10个字符
                     else:
                         row["trade_date"] = date_str[:10]
                 data.append(row)
@@ -387,9 +351,8 @@ async def get_factor_data(
 
 @router.get("/factor/factors/{factor_id}/stats")
 async def get_factor_stats(factor_id: str):
-    """获取因子统计摘要"""
+    """获取因子统计摘要（DolphinDB factor_values，时序数据）"""
     try:
-        # 基本统计
         df = db_client.query("""
             SELECT
                 count(*) AS total_rows,
@@ -407,34 +370,24 @@ async def get_factor_stats(factor_id: str):
 
         row = df.to_dicts()[0]
 
-        # 单独查询股票数（DolphinDB 不支持在聚合中嵌套 count(distinct)）
         stock_count_df = db_client.query("""
             SELECT count(*) AS stock_count
             FROM (SELECT DISTINCT ts_code FROM factor_values WHERE factor_id = %s)
         """, (factor_id,))
+        row["stock_count"] = stock_count_df["stock_count"][0] if not stock_count_df.is_empty() else 0
 
-        if not stock_count_df.is_empty():
-            row["stock_count"] = stock_count_df["stock_count"][0]
-        else:
-            row["stock_count"] = 0
-        # 转换 Decimal 等类型（跳过日期字段）
         for k, v in row.items():
             if k in ["min_date", "max_date"]:
-                continue  # 跳过日期字段
+                continue
             if v is not None and not isinstance(v, (str, int)):
                 row[k] = float(v)
-        # 格式化日期字段：处理多种日期格式
         for date_field in ["min_date", "max_date"]:
             if row.get(date_field):
-                date_val = row[date_field]
-                date_str = str(date_val)
-                # 如果是 ISO 格式 (YYYY-MM-DDTHH:MM:SS)，只取日期部分
+                date_str = str(row[date_field])
                 if 'T' in date_str:
                     row[date_field] = date_str.split('T')[0]
-                # 如果是 YYYYMMDD 格式，转换为 YYYY-MM-DD
                 elif len(date_str) == 8 and date_str.isdigit():
                     row[date_field] = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
-                # 其他格式，只取前10个字符
                 else:
                     row[date_field] = date_str[:10]
         return {"status": "success", "data": row}
@@ -446,96 +399,57 @@ async def get_factor_stats(factor_id: str):
 
 @router.get("/factor/factors/{factor_id}/missing-dates")
 async def get_factor_missing_dates(factor_id: str):
-    """检查因子数据缺失的交易日
-
-    逻辑：获取因子数据的最早和最晚日期，然后检查该范围内是否有缺失的交易日
-    """
+    """检查因子数据缺失的交易日（DolphinDB factor_values + sync_trade_cal）"""
     try:
-        # 获取因子数据中实际存在的所有日期
         actual_dates_df = db_client.query("""
             SELECT DISTINCT trade_date FROM factor_values
-            WHERE factor_id = %s
-            ORDER BY trade_date
+            WHERE factor_id = %s ORDER BY trade_date
         """, (factor_id,))
 
         if actual_dates_df.is_empty():
             return {"status": "success", "data": {"missing_dates": [], "total_missing": 0, "has_data": False}}
 
-        # 格式化实际日期为 YYYYMMDD 格式
-        actual_dates = []
-        for d in actual_dates_df["trade_date"].to_list():
-            date_str = str(d)
-            # 处理 ISO 格式 (YYYY-MM-DDTHH:MM:SS)
-            if 'T' in date_str:
-                date_str = date_str.split('T')[0].replace('-', '')
-            # 处理 YYYY-MM-DD 格式
-            elif '-' in date_str and len(date_str) >= 10:
-                date_str = date_str[:10].replace('-', '')
-            # 处理带空格的格式 (YYYYMMDD HH:MM:SS)
-            elif ' ' in date_str:
-                date_str = date_str.split(' ')[0].replace('-', '')
-            actual_dates.append(date_str)
+        def _fmt(d) -> str:
+            s = str(d)
+            if 'T' in s:
+                return s.split('T')[0].replace('-', '')
+            if '-' in s and len(s) >= 10:
+                return s[:10].replace('-', '')
+            if ' ' in s:
+                return s.split(' ')[0].replace('-', '')
+            return s
 
-        actual_dates = sorted(set(actual_dates))
-
-        if len(actual_dates) == 0:
+        actual_dates = sorted(set(_fmt(d) for d in actual_dates_df["trade_date"].to_list()))
+        if not actual_dates:
             return {"status": "success", "data": {"missing_dates": [], "total_missing": 0, "has_data": False}}
 
-        min_date = actual_dates[0]
-        max_date = actual_dates[-1]
+        min_date, max_date = actual_dates[0], actual_dates[-1]
 
-        # 从交易日历获取该范围内的所有交易日
         trade_cal_df = db_client.query("""
             SELECT cal_date FROM sync_trade_cal
-            WHERE is_open = 1 AND cal_date >= %s AND cal_date <= %s
-            ORDER BY cal_date
+            WHERE is_open = 1 AND cal_date >= %s AND cal_date <= %s ORDER BY cal_date
         """, (min_date, max_date))
 
-        # 如果交易日历表为空，返回警告信息
         if trade_cal_df.is_empty():
-            # 格式化日期
-            min_date_formatted = f"{min_date[:4]}-{min_date[4:6]}-{min_date[6:]}" if len(min_date) == 8 else min_date
-            max_date_formatted = f"{max_date[:4]}-{max_date[4:6]}-{max_date[6:]}" if len(max_date) == 8 else max_date
-
             return {
                 "status": "success",
                 "data": {
-                    "missing_dates": [],
-                    "total_missing": 0,
-                    "has_data": True,
+                    "missing_dates": [], "total_missing": 0, "has_data": True,
                     "warning": "交易日历表为空，无法检查完整性",
                     "actual_days": len(actual_dates),
                     "date_range": {
-                        "min": min_date_formatted,
-                        "max": max_date_formatted
+                        "min": f"{min_date[:4]}-{min_date[4:6]}-{min_date[6:]}",
+                        "max": f"{max_date[:4]}-{max_date[4:6]}-{max_date[6:]}",
                     }
                 }
             }
 
-        # 格式化交易日历日期为 YYYYMMDD
-        all_trade_dates = set()
-        for d in trade_cal_df["cal_date"].to_list():
-            date_str = str(d)
-            # 处理 datetime 对象
-            if 'T' in date_str:
-                date_str = date_str.split('T')[0].replace('-', '')
-            elif '-' in date_str and len(date_str) >= 10:
-                date_str = date_str[:10].replace('-', '')
-            elif ' ' in date_str:
-                date_str = date_str.split(' ')[0].replace('-', '')
-            all_trade_dates.add(date_str)
-        actual_dates_set = set(actual_dates)
-
-        # 计算缺失的日期
-        missing = sorted(all_trade_dates - actual_dates_set)
-
-        # 格式化日期：YYYYMMDD -> YYYY-MM-DD
-        formatted_missing = []
-        for date_str in missing:
-            if len(date_str) == 8 and date_str.isdigit():
-                formatted_missing.append(f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}")
-            else:
-                formatted_missing.append(date_str)
+        all_trade_dates = set(_fmt(d) for d in trade_cal_df["cal_date"].to_list())
+        missing = sorted(all_trade_dates - set(actual_dates))
+        formatted_missing = [
+            f"{d[:4]}-{d[4:6]}-{d[6:]}" if len(d) == 8 and d.isdigit() else d
+            for d in missing
+        ]
 
         return {
             "status": "success",
@@ -547,7 +461,7 @@ async def get_factor_missing_dates(factor_id: str):
                 "has_data": True,
                 "date_range": {
                     "min": f"{min_date[:4]}-{min_date[4:6]}-{min_date[6:]}",
-                    "max": f"{max_date[:4]}-{max_date[4:6]}-{max_date[6:]}"
+                    "max": f"{max_date[:4]}-{max_date[4:6]}-{max_date[6:]}",
                 }
             }
         }

@@ -1,3 +1,4 @@
+import { notify } from '../../utils/notify';
 /**
  * ETL 任务配置抽屉组件
  * 匹配原始实现：配置 + 脚本测试 + 字段定义 + 历史记录
@@ -176,7 +177,7 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
 
   const handleTestScript = async () => {
     if (!config.script) {
-      message.warning('请先输入 ETL 脚本');
+      notify.warning('请先输入 ETL 脚本');
       return;
     }
 
@@ -215,14 +216,14 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
         preview: data.preview || [],
       });
 
-      message.success(`测试通过: ${data.rows || 0} 行`);
+      notify.success(`测试通过: ${data.rows || 0} 行`);
     } catch (error: any) {
       const errorMsg = error.response?.data?.detail || '脚本测试失败';
       setTestResult({
         status: 'error',
         error: errorMsg,
       });
-      message.error(errorMsg);
+      notify.error(errorMsg);
     } finally {
       setTestLoading(false);
     }
@@ -265,12 +266,12 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
 
   const handleSave = async (confirmSchemaChange = false) => {
     if (!config.task_id || !config.task_id.startsWith('etl_')) {
-      message.error('任务ID必须以 etl_ 开头');
+      notify.error('任务ID必须以 etl_ 开头');
       return;
     }
 
     if (!config.script) {
-      message.error('请输入 ETL 脚本');
+      notify.error('请输入 ETL 脚本');
       return;
     }
 
@@ -299,7 +300,7 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
 
       if (isNew) {
         const response = await dataApi.createEtlTask(saveConfig);
-        message.success(`ETL 任务 ${config.task_id} 创建成功`);
+        notify.success(`ETL 任务 ${config.task_id} 创建成功`);
         onSave();
         onClose();
       } else {
@@ -347,13 +348,13 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
             },
           });
         } else if (result.status === 'success') {
-          message.success(`ETL 任务 ${config.task_id} 更新成功`);
+          notify.success(`ETL 任务 ${config.task_id} 更新成功`);
           onSave();
           onClose();
         }
       }
     } catch (error: any) {
-      message.error(error.response?.data?.detail || '保存配置失败');
+      notify.error(error.response?.data?.detail || '保存配置失败');
     }
   };
 

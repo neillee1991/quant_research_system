@@ -3,7 +3,7 @@
  */
 
 import { useState } from 'react';
-import { message } from 'antd';
+import { notify } from '../../../utils/notify';
 import { productionApi } from '../../../api';
 import type { PreprocessOptions } from '../../../types';
 import type { TestResult, TestLog } from '../types';
@@ -45,14 +45,14 @@ export const useFactorTest = () => {
 
       if (data.error) {
         setTestError(data.error);
-        message.error('测试失败');
+        notify.error('测试失败');
       } else {
-        message.success('测试成功');
+        notify.success('测试成功');
       }
     } catch (error: any) {
       const errorMessage = error.response?.data?.detail || error.message || '测试失败';
       setTestError(errorMessage);
-      message.error(errorMessage);
+      notify.error(errorMessage);
       throw error;
     } finally {
       setTestLoading(false);

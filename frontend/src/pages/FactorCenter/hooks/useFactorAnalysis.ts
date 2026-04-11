@@ -3,7 +3,7 @@
  */
 
 import { useState, useEffect, useRef } from 'react';
-import { message } from 'antd';
+import { notify } from '../../../utils/notify';
 import dayjs from 'dayjs';
 import { productionApi } from '../../../api';
 
@@ -67,12 +67,12 @@ export const useFactorAnalysis = () => {
           setRunLoading(false);
           const resultRes = await productionApi.getLatestAlphalensAnalysis(selectedFactor);
           setAnalysisResult(resultRes.data?.data);
-          message.success('分析完成');
+          notify.success('分析完成');
         } else if (status === 'failed') {
           stopPolling();
           setRunLoading(false);
           const error = res.data?.data?.error_message || '分析失败';
-          message.error(error);
+          notify.error(error);
         }
       } catch (e) {
         stopPolling();
@@ -85,7 +85,7 @@ export const useFactorAnalysis = () => {
 
   const runAnalysis = async () => {
     if (!selectedFactor) {
-      message.warning('请选择因子');
+      notify.warning('请选择因子');
       return;
     }
     setRunLoading(true);
@@ -114,7 +114,7 @@ export const useFactorAnalysis = () => {
     } catch (error: any) {
       setRunLoading(false);
       setTaskStatus('failed');
-      message.error(error.response?.data?.detail || '提交失败');
+      notify.error(error.response?.data?.detail || '提交失败');
     }
   };
 

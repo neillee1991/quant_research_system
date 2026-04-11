@@ -11,8 +11,8 @@ import {
   Space,
   Tooltip,
   Collapse,
-  message,
 } from 'antd';
+import { notify } from '../../utils/notify';
 import {
   BellOutlined,
   LoadingOutlined,
@@ -174,7 +174,6 @@ export const TaskMonitor: React.FC = () => {
         if (!stillRunning) {
           const old = runningTasksRef.current.find((t) => t.run_id === id);
           if (old) {
-            message.success(`任务完成: ${old.task_name}`);
             setHistoryLoaded(false);
           }
         }
@@ -210,14 +209,14 @@ export const TaskMonitor: React.FC = () => {
       const res = await taskMonitorApi.cleanupStale(0);
       const cleaned = (res.data as any)?.data?.cleaned ?? 0;
       if (cleaned > 0) {
-        message.success(`已清理 ${cleaned} 个僵尸任务`);
+        notify.success(`已清理 ${cleaned} 个僵尸任务`);
         setHistoryLoaded(false);
         fetchRunningTasks();
       } else {
-        message.info('没有需要清理的任务');
+        notify.info('没有需要清理的任务');
       }
     } catch {
-      message.error('清理失败');
+      notify.error('清理失败');
     } finally {
       setCleaning(false);
     }

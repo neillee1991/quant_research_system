@@ -55,6 +55,7 @@ export const TaskLogTable: React.FC<TaskLogTableProps> = ({
 }) => {
   const [selectedTaskId, setSelectedTaskId] = useState<string | undefined>();
   const [dateRange, setDateRange] = useState<[Dayjs | null, Dayjs | null] | null>(null);
+  const [pageSize, setPageSize] = useState(10);
 
   const taskIdOptions = useMemo(() => {
     const ids = Array.from(new Set(logs.map(l => l.task_id).filter(Boolean)));
@@ -95,7 +96,7 @@ export const TaskLogTable: React.FC<TaskLogTableProps> = ({
       width: 120,
       render: (v: string) => (
         <Tooltip title={v}>
-          <Text code style={{ fontSize: '12px' }} ellipsis>{v.slice(-8)}</Text>
+          <Text code style={{ fontSize: '12px' }} ellipsis>{v ? v.slice(-8) : '-'}</Text>
         </Tooltip>
       ),
     },
@@ -189,7 +190,12 @@ export const TaskLogTable: React.FC<TaskLogTableProps> = ({
         columns={columns}
         rowKey="run_id"
         loading={loading}
-        pagination={{ pageSize: 10 }}
+        pagination={{
+          pageSize,
+          showSizeChanger: true,
+          pageSizeOptions: ['10', '20', '50', '100'],
+          onShowSizeChange: (_, size) => setPageSize(size),
+        }}
         scroll={{ x: '100%' }}
         size="small"
       />

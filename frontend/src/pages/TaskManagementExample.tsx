@@ -1,3 +1,4 @@
+import { notify } from '../utils/notify';
 /**
  * Task Management Example Page
  *
@@ -177,7 +178,7 @@ const TaskManagementExample: React.FC = () => {
         }
       }
       setEditModalVisible(false);
-      message.success('保存成功');
+      notify.success('保存成功');
     } catch (error) {
       // Error already handled by service
     }

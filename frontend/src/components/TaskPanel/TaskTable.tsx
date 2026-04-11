@@ -29,10 +29,11 @@ export function TaskTable<TTask, TStatus extends GenericTaskStatus, TRunParams e
 }: TaskTableProps<TTask, TStatus, TRunParams>) {
   const defaultFormatDate = (dateStr: string | null | undefined): string => {
     if (!dateStr) return '-';
-    if (typeof dateStr === 'string' && dateStr.length === 8) {
-      return `${dateStr.slice(0, 4)}-${dateStr.slice(4, 6)}-${dateStr.slice(6, 8)}`;
+    const dateString = String(dateStr);
+    if (typeof dateString === 'string' && dateString.length === 8) {
+      return `${dateString.slice(0, 4)}-${dateString.slice(4, 6)}-${dateString.slice(6, 8)}`;
     }
-    return String(dateStr).slice(0, 10);
+    return dateString.slice(0, 10);
   };
 
   const formatDateFn = formatDate || defaultFormatDate;
@@ -140,7 +141,7 @@ export function TaskTable<TTask, TStatus extends GenericTaskStatus, TRunParams e
                   fontSize: '12px',
                 }}
               >
-                {syncTime.slice(0, 16)}
+                {String(syncTime).slice(0, 16)}
               </div>
             </Tooltip>
           );

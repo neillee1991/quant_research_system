@@ -2,7 +2,7 @@
  * 同步任务管理 Hook
  */
 import { useState, useCallback } from 'react';
-import { message } from 'antd';
+import { notify } from '../../../utils/notify';
 import { dataApi } from '../../../api';
 import type { SyncTask, TaskStatus, ScheduleInfo } from '../../../types';
 
@@ -34,7 +34,6 @@ export const useSyncTasks = () => {
       setTaskStatuses(statuses);
     } catch (error) {
       console.error('Failed to load sync tasks:', error);
-      message.error('加载同步任务失败');
     }
   }, []);
 
@@ -71,12 +70,12 @@ export const useSyncTasks = () => {
     setSyncingTasks((prev) => new Set(prev).add(taskId));
     try {
       await dataApi.syncTask(taskId, targetDate, startDate, endDate);
-      message.success(`任务 ${taskId} 同步已启动`);
+      notify.success(`任务 ${taskId} 同步已启动`);
       setTimeout(() => {
         loadTaskStatus(taskId);
       }, 2000);
     } catch (error: any) {
-      message.error(`任务 ${taskId} 同步失败: ${error.response?.data?.detail || error.message}`);
+      notify.error(`任务 ${taskId} 同步失败: ${error.response?.data?.detail || error.message}`);
       throw error;
     } finally {
       setSyncingTasks((prev) => {
@@ -99,7 +98,7 @@ export const useSyncTasks = () => {
     const incrementalIds = taskIds.filter(id => !fullIds.includes(id));
 
     if (incrementalIds.length > 0 && (!startDate || !endDate)) {
-      message.warning('存在增量任务，请选择日期范围');
+      notify.warning('存在增量任务，请选择日期范围');
       return false;
     }
 
@@ -107,7 +106,7 @@ export const useSyncTasks = () => {
       setSyncingTasks((prev) => new Set(prev).add(taskId));
     });
 
-    message.info(`开始同步 ${taskIds.length} 个任务`);
+    notify.info(`开始同步 ${taskIds.length} 个任务`);
 
     for (const taskId of taskIds) {
       const isFull = fullIds.includes(taskId);
@@ -118,7 +117,7 @@ export const useSyncTasks = () => {
           await dataApi.syncTask(taskId, undefined, startDate, endDate);
         }
       } catch (error: any) {
-        message.error(`任务 ${taskId} 同步失败: ${error.response?.data?.detail || error.message}`);
+        notify.error(`任务 ${taskId} 同步失败: ${error.response?.data?.detail || error.message}`);
       }
     }
 
@@ -140,10 +139,10 @@ export const useSyncTasks = () => {
   const deleteTask = useCallback(async (taskId: string, dropTable = true) => {
     try {
       await dataApi.deleteTask(taskId, dropTable);
-      message.success(`同步任务 ${taskId} 已删除`);
+      notify.success(`同步任务 ${taskId} 已删除`);
       await loadSyncTasks();
     } catch (error: any) {
-      message.error(`删除任务失败: ${error.response?.data?.detail || error.message}`);
+      notify.error(`删除任务失败: ${error.response?.data?.detail || error.message}`);
       throw error;
     }
   }, [loadSyncTasks]);
@@ -151,10 +150,10 @@ export const useSyncTasks = () => {
   const createTask = useCallback(async (config: any) => {
     try {
       await dataApi.createSyncTask(config);
-      message.success(`同步任务 ${config.task_id} 创建成功`);
+      notify.success(`同步任务 ${config.task_id} 创建成功`);
       await loadSyncTasks();
     } catch (error: any) {
-      message.error(`创建任务失败: ${error.response?.data?.detail || error.message}`);
+      notify.error(`创建任务失败: ${error.response?.data?.detail || error.message}`);
       throw error;
     }
   }, [loadSyncTasks]);
@@ -162,10 +161,10 @@ export const useSyncTasks = () => {
   const updateTask = useCallback(async (config: any) => {
     try {
       await dataApi.updateSyncTask(config.task_id, config);
-      message.success(`同步任务 ${config.task_id} 更新成功`);
+      notify.success(`同步任务 ${config.task_id} 更新成功`);
       await loadSyncTasks();
     } catch (error: any) {
-      message.error(`更新任务失败: ${error.response?.data?.detail || error.message}`);
+      notify.error(`更新任务失败: ${error.response?.data?.detail || error.message}`);
       throw error;
     }
   }, [loadSyncTasks]);
@@ -179,19 +178,19 @@ export const useSyncTasks = () => {
     try {
       if (enabled) {
         if (!schedule) {
-          message.warning('请先配置调度规则');
+          notify.warning('请先配置调度规则');
           return false;
         }
         await dataApi.enableTaskSchedule(taskId, schedule, cronExpression);
-        message.success(`任务 ${taskId} 调度已启用`);
+        notify.success(`任务 ${taskId} 调度已启用`);
       } else {
         await dataApi.disableTaskSchedule(taskId);
-        message.success(`任务 ${taskId} 调度已禁用`);
+        notify.success(`任务 ${taskId} 调度已禁用`);
       }
       await loadTaskScheduleInfo(taskId);
       return true;
     } catch (error: any) {
-      message.error(`调度设置失败: ${error.response?.data?.detail || error.message}`);
+      notify.error(`调度设置失败: ${error.response?.data?.detail || error.message}`);
       return false;
     }
   }, [loadTaskScheduleInfo]);

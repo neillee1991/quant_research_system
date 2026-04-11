@@ -11,7 +11,7 @@ import ReactFlow, {
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { Button, Input, Space } from 'antd';
-import { useMessage } from '../../hooks/useMessage';
+import { notify } from '../../utils/notify';
 import { useFlowStore } from '../../store';
 import DataInputNode from './nodes/DataInputNode';
 import OperatorNode from './nodes/OperatorNode';
@@ -33,7 +33,6 @@ const FlowEditor: React.FC = () => {
   const [localNodes, setLocalNodes, onNodesChange] = useNodesState(nodes);
   const [localEdges, setLocalEdges, onEdgesChange] = useEdgesState(edges);
   const { setResult, setLoading } = useBacktestStore();
-  const message = useMessage();
   const [backtestName, setBacktestName] = useState<string>('backtest');
   const [asyncPolling, setAsyncPolling] = useState<boolean>(false);
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -60,9 +59,9 @@ const FlowEditor: React.FC = () => {
       };
       const res = await strategyApi.backtest(graph);
       setResult(res.data);
-      message.success('回测完成');
+      notify.success('回测完成');
     } catch (e: any) {
-      message.error(e?.response?.data?.detail || '回测失败');
+      notify.error(e?.response?.data?.detail || '回测失败');
     } finally {
       setLoading(false);
     }
@@ -78,7 +77,7 @@ const FlowEditor: React.FC = () => {
       const runId: string = res.data.run_id;
       setAsyncPolling(true);
       setLoading(true);
-      message.info(`异步回测已启动: ${runId}`);
+      notify.info(`异步回测已启动: ${runId}`);
 
       const poll = async () => {
         try {
@@ -89,11 +88,11 @@ const FlowEditor: React.FC = () => {
             const resultRes = await strategyApi.getBacktestResult(runId);
             setResult(resultRes.data);
             setLoading(false);
-            message.success('异步回测完成');
+            notify.success('异步回测完成');
           } else if (status === 'failed') {
             setAsyncPolling(false);
             setLoading(false);
-            message.error(statusRes.data?.error || '异步回测失败');
+            notify.error(statusRes.data?.error || '异步回测失败');
           } else {
             pollRef.current = setTimeout(poll, 3000);
           }
@@ -103,7 +102,7 @@ const FlowEditor: React.FC = () => {
       };
       poll();
     } catch (e: any) {
-      message.error(e?.response?.data?.detail || '启动异步回测失败');
+      notify.error(e?.response?.data?.detail || '启动异步回测失败');
     }
   };
 

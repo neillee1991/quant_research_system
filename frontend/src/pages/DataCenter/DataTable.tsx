@@ -182,7 +182,7 @@ export const DataTable: React.FC<DataTableProps> = ({
               <Table
                 dataSource={queryResult}
                 columns={queryResultColumns}
-                rowKey={(record: any) => JSON.stringify(record).slice(0, 100)}
+                rowKey={(record: any) => String(JSON.stringify(record)).slice(0, 100)}
                 size="middle"
                 pagination={{ pageSize: 50 }}
                 scroll={{ x: 'max-content', y: 500 }}

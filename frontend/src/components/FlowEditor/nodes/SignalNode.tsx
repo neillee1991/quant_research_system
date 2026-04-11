@@ -4,13 +4,12 @@ import { Card, Input } from 'antd';
 import Editor from '@monaco-editor/react';
 import { useThemeStore } from '../../../store';
 import { formatCode } from '../../../utils/codeFormatter';
-import { useMessage } from '../../../hooks/useMessage';
+import { notify } from '../../../utils/notify';
 
 const SignalNode: React.FC<NodeProps> = ({ id, data }) => {
   const { mode } = useThemeStore();
   const editorRef = useRef<any>(null);
   const { setNodes } = useReactFlow();
-  const message = useMessage();
 
   const handleFormat = async () => {
     if (!editorRef.current) return;
@@ -18,9 +17,8 @@ const SignalNode: React.FC<NodeProps> = ({ id, data }) => {
       const currentValue = editorRef.current.getValue();
       const formatted = await formatCode(currentValue, 'python');
       editorRef.current.setValue(formatted);
-      message.success('代码格式化成功');
     } catch (error: any) {
-      message.error(error.message || '格式化失败');
+      notify.error(error.message || '格式化失败');
     }
   };
 

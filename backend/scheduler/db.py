@@ -30,6 +30,7 @@ class DatabasePool:
                 password=settings.postgresql.postgres_password,
                 min_size=5,
                 max_size=20,
+                server_settings={"timezone": "Asia/Shanghai"},
             )
             logger.info("PostgreSQL 连接池初始化成功")
         except Exception as e:

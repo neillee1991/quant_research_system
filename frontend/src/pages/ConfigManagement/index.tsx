@@ -1,3 +1,4 @@
+import { notify } from '../../utils/notify';
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Card,
@@ -61,7 +62,7 @@ function readFileAsBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     // 添加文件大小检查 (10MB)
     if (file.size > 10 * 1024 * 1024) {
-      message.error('文件太大，请选择小于10MB的文件');
+      notify.error('文件太大，请选择小于10MB的文件');
       return reject(new Error('File too large'));
     }
 
@@ -107,14 +108,13 @@ const ConfigManagement: React.FC = () => {
       // 默认全选
       setSelectedExportTypes(response.data.map(t => t.value));
     } catch (error) {
-      message.error('加载配置类型失败');
     }
   };
 
   // 导出处理
   const handleExport = async () => {
     if (selectedExportTypes.length === 0) {
-      message.warning('请至少选择一种配置类型');
+      notify.warning('请至少选择一种配置类型');
       return;
     }
 
@@ -123,10 +123,10 @@ const ConfigManagement: React.FC = () => {
       const request: ExportRequest = { config_types: selectedExportTypes };
       const response = await configApi.exportConfigs(request);
       downloadFile(response.data.content, response.data.filename);
-      message.success('导出成功');
+      notify.success('导出成功');
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : '未知错误';
-      message.error(`导出失败: ${errorMsg}`);
+      notify.error(`导出失败: ${errorMsg}`);
     } finally {
       setLoading(false);
     }
@@ -138,7 +138,7 @@ const ConfigManagement: React.FC = () => {
       const isValidFileType = file.type === 'application/json' ||
                              file.name.toLowerCase().endsWith('.json');
       if (!isValidFileType) {
-        message.error('请上传 JSON 文件');
+        notify.error('请上传 JSON 文件');
         return false;
       }
 
@@ -152,7 +152,7 @@ const ConfigManagement: React.FC = () => {
         setImportContent(content);
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : '读取文件失败';
-        message.error(`读取文件失败: ${errorMsg}`);
+        notify.error(`读取文件失败: ${errorMsg}`);
       }
 
       return false;
@@ -164,7 +164,7 @@ const ConfigManagement: React.FC = () => {
   // 验证导入
   const handleVerify = async () => {
     if (!importContent) {
-      message.warning('请先选择文件');
+      notify.warning('请先选择文件');
       return;
     }
 
@@ -189,13 +189,13 @@ const ConfigManagement: React.FC = () => {
       }
 
       if (response.data.valid) {
-        message.success('验证通过');
+        notify.success('验证通过');
       } else {
-        message.error('验证失败');
+        notify.error('验证失败');
       }
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : '验证过程发生错误';
-      message.error(`验证失败: ${errorMsg}`);
+      notify.error(`验证失败: ${errorMsg}`);
     } finally {
       setLoading(false);
     }
@@ -204,7 +204,7 @@ const ConfigManagement: React.FC = () => {
   // 执行导入
   const handleApply = async () => {
     if (!verifyResult?.valid) {
-      message.warning('请先通过验证');
+      notify.warning('请先通过验证');
       return;
     }
 
@@ -219,13 +219,13 @@ const ConfigManagement: React.FC = () => {
       setImportResult(response.data);
 
       if (response.data.success) {
-        message.success('导入成功');
+        notify.success('导入成功');
       } else {
-        message.error('导入失败');
+        notify.error('导入失败');
       }
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : '导入过程发生错误';
-      message.error(`导入失败: ${errorMsg}`);
+      notify.error(`导入失败: ${errorMsg}`);
     } finally {
       setLoading(false);
     }

@@ -2,7 +2,7 @@
  * 数据查询管理 Hook
  */
 import { useState, useCallback } from 'react';
-import { message } from 'antd';
+import { notify } from '../../../utils/notify';
 import { dataApi } from '../../../api';
 import type { TableInfo, DailyData } from '../../../types';
 
@@ -21,14 +21,13 @@ export const useDataQuery = () => {
       setTables(res.data.tables || []);
     } catch (error) {
       console.error('Failed to load tables:', error);
-      message.error('加载数据表失败');
     }
   }, []);
 
   const executeQuery = useCallback(async (sql?: string) => {
     const queryToExecute = sql || sqlQuery;
     if (!queryToExecute.trim()) {
-      message.warning('请输入 SQL 查询语句');
+      notify.warning('请输入 SQL 查询语句');
       return;
     }
 
@@ -37,9 +36,9 @@ export const useDataQuery = () => {
       const res = await dataApi.executeQuery(queryToExecute);
       setQueryResult(res.data.data || []);
       setQueryColumns(res.data.columns || []);
-      message.success(`查询返回 ${res.data.count} 行数据`);
+      notify.success(`查询返回 ${res.data.count} 行数据`);
     } catch (error: any) {
-      message.error(error.response?.data?.detail || '查询失败');
+      notify.error(error.response?.data?.detail || '查询失败');
       throw error;
     } finally {
       setQueryLoading(false);
@@ -49,10 +48,10 @@ export const useDataQuery = () => {
   const truncateTable = useCallback(async (tableName: string) => {
     try {
       await dataApi.truncateTable(tableName);
-      message.success(`表 ${tableName} 已清空`);
+      notify.success(`表 ${tableName} 已清空`);
       await loadTables();
     } catch (error: any) {
-      message.error(error.response?.data?.detail || '清空表失败');
+      notify.error(error.response?.data?.detail || '清空表失败');
       throw error;
     }
   }, [loadTables]);
@@ -64,7 +63,6 @@ export const useDataQuery = () => {
       setDailyData(r.data.data || []);
     } catch (error) {
       console.error('Failed to load daily data:', error);
-      message.error('加载日线数据失败');
     } finally {
       setLoading(false);
     }

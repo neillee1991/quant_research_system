@@ -3,6 +3,7 @@ Flow Configuration Management API (PostgreSQL + Custom Scheduler)
 """
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
+from pydantic import BaseModel
 from datetime import datetime, timedelta
 
 from app.core.logger import logger
@@ -18,6 +19,11 @@ from scheduler.core import get_scheduler
 from scheduler.repository import FlowRunRepository
 
 router = APIRouter()
+
+
+class BackfillRequest(BaseModel):
+    start_date: str
+    end_date: str
 
 
 # ==================== API Endpoints ====================
@@ -141,6 +147,97 @@ async def trigger_flow(
         raise HTTPException(status_code=500, detail="Failed to trigger flow")
 
 
+@router.post("/flows/{name}/backfill")
+async def backfill_flow(name: str, body: BackfillRequest, background_tasks: BackgroundTasks):
+    """回溯模式：按交易日串行触发多个 FlowRun（后台执行）"""
+    try:
+        scheduler = get_scheduler()
+        flow = await scheduler._get_flow_config(name)
+        if not flow:
+            raise HTTPException(status_code=404, detail=f"Flow '{name}' not found")
+
+        # 后台串行执行，立即返回
+        background_tasks.add_task(scheduler.backfill_flow, name, body.start_date, body.end_date)
+
+        return {
+            "status": "success",
+            "message": f"Flow '{name}' backfill started ({body.start_date} ~ {body.end_date})",
+            "start_date": body.start_date,
+            "end_date": body.end_date,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to backfill flow {name}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to start backfill")
+
+
+
+@router.get("/flows/{name}/runs/{flow_run_id}")
+async def get_flow_run_detail(name: str, flow_run_id: str):
+    """获取单次 flow_run 的详情（flow_run_id 为随机 run_id 字符串）"""
+    try:
+        from scheduler.db import DatabasePool
+        flow_run = await DatabasePool.fetchrow(
+            "SELECT * FROM flow_runs WHERE run_id = $1", flow_run_id
+        )
+        flow_run = dict(flow_run) if flow_run else None
+        if not flow_run or flow_run.get("flow_name") != name:
+            raise HTTPException(status_code=404, detail=f"Flow run {flow_run_id} not found")
+
+        task_rows = await DatabasePool.fetch("""
+            SELECT run_id, task_id, task_type, status,
+                   started_at, finished_at, elapsed_sec,
+                   rows, params, extra, error
+            FROM task_runs
+            WHERE flow_run_id = $1 AND run_id IS NOT NULL
+            ORDER BY COALESCE(started_at, created_at)
+        """, flow_run["id"])
+
+        def fmt_time(t):
+            return t.isoformat() if t else None
+
+        tasks = []
+        for r in task_rows:
+            tasks.append({
+                "run_id": r["run_id"],
+                "task_id": r["task_id"],
+                "task_type": r["task_type"],
+                "status": r["status"],
+                "started_at": fmt_time(r["started_at"]),
+                "finished_at": fmt_time(r["finished_at"]),
+                "elapsed_sec": r["elapsed_sec"],
+                "rows": r["rows"],
+                "params": r["params"],
+                "extra": r["extra"],
+                "error": r["error"],
+            })
+
+        duration_sec = None
+        if flow_run.get("started_at") and flow_run.get("ended_at"):
+            duration_sec = (flow_run["ended_at"] - flow_run["started_at"]).total_seconds()
+
+        return {
+            "flow_run": {
+                "run_id": flow_run["run_id"],
+                "flow_name": flow_run["flow_name"],
+                "status": flow_run["status"],
+                "trigger_type": flow_run["trigger_type"],
+                "target_date": flow_run["target_date"],
+                "started_at": fmt_time(flow_run.get("started_at")),
+                "ended_at": fmt_time(flow_run.get("ended_at")),
+                "duration_sec": duration_sec,
+                "error_message": flow_run.get("error_message"),
+            },
+            "tasks": tasks,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get flow run detail {flow_run_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get flow run detail")
+
+
 @router.get("/flows/{name}/runs")
 async def list_flow_runs(
     name: str,
@@ -149,9 +246,27 @@ async def list_flow_runs(
     """List flow execution history"""
     try:
         runs = await FlowRunRepository.list_by_flow_name(name, limit=limit)
+        # Convert to frontend expected format
+        formatted_runs = []
+        for run in runs:
+            duration_sec = None
+            if run.get("started_at") and run.get("ended_at"):
+                duration_sec = (run["ended_at"] - run["started_at"]).total_seconds()
+
+            formatted_runs.append({
+                "flow_run_id": run.get("run_id") or str(run["id"]),  # 优先用随机 run_id
+                "flow_name": run["flow_name"],
+                "status": run["status"],
+                "trigger_type": "scheduled" if run["trigger_type"] == "cron" else run["trigger_type"],
+                "target_date": run["target_date"],
+                "started_at": run["started_at"].isoformat() if run.get("started_at") else None,
+                "finished_at": run["ended_at"].isoformat() if run.get("ended_at") else None,
+                "duration_sec": duration_sec,
+                "error": run.get("error_message"),
+            })
         return {
             "status": "success",
-            "data": runs,
+            "data": formatted_runs,
         }
     except Exception as e:
         logger.error(f"Failed to list flow runs for {name}: {e}")
@@ -161,7 +276,7 @@ async def list_flow_runs(
 # ==================== Dependency Inference ====================
 
 @router.post("/flows/infer-dependencies")
-def infer_dependencies(tasks: List[TaskInDAG]):
+async def infer_dependencies(tasks: List[TaskInDAG]):
     """
     Infer dependencies for tasks automatically
 
@@ -171,7 +286,7 @@ def infer_dependencies(tasks: List[TaskInDAG]):
     try:
         from app.services.dependency_inference import dependency_inference_service
 
-        inferred_tasks = dependency_inference_service.infer_dependencies(tasks)
+        inferred_tasks = await dependency_inference_service.infer_dependencies(tasks)
 
         return {
             "status": "success",

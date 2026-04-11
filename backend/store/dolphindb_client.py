@@ -34,70 +34,28 @@ class DolphinDBClient(_NewDolphinDBClient):
         super().__init__()
 
     def seed_sync_task_config(self) -> None:
-        """种子数据：同步任务配置"""
-        try:
-            from infrastructure.seed import SeedDataLoader, SeedDataManager
-
-            loader = SeedDataLoader()
-            manager = SeedDataManager(db_client=self, loader=loader)
-            manager.seed_sync_task_config()
-        except Exception as e:
-            logger.error(f"seed_sync_task_config failed: {e}")
+        """已废弃：seed 数据现由 app/main.py lifespan 通过 SeedDataManager 处理"""
+        logger.warning("seed_sync_task_config is deprecated; seed is handled by app lifespan")
 
     def seed_etl_task_config(self) -> None:
-        """种子数据：ETL 任务配置"""
-        try:
-            from infrastructure.seed import SeedDataLoader, SeedDataManager
-
-            loader = SeedDataLoader()
-            manager = SeedDataManager(db_client=self, loader=loader)
-            manager.seed_etl_task_config()
-        except Exception as e:
-            logger.error(f"seed_etl_task_config failed: {e}")
+        """已废弃：seed 数据现由 app/main.py lifespan 通过 SeedDataManager 处理"""
+        logger.warning("seed_etl_task_config is deprecated; seed is handled by app lifespan")
 
     def seed_factor_data_config(self) -> None:
-        """种子数据：因子数据配置"""
-        try:
-            from infrastructure.seed import SeedDataLoader, SeedDataManager
-
-            loader = SeedDataLoader()
-            manager = SeedDataManager(db_client=self, loader=loader)
-            manager.seed_factor_data_config()
-        except Exception as e:
-            logger.error(f"seed_factor_data_config failed: {e}")
+        """已废弃：seed 数据现由 app/main.py lifespan 通过 SeedDataManager 处理"""
+        logger.warning("seed_factor_data_config is deprecated; seed is handled by app lifespan")
 
     def seed_factor_metadata(self) -> None:
-        """种子数据：因子元数据"""
-        try:
-            from infrastructure.seed import SeedDataLoader, SeedDataManager
-
-            loader = SeedDataLoader()
-            manager = SeedDataManager(db_client=self, loader=loader)
-            manager.seed_factor_metadata()
-        except Exception as e:
-            logger.error(f"seed_factor_metadata failed: {e}")
+        """已废弃：seed 数据现由 app/main.py lifespan 通过 SeedDataManager 处理"""
+        logger.warning("seed_factor_metadata is deprecated; seed is handled by app lifespan")
 
     def seed_user_sync_preference(self) -> None:
-        """种子数据：用户同步偏好配置"""
-        try:
-            from infrastructure.seed import SeedDataLoader, SeedDataManager
-
-            loader = SeedDataLoader()
-            manager = SeedDataManager(db_client=self, loader=loader)
-            manager.seed_user_sync_preference()
-        except Exception as e:
-            logger.error(f"seed_user_sync_preference failed: {e}")
+        """已废弃：seed 数据现由 app/main.py lifespan 通过 SeedDataManager 处理"""
+        logger.warning("seed_user_sync_preference is deprecated; seed is handled by app lifespan")
 
     def seed_flow_config(self) -> None:
-        """种子数据：flow 配置"""
-        try:
-            from infrastructure.seed import SeedDataLoader, SeedDataManager
-
-            loader = SeedDataLoader()
-            manager = SeedDataManager(db_client=self, loader=loader)
-            manager.seed_flow_config()
-        except Exception as e:
-            logger.error(f"seed_flow_config failed: {e}")
+        """已废弃：seed 数据现由 app/main.py lifespan 通过 SeedDataManager 处理"""
+        logger.warning("seed_flow_config is deprecated; seed is handled by app lifespan")
 
 
 # 单例实例（延迟初始化）

@@ -4,12 +4,14 @@
 from typing import Dict, List
 from app.models.config_import_export import ConfigType
 
-# 配置类型到表名的映射
+# 配置类型到表名的映射（迁移到 PostgreSQL 后的新表名）
 CONFIG_TYPE_TABLE_MAP: Dict[ConfigType, str] = {
-    ConfigType.SYNC_TASKS: "sync_task_config",
-    ConfigType.ETL_TASKS: "etl_task_config",
-    ConfigType.FACTOR_METADATA: "factor_metadata",
-    ConfigType.FACTOR_DATA_CONFIG: "factor_data_config",
+    ConfigType.SYNC_TASKS: "sync_task_configs",
+    ConfigType.ETL_TASKS: "etl_task_configs",
+    ConfigType.FACTOR_METADATA: "factor_configs",        # 旧值映射到新表
+    ConfigType.FACTOR_CONFIGS: "factor_configs",
+    ConfigType.FACTOR_DATA_CONFIG: "factor_field_mappings",  # 旧值映射到新表
+    ConfigType.FACTOR_FIELD_MAPPINGS: "factor_field_mappings",
 }
 
 # 配置类型到ID字段的映射
@@ -17,7 +19,9 @@ CONFIG_TYPE_ID_FIELD_MAP: Dict[ConfigType, str] = {
     ConfigType.SYNC_TASKS: "task_id",
     ConfigType.ETL_TASKS: "task_id",
     ConfigType.FACTOR_METADATA: "factor_id",
+    ConfigType.FACTOR_CONFIGS: "factor_id",
     ConfigType.FACTOR_DATA_CONFIG: "field_key",
+    ConfigType.FACTOR_FIELD_MAPPINGS: "field_key",
 }
 
 # 允许的表名白名单
@@ -43,7 +47,6 @@ def get_validated_table_name(config_type: ConfigType) -> str:
     table_name = CONFIG_TYPE_TABLE_MAP.get(config_type)
     if not table_name:
         raise ValueError(f"Invalid config type: {config_type}")
-    # 白名单验证
     if table_name not in ALLOWED_TABLES:
         raise ValueError(f"Invalid table name: {table_name}")
     return table_name
@@ -65,7 +68,6 @@ def get_validated_id_field(config_type: ConfigType) -> str:
     id_field = CONFIG_TYPE_ID_FIELD_MAP.get(config_type)
     if not id_field:
         raise ValueError(f"Invalid config type: {config_type}")
-    # 白名单验证
     if id_field not in ALLOWED_ID_FIELDS:
         raise ValueError(f"Invalid ID field: {id_field}")
     return id_field

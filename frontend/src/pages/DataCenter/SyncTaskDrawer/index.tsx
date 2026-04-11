@@ -1,3 +1,4 @@
+import { notify } from '../../../utils/notify';
 /**
  * 同步任务配置抽屉 - 组装层
  */
@@ -132,7 +133,7 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
 
       if (isNew) {
         await dataApi.createSyncTask(configToSave);
-        message.success(`任务 ${configToSave.task_id} 创建成功`);
+        notify.success(`任务 ${configToSave.task_id} 创建成功`);
         onSave();
         onClose();
         return;
@@ -146,14 +147,14 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
         return;
       }
 
-      message.success(`任务 ${configToSave.task_id} 更新成功`);
+      notify.success(`任务 ${configToSave.task_id} 更新成功`);
       onSave();
       onClose();
     } catch (error: any) {
       if (error instanceof SyntaxError) {
-        message.error('JSON 格式无效');
+        notify.error('JSON 格式无效');
       } else {
-        message.error(error.response?.data?.detail || '保存配置失败');
+        notify.error(error.response?.data?.detail || '保存配置失败');
       }
     }
   };

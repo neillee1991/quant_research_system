@@ -34,6 +34,7 @@ class TriggerType(str, Enum):
 class FlowRun(BaseModel):
     """Flow 执行记录"""
     id: Optional[int] = None
+    run_id: Optional[str] = None  # 随机生成的对外展示 ID，格式同 task run_id
     flow_name: str
     parent_flow_run_id: Optional[int] = None
     status: FlowStatus = FlowStatus.PENDING
@@ -49,9 +50,11 @@ class FlowRun(BaseModel):
 class TaskRun(BaseModel):
     """Task 执行记录"""
     id: Optional[int] = None
+    run_id: Optional[str] = None  # 预生成，传给 TaskRunner 实现单条记录合并
     flow_run_id: int
     task_id: str
     task_type: str  # sync/etl/factor/flow
+    target_date: Optional[str] = None
     status: TaskStatus = TaskStatus.PENDING
     started_at: Optional[datetime] = None
     ended_at: Optional[datetime] = None

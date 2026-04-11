@@ -3,7 +3,7 @@
  */
 
 import { useState, useCallback, useEffect } from 'react';
-import { message } from 'antd';
+import { notify } from '../../../utils/notify';
 import { productionApi } from '../../../api';
 import { useTaskLogs } from '../../../hooks/useTaskLogs';
 import type { FactorDefinition } from '../../../types';
@@ -23,7 +23,6 @@ export const useFactorList = () => {
       setFactors(res.data?.data || []);
     } catch (error) {
       console.error('Failed to load factors:', error);
-      message.error('加载因子列表失败');
     } finally {
       setLoading(false);
     }
@@ -41,12 +40,12 @@ export const useFactorList = () => {
       const params = factor?.params as any;
       const pp = params?.preprocess || undefined;
       await productionApi.runProduction(factorId, runMode, undefined, startDate, endDate, pp);
-      message.success(`因子 ${factorId} ${runMode === 'incremental' ? '增量' : '全量'}计算完成`);
+      notify.success(`因子 ${factorId} ${runMode === 'incremental' ? '增量' : '全量'}计算完成`);
       await loadFactors();
       await loadHistory({ taskId: selectedFactor || undefined });
     } catch (error: any) {
       const errorMessage = error.response?.data?.detail || '执行失败';
-      message.error(errorMessage);
+      notify.error(errorMessage);
       throw error;
     } finally {
       setRunLoading(null);
@@ -56,12 +55,12 @@ export const useFactorList = () => {
   const deleteFactor = async (factorId: string): Promise<void> => {
     try {
       await productionApi.deleteFactor(factorId);
-      message.success('因子已删除');
+      notify.success('因子已删除');
       await loadFactors();
       await loadHistory();
     } catch (error: any) {
       const errorMessage = error.response?.data?.detail || '删除失败';
-      message.error(errorMessage);
+      notify.error(errorMessage);
       throw error;
     }
   };

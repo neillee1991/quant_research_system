@@ -107,7 +107,7 @@ def apply_import(request: ImportApplyRequest) -> ImportApplyResponse:
 @router.get("/config/types", response_model=List[Dict[str, str]])
 def get_config_types() -> List[Dict[str, str]]:
     """
-    获取可用的配置类型列表
+    获取可用的配置类型列表（新旧值都包含，向后兼容）
 
     Returns:
         配置类型列表
@@ -116,5 +116,7 @@ def get_config_types() -> List[Dict[str, str]]:
         {"value": ConfigType.SYNC_TASKS.value, "label": "同步任务配置"},
         {"value": ConfigType.ETL_TASKS.value, "label": "ETL任务配置"},
         {"value": ConfigType.FACTOR_METADATA.value, "label": "因子元数据配置"},
+        {"value": ConfigType.FACTOR_CONFIGS.value, "label": "因子配置"},
         {"value": ConfigType.FACTOR_DATA_CONFIG.value, "label": "因子数据配置"},
+        {"value": ConfigType.FACTOR_FIELD_MAPPINGS.value, "label": "因子字段映射配置"},
     ]

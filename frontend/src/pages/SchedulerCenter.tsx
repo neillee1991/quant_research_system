@@ -8,6 +8,9 @@ import {
   Space,
   Popconfirm,
   Empty,
+  Modal,
+  Spin,
+  Typography,
 } from 'antd';
 import {
   ReloadOutlined,
@@ -16,16 +19,15 @@ import {
   EditOutlined,
   DeleteOutlined,
   PlayCircleOutlined,
-  HistoryOutlined,
 } from '@ant-design/icons';
-import { useMessage } from '../hooks/useMessage';
+import dayjs from 'dayjs';
+import { notify } from '../utils/notify';
 import cronstrue from 'cronstrue/i18n';
-import { flowApi, FlowListItem, FlowRun } from '../api';
+import { flowApi, FlowListItem, FlowRun, FlowRunDetail, TaskConfig } from '../api';
 import FlowEditor from '../components/SchedulerFlowEditor';
+import QuantDatePicker from '../components/QuantDatePicker';
 
 const SchedulerCenter: React.FC = () => {
-  const message = useMessage();
-
   const [flows, setFlows] = useState<FlowListItem[]>([]);
   const [flowRuns, setFlowRuns] = useState<FlowRun[]>([]);
   const [loading, setLoading] = useState(false);
@@ -34,13 +36,37 @@ const SchedulerCenter: React.FC = () => {
   const [editingFlow, setEditingFlow] = useState<string | undefined>();
   const [runningFlow, setRunningFlow] = useState<string | null>(null);
 
+  // 触发 Modal 状态
+  const [triggerModal, setTriggerModal] = useState<{ visible: boolean; flowName: string }>({ visible: false, flowName: '' });
+  const [dateRange, setDateRange] = useState<[string, string]>(['', '']);
+  const [flowTasks, setFlowTasks] = useState<TaskConfig[]>([]);
+  const [tasksLoading, setTasksLoading] = useState(false);
+
+  // 执行历史展开行
+  const [runDetails, setRunDetails] = useState<Record<string, FlowRunDetail>>({});
+  const [expandLoading, setExpandLoading] = useState<Record<string, boolean>>({});
+
+  const handleExpandRun = async (expanded: boolean, record: FlowRun) => {
+    if (!expanded || !record.flow_run_id) return;
+    const key = record.flow_run_id;
+    if (runDetails[key]) return; // 已加载
+    setExpandLoading(prev => ({ ...prev, [key]: true }));
+    try {
+      const res = await flowApi.getRunDetail(record.flow_name, key);
+      setRunDetails(prev => ({ ...prev, [key]: res.data }));
+    } catch {
+      // 展开失败静默处理
+    } finally {
+      setExpandLoading(prev => ({ ...prev, [key]: false }));
+    }
+  };
+
   const fetchFlows = async () => {
     setLoading(true);
     try {
       const res = await flowApi.list();
       setFlows(res.data);
     } catch (e) {
-      message.error({ content: '加载 Flow 列表失败' });
     } finally {
       setLoading(false);
     }
@@ -55,7 +81,7 @@ const SchedulerCenter: React.FC = () => {
       for (const flow of flows) {
         try {
           const res = await flowApi.listRuns(flow.name, 10);
-          if (res.data?.data) {
+          if (res.data?.data && Array.isArray(res.data.data)) {
             allRuns.push(...res.data.data);
           }
         } catch (e) {
@@ -63,10 +89,13 @@ const SchedulerCenter: React.FC = () => {
         }
       }
       // 按时间倒序排列
-      allRuns.sort((a, b) => new Date(b.started_at || 0).getTime() - new Date(a.started_at || 0).getTime());
+      allRuns.sort((a, b) => {
+        const aTime = a.started_at ? new Date(a.started_at).getTime() : 0;
+        const bTime = b.started_at ? new Date(b.started_at).getTime() : 0;
+        return bTime - aTime;
+      });
       setFlowRuns(allRuns.slice(0, 100));
     } catch (e) {
-      message.error({ content: '加载 Flow 运行记录失败' });
     } finally {
       setRunsLoading(false);
     }
@@ -94,29 +123,77 @@ const SchedulerCenter: React.FC = () => {
 
   const handleDelete = async (name: string) => {
     try {
-      console.log('Deleting flow:', name);
       await flowApi.delete(name, true);
-      message.success({ content: `Flow "${name}" 已删除` });
-      console.log('Fetching flows again...');
       await fetchFlows();
     } catch (e: any) {
       console.error('Delete failed:', e);
-      message.error({ content: e?.response?.data?.detail || '删除失败' });
     }
   };
 
   const handleRun = async (name: string) => {
-    setRunningFlow(name);
+    const today = dayjs().format('YYYYMMDD');
+    setTriggerModal({ visible: true, flowName: name });
+    setDateRange([today, today]);
+    setFlowTasks([]);
+    setTasksLoading(true);
     try {
-      await flowApi.trigger(name);
-      message.success({ content: `Flow "${name}" 已开始执行` });
-      // 刷新运行记录
+      const res = await flowApi.get(name);
+      setFlowTasks(res.data?.tasks ?? []);
+    } catch {
+      // 拿不到 tasks 也不影响执行
+    } finally {
+      setTasksLoading(false);
+    }
+  };
+
+  const handleTriggerConfirm = async () => {
+    const { flowName } = triggerModal;
+    const [start, end] = dateRange;
+    if (!start || !end) {
+      notify.error('请选择日期范围');
+      return;
+    }
+    setRunningFlow(flowName);
+    setTriggerModal({ visible: false, flowName: '' });
+    try {
+      await flowApi.backfill(flowName, start, end);
+      const days = dayjs(end, 'YYYYMMDD').diff(dayjs(start, 'YYYYMMDD'), 'day') + 1;
+      notify.success(`Flow "${flowName}" 已启动，共 ${days} 天`);
       setTimeout(fetchFlowRuns, 2000);
     } catch (e: any) {
-      message.error({ content: e?.response?.data?.detail || '执行失败' });
+      notify.error(e?.response?.data?.detail || '执行失败');
     } finally {
       setRunningFlow(null);
     }
+  };
+
+  /** 拓扑排序，返回层列表（每层可并行） */
+  const topoLayers = (tasks: TaskConfig[]): TaskConfig[][] => {
+    const idMap = new Map(tasks.map(t => [t.id, t]));
+    const inDegree = new Map(tasks.map(t => [t.id, 0]));
+    const adj = new Map<string, string[]>(tasks.map(t => [t.id, []]));
+    for (const t of tasks) {
+      for (const dep of t.depends_on) {
+        if (idMap.has(dep)) {
+          adj.get(dep)!.push(t.id);
+          inDegree.set(t.id, (inDegree.get(t.id) ?? 0) + 1);
+        }
+      }
+    }
+    const layers: TaskConfig[][] = [];
+    let queue = tasks.filter(t => (inDegree.get(t.id) ?? 0) === 0);
+    while (queue.length > 0) {
+      layers.push(queue);
+      const next: TaskConfig[] = [];
+      for (const t of queue) {
+        for (const nid of (adj.get(t.id) ?? [])) {
+          inDegree.set(nid, (inDegree.get(nid) ?? 1) - 1);
+          if (inDegree.get(nid) === 0) next.push(idMap.get(nid)!);
+        }
+      }
+      queue = next;
+    }
+    return layers;
   };
 
   const getStatusColor = (status: string) => {
@@ -265,9 +342,11 @@ const SchedulerCenter: React.FC = () => {
       title: '运行 ID',
       dataIndex: 'flow_run_id',
       key: 'flow_run_id',
-      render: (id: string) => (
-        <code style={{ fontSize: 11 }}>{id.slice(0, 8)}...</code>
-      ),
+      render: (id?: string) => id ? (
+        <Tooltip title={id}>
+          <Typography.Text code style={{ fontSize: 12 }} ellipsis>{id.slice(-8)}</Typography.Text>
+        </Tooltip>
+      ) : '-',
     },
     {
       title: '触发方式',
@@ -304,7 +383,7 @@ const SchedulerCenter: React.FC = () => {
       title: '耗时',
       dataIndex: 'duration_sec',
       key: 'duration_sec',
-      render: (sec?: number) => sec !== undefined ? `${sec.toFixed(1)}s` : '-',
+      render: (sec?: number) => sec != null ? `${sec.toFixed(1)}s` : '-',
     },
     {
       title: '错误',
@@ -398,6 +477,99 @@ const SchedulerCenter: React.FC = () => {
                 loading={runsLoading}
                 pagination={{ pageSize: 20 }}
                 locale={{ emptyText: <Empty description="暂无执行记录" /> }}
+                expandable={{
+                  onExpand: handleExpandRun,
+                  expandedRowRender: (record: FlowRun) => {
+                    const key = record.flow_run_id;
+                    if (expandLoading[key]) return <Spin size="small" style={{ padding: 12 }} />;
+                    const detail = runDetails[key];
+                    if (!detail) return <span style={{ color: 'var(--text-secondary)', fontSize: 12, padding: 12 }}>暂无数据</span>;
+                    return (
+                      <Table
+                        size="small"
+                        dataSource={detail.tasks}
+                        rowKey="run_id"
+                        pagination={false}
+                        style={{ margin: '4px 0' }}
+                        columns={[
+                          {
+                            title: '运行 ID',
+                            dataIndex: 'run_id',
+                            key: 'run_id',
+                            width: 120,
+                            render: (id: string) => id ? (
+                              <Tooltip title={id}>
+                                <Typography.Text code style={{ fontSize: 12 }} ellipsis>{id.slice(-8)}</Typography.Text>
+                              </Tooltip>
+                            ) : '-',
+                          },
+                          {
+                            title: '任务',
+                            dataIndex: 'task_id',
+                            key: 'task_id',
+                            render: (id: string, r: any) => (
+                              <span>
+                                <Tag color={r.task_type === 'sync' ? 'blue' : r.task_type === 'etl' ? 'cyan' : r.task_type === 'factor' ? 'purple' : 'orange'} style={{ marginRight: 6 }}>
+                                  {r.task_type}
+                                </Tag>
+                                {id}
+                              </span>
+                            ),
+                          },
+                          {
+                            title: '状态',
+                            dataIndex: 'status',
+                            key: 'status',
+                            width: 80,
+                            render: (s: string) => (
+                              <Tag color={s === 'success' ? 'green' : s === 'running' ? 'blue' : s === 'failed' ? 'red' : 'orange'}>
+                                {s === 'success' ? '成功' : s === 'running' ? '运行中' : s === 'failed' ? '失败' : s}
+                              </Tag>
+                            ),
+                          },
+                          {
+                            title: '耗时',
+                            dataIndex: 'elapsed_sec',
+                            key: 'elapsed_sec',
+                            width: 80,
+                            render: (v?: number) => v != null ? `${v.toFixed(1)}s` : '-',
+                          },
+                          {
+                            title: '行数',
+                            dataIndex: 'rows',
+                            key: 'rows',
+                            width: 80,
+                            render: (v?: number) => v != null ? v.toLocaleString() : '-',
+                          },
+                          {
+                            title: '参数',
+                            dataIndex: 'params',
+                            key: 'params',
+                            render: (v?: string) => {
+                              if (!v || v === '{}' || v === '') return '-';
+                              try {
+                                const obj = JSON.parse(v);
+                                return <Typography.Text code style={{ fontSize: 11 }}>{JSON.stringify(obj)}</Typography.Text>;
+                              } catch {
+                                return <Typography.Text code style={{ fontSize: 11 }}>{v}</Typography.Text>;
+                              }
+                            },
+                          },
+                          {
+                            title: '错误',
+                            dataIndex: 'error',
+                            key: 'error',
+                            render: (v?: string) => v ? (
+                              <Tooltip title={v}>
+                                <span style={{ color: 'var(--error-color)', cursor: 'pointer', fontSize: 12 }}>查看</span>
+                              </Tooltip>
+                            ) : '-',
+                          },
+                        ]}
+                      />
+                    );
+                  },
+                }}
               />
             </div>
           ),
@@ -412,6 +584,76 @@ const SchedulerCenter: React.FC = () => {
           fetchFlows();
         }}
       />
+
+      <Modal
+        title={`执行调度: ${triggerModal.flowName}`}
+        open={triggerModal.visible}
+        onOk={handleTriggerConfirm}
+        onCancel={() => setTriggerModal({ visible: false, flowName: '' })}
+        okText="确认执行"
+        cancelText="取消"
+        okButtonProps={{ loading: runningFlow === triggerModal.flowName }}
+        width={480}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div>
+            <div style={{ marginBottom: 6, fontWeight: 500, fontSize: 13 }}>日期范围</div>
+            <QuantDatePicker
+              value={dateRange}
+              onChange={(s, e) => setDateRange([s, e])}
+              style={{ width: '100%' }}
+            />
+            {dateRange[0] && dateRange[1] && (
+              <div style={{ marginTop: 8, padding: '6px 10px', background: 'var(--color-primary-light-default)', borderRadius: 6 }}>
+                <span style={{ color: 'var(--color-primary)', fontSize: 13, fontWeight: 500 }}>
+                  共 {dayjs(dateRange[1], 'YYYYMMDD').diff(dayjs(dateRange[0], 'YYYYMMDD'), 'day') + 1} 天，每天串行执行一次
+                </span>
+              </div>
+            )}
+          </div>
+
+          <div>
+            <div style={{ marginBottom: 8, fontWeight: 500, fontSize: 13 }}>任务执行顺序</div>
+            {tasksLoading ? (
+              <Spin size="small" />
+            ) : flowTasks.length === 0 ? (
+              <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>暂无任务配置</span>
+            ) : (() => {
+              const layers = topoLayers(flowTasks);
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {layers.map((layer, i) => (
+                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{
+                        minWidth: 24, height: 24, borderRadius: '50%',
+                        background: 'var(--color-primary)', color: '#fff',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: 11, fontWeight: 600, flexShrink: 0,
+                      }}>
+                        {i + 1}
+                      </span>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                        {layer.map(t => (
+                          <Tag key={t.id} color={
+                            t.type === 'sync' ? 'blue' :
+                            t.type === 'etl' ? 'cyan' :
+                            t.type === 'factor' ? 'purple' : 'orange'
+                          } style={{ margin: 0 }}>
+                            {t.id}
+                          </Tag>
+                        ))}
+                      </div>
+                      {i < layers.length - 1 && (
+                        <span style={{ color: 'var(--text-muted)', fontSize: 11, marginLeft: 'auto', flexShrink: 0 }}>↓ 完成后</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 };

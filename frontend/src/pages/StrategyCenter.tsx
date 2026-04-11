@@ -1,6 +1,6 @@
+import { notify } from '../utils/notify';
 import React, { useState, useEffect } from 'react';
 import { Tabs, Select, Button, Tag, Spin, Progress } from 'antd';
-import { useMessage } from '../hooks/useMessage';
 import FlowEditor from '../components/FlowEditor';
 import EquityCurveChart from '../components/Charts/EquityCurveChart';
 import { useBacktestStore } from '../store';
@@ -10,7 +10,6 @@ import { TaskLogTable } from '../components/TaskLogTable';
 import type { MLJobStatus, MLWeights, EquityPoint, BacktestMetrics } from '../types';
 
 const StrategyCenter: React.FC = () => {
-  const message = useMessage();
   // 回测状态
   const { result, loading } = useBacktestStore();
   const metrics: BacktestMetrics | undefined = result?.metrics;
@@ -56,10 +55,10 @@ const StrategyCenter: React.FC = () => {
         if (r.data.status === 'done' || r.data.status === 'failed') {
           setPolling(false);
           if (r.data.status === 'done') {
-            message.success('模型训练完成');
+            notify.success('模型训练完成');
             mlApi.getWeights().then((wr) => setWeights(wr.data.weights || {}));
           } else {
-            message.error('模型训练失败');
+            notify.error('模型训练失败');
           }
         } else {
           setTimeout(pollStatus, 5000);
@@ -89,10 +88,10 @@ const StrategyCenter: React.FC = () => {
         status: 'queued',
         created_at: new Date().toISOString()
       });
-      message.info(`训练任务 ${r.data.job_id} 已启动`);
+      notify.info(`训练任务 ${r.data.job_id} 已启动`);
     } catch (error) {
       console.error('Failed to start training:', error);
-      message.error('启动训练失败');
+      notify.error('启动训练失败');
     }
   };
 

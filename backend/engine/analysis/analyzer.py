@@ -509,119 +509,38 @@ class FactorAnalyzer:
             end_date=end_date
         )
 
-    def _save_alphalens_analysis(
-        self,
-        factor_id: str,
-        results: Dict[str, Any],
-        start_date: str,
-        end_date: str,
-        config: Dict[str, Any],
-        task_id: Optional[int] = None,
-    ):
-        """保存 Alphalens 分析结果
-
-        如果提供了 task_id，则更新该记录；否则创建新记录。
-
-        存储策略：
-        - 数据库：任务元数据 + 摘要指标（用于列表展示和跨因子比较）
-        - 文件：完整分析报告（仅在查看单次分析详情时加载）
-        """
-        import polars as pl
-        from datetime import datetime as dt
-        import math
-        import numpy as np
-        import json
-        from pathlib import Path
-        from app.core.config import settings
-
-        def clean_value(v):
-            if isinstance(v, (float, np.floating)):
-                if math.isnan(v) or math.isinf(v):
-                    return None
-            elif isinstance(v, (np.integer, np.int64, np.int32)):
-                return int(v)
-            return v
-
-        def clean_dict(d):
-            if isinstance(d, dict):
-                return {k: clean_dict(v) for k, v in d.items()}
-            elif isinstance(d, (list, tuple)):
-                return [clean_dict(item) for item in d]
-            else:
-                return clean_value(d)
-
-        results = clean_dict(results)
-
-        # 如果提供了 task_id，使用它；否则生成新的
-        if task_id is not None:
-            analysis_id = task_id
-            logger.info(f"Updating existing analysis record: id={analysis_id}")
-        else:
-            analysis_id = int(datetime.now().timestamp() * 1000)
-            logger.info(f"Creating new analysis record: id={analysis_id}")
-
-        analysis_datetime = datetime.now()
-
-        def _to_date(d):
-            if d is None:
-                return None
-            if hasattr(d, 'date'):
-                return d.date()
-            return dt.strptime(str(d), "%Y%m%d").date()
-
-        # 1. 完整分析报告存文件（详情页使用）
-        report_fields = [
-            'ic_ts', 'quantile_returns', 'cumulative_returns',
-            'returns_by_group', 'turnover', 'charts_data',
-            'ic_by_group', 'spread_ts', 'alpha_beta',
-            'factor_cumulative_returns', 'ic_by_month', 'event_study',
-            'ic_by_industry', 'returns_by_industry', 'diagnostics',
-            'decay_analysis',
-        ]
-        report = {k: results.get(k) for k in report_fields if results.get(k) is not None}
-
-        factor_analysis_dir = Path(settings.analysis_dir) / factor_id
-        factor_analysis_dir.mkdir(parents=True, exist_ok=True)
-        report_path = factor_analysis_dir / f"{analysis_id}.json"
-        report_path.write_text(json.dumps(report), encoding='utf-8')
-        logger.info(f"Analysis report saved to {report_path}")
-
-        # 2. 数据库只存摘要指标 + 文件路径（列表页和比较使用）
-        record = {
-            "id": analysis_id,
-            "factor_id": factor_id,
-            "analysis_date": analysis_datetime,
-            "start_date": _to_date(start_date),
-            "end_date": _to_date(end_date),
-            "config": json.dumps(config),
-            # 摘要指标：用于列表展示和跨因子比较
-            "ic_summary": json.dumps(results.get("ic_summary", {})),
-            "ic_by_period": json.dumps(results.get("ic_by_period", [])),
-            "decay_analysis": None,
-            # 详情报告文件路径
-            "report_path": str(report_path),
-            "task_status": "completed",
-            "task_id": str(task_id) if task_id else None,
-            "error_message": None
-        }
-
-        df = pl.DataFrame([record])
-        self.db.upsert("factor_analysis_extended", df, key_columns=["id"])
-        logger.info(f"Saved analysis metadata for {factor_id} (id={analysis_id})")
-
     # ==================== 查询接口 ====================
 
     def get_task_status(self, task_id: str) -> Optional[Dict]:
-        """查询分析任务状态"""
+        """查询分析任务状态（从 PostgreSQL factor_analysis_results）"""
+        import asyncio
+        import psycopg2
+        import psycopg2.extras
+
         try:
-            df = self.db.query("""
-                SELECT id, factor_id, task_status, error_message, analysis_date
-                FROM factor_analysis_extended
-                WHERE id = %s
-            """, (task_id,))
-            if df.is_empty():
+            from app.core.config import settings
+            conn = psycopg2.connect(
+                host=settings.postgresql.postgres_host,
+                port=settings.postgresql.postgres_port,
+                dbname=settings.postgresql.postgres_db,
+                user=settings.postgresql.postgres_user,
+                password=settings.postgresql.postgres_password,
+            )
+            with conn:
+                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                    cur.execute(
+                        "SELECT factor_id, task_status, error_message, analysis_date "
+                        "FROM factor_analysis_results WHERE task_id = %s LIMIT 1",
+                        (task_id,),
+                    )
+                    row = cur.fetchone()
+            conn.close()
+            if not row:
                 return None
-            return df.to_dicts()[0]
+            result = dict(row)
+            if result.get("analysis_date"):
+                result["analysis_date"] = str(result["analysis_date"])
+            return result
         except Exception as e:
             logger.error(f"Failed to get task status: {e}")
             return None

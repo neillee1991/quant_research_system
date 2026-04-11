@@ -73,7 +73,7 @@ class FactorTestRequest(BaseModel):
 # ==================== API Endpoints ====================
 
 @tracked_task("factor", task_id_kwarg="factor_id")
-def _run_factor_background(
+async def _run_factor_background(
     factor_id: str,
     mode: str,
     target_date: Optional[str],
@@ -108,8 +108,8 @@ async def run_production(req: ProductionRunRequest, background_tasks: Background
         run_id = f"{req.factor_id}_{int(time.time() * 1000)}"
 
         # 写入统一任务表
-        TaskRunner.start(run_id, "factor", req.factor_id, f"因子计算: {req.factor_id}",
-                         params=json.dumps({"mode": req.mode, "start_date": req.start_date, "end_date": req.end_date}))
+        await TaskRunner.start(run_id, "factor", req.factor_id, f"因子计算: {req.factor_id}",
+                               params=json.dumps({"mode": req.mode, "start_date": req.start_date, "end_date": req.end_date}))
 
         preprocess = req.preprocess.model_dump() if req.preprocess else None
 
@@ -155,8 +155,8 @@ async def batch_run_production(req: BatchRunRequest, background_tasks: Backgroun
             run_ids.append({"factor_id": fid, "run_id": run_id, "status": "running"})
 
             # 写入统一任务表
-            TaskRunner.start(run_id, "factor", fid, f"因子计算: {fid}",
-                             params=json.dumps({"mode": req.mode, "start_date": req.start_date, "end_date": req.end_date}))
+            await TaskRunner.start(run_id, "factor", fid, f"因子计算: {fid}",
+                                   params=json.dumps({"mode": req.mode, "start_date": req.start_date, "end_date": req.end_date}))
 
             # 每个因子独立后台任务
             background_tasks.add_task(
@@ -185,25 +185,20 @@ async def batch_run_production(req: BatchRunRequest, background_tasks: Backgroun
 @router.get("/factor/status/{run_id}")
 async def get_run_status(run_id: str):
     """查询因子计算任务状态（使用统一 task_runs 表）"""
+    from scheduler.db import DatabasePool
+
     try:
-        df = db_client.query("""
-            SELECT * FROM task_runs
-            WHERE run_id = %s
-            ORDER BY started_at DESC
-            LIMIT 1
-        """, (run_id,))
+        row = await DatabasePool.fetchrow(
+            "SELECT * FROM task_runs WHERE run_id = $1 ORDER BY started_at DESC LIMIT 1",
+            run_id,
+        )
 
-        if df.is_empty():
-            raise HTTPException(
-                status_code=404,
-                detail=f"Run {run_id} not found"
-            )
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
 
-        record = df.to_dicts()[0]
-
-        # 格式化时间戳
+        record = dict(row)
         for field in ["created_at", "updated_at", "started_at", "finished_at"]:
-            if field in record and record[field]:
+            if record.get(field):
                 record[field] = str(record[field])
 
         return {"status": "success", "data": record}
@@ -222,48 +217,52 @@ async def get_production_history(
     end_date: Optional[str] = Query(None, description="结束日期 YYYYMMDD")
 ):
     """获取生产运行历史（使用统一 task_runs 表）"""
-    try:
-        from store.dolphindb_client import db_client
+    from scheduler.db import DatabasePool
 
+    try:
         where_conditions = ["task_type = 'factor'"]
-        params = []
+        params: list = []
+        idx = 1
 
         if factor_id:
-            where_conditions.append("task_id = %s")
+            where_conditions.append(f"task_id = ${idx}")
             params.append(factor_id)
+            idx += 1
 
         if start_date:
             if not DateUtils.validate_yyyymmdd(start_date):
                 raise HTTPException(status_code=400, detail="start_date must be YYYYMMDD")
-            where_conditions.append(f"date(started_at) >= {start_date[:4]}.{start_date[4:6]}.{start_date[6:8]}")
+            where_conditions.append(f"started_at::date >= ${idx}::date")
+            params.append(f"{start_date[:4]}-{start_date[4:6]}-{start_date[6:8]}")
+            idx += 1
 
         if end_date:
             if not DateUtils.validate_yyyymmdd(end_date):
                 raise HTTPException(status_code=400, detail="end_date must be YYYYMMDD")
-            where_conditions.append(f"date(started_at) <= {end_date[:4]}.{end_date[4:6]}.{end_date[6:8]}")
+            where_conditions.append(f"started_at::date <= ${idx}::date")
+            params.append(f"{end_date[:4]}-{end_date[4:6]}-{end_date[6:8]}")
+            idx += 1
 
-        where_clause = " AND ".join(where_conditions) if where_conditions else "1=1"
         params.append(limit)
+        where_clause = " AND ".join(where_conditions)
 
-        df = db_client.query(f"""
-            SELECT * FROM task_runs
-            WHERE {where_clause}
-            ORDER BY started_at DESC LIMIT %s
-        """, tuple(params))
+        rows = await DatabasePool.fetch(
+            f"SELECT * FROM task_runs WHERE {where_clause} ORDER BY started_at DESC LIMIT ${idx}",
+            *params,
+        )
 
         data = []
-        if not df.is_empty():
-            for row in df.to_dicts():
-                # 格式化时间戳
-                for field in ["created_at", "updated_at", "started_at", "finished_at"]:
-                    if field in row and row[field]:
-                        row[field] = str(row[field])
-                data.append(row)
+        for row in rows:
+            r = dict(row)
+            for field in ["created_at", "updated_at", "started_at", "finished_at"]:
+                if r.get(field):
+                    r[field] = str(r[field])
+            data.append(r)
 
         return {"status": "success", "data": data}
+    except HTTPException:
+        raise
     except Exception as e:
-        if "does not exist" in str(e):
-            return {"status": "success", "data": []}
         raise HTTPException(status_code=500, detail=str(e))
 
 

@@ -1,3 +1,4 @@
+import { notify } from '../../utils/notify';
 /**
  * 指数订阅抽屉组件
  * 三阶段流程：基础配置 → 指数列表 → 任务配置
@@ -189,7 +190,7 @@ export const IndexSubscribeDrawer: React.FC<IndexSubscribeDrawerProps> = ({
   // 保存用户偏好
   const handleSavePreference = async () => {
     if (!selectedTable) {
-      message.warning('请选择指数基础信息表');
+      notify.warning('请选择指数基础信息表');
       return;
     }
 
@@ -199,10 +200,10 @@ export const IndexSubscribeDrawer: React.FC<IndexSubscribeDrawerProps> = ({
         index_basic_table: selectedTable,
         filter_config: filterConfig.length > 0 ? filterConfig : undefined,
       });
-      message.success('配置已保存');
+      notify.success('配置已保存');
       setCurrentStep(1);
     } catch (error: any) {
-      message.error(
+      notify.error(
         `保存配置失败: ${error.response?.data?.detail || error.message}`
       );
     } finally {
@@ -229,7 +230,6 @@ export const IndexSubscribeDrawer: React.FC<IndexSubscribeDrawerProps> = ({
       setTotal(res.data.total || 0);
     } catch (error) {
       console.error('Failed to load indices:', error);
-      message.error('加载指数列表失败');
     } finally {
       setLoading(false);
     }
@@ -246,11 +246,11 @@ export const IndexSubscribeDrawer: React.FC<IndexSubscribeDrawerProps> = ({
       onOk: async () => {
         try {
           await indexApi.unsubscribeIndex(index.ts_code);
-          message.success(`已取消订阅 ${index.name}`);
+          notify.success(`已取消订阅 ${index.name}`);
           onUnsubscribeSuccess?.();
           loadIndices(page, pageSize, searchText, activeFilters);
         } catch (error: any) {
-          message.error(`取消订阅失败: ${error.response?.data?.detail || error.message}`);
+          notify.error(`取消订阅失败: ${error.response?.data?.detail || error.message}`);
         }
       },
     });
@@ -267,11 +267,11 @@ export const IndexSubscribeDrawer: React.FC<IndexSubscribeDrawerProps> = ({
       // 默认行为：直接创建任务
       try {
         await dataApi.createSyncTask(defaultConfig);
-        message.success(`成功订阅指数 ${index.name}`);
+        notify.success(`成功订阅指数 ${index.name}`);
         onSubscribeSuccess?.();
         onClose();
       } catch (error: any) {
-        message.error(
+        notify.error(
           `订阅失败: ${error.response?.data?.detail || error.message}`
         );
       }

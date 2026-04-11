@@ -1,3 +1,4 @@
+import { notify } from '../../../utils/notify';
 /**
  * 同步任务数据探查 Tab
  */
@@ -24,7 +25,7 @@ export const SyncDataInspectTab: React.FC<SyncDataInspectTabProps> = ({ taskId }
       setInspectionData(data);
     } catch (error) {
       console.error('Data inspection failed:', error);
-      message.error('数据探查失败');
+      notify.error('数据探查失败');
     } finally {
       setInspectionLoading(false);
     }
