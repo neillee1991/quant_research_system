@@ -52,15 +52,6 @@ export const useSyncTasks = () => {
     setTaskStatuses(statuses);
   }, []);
 
-  const loadTaskScheduleInfo = useCallback(async (taskId: string) => {
-    try {
-      const res = await dataApi.getTaskScheduleInfo(taskId);
-      setScheduleInfo((prev) => ({ ...prev, [taskId]: res.data }));
-    } catch (error) {
-      console.error(`Failed to load schedule info for ${taskId}:`, error);
-    }
-  }, []);
-
   const syncTask = useCallback(async (
     taskId: string,
     targetDate?: string,
@@ -176,24 +167,15 @@ export const useSyncTasks = () => {
     cronExpression?: string
   ) => {
     try {
-      if (enabled) {
-        if (!schedule) {
-          notify.warning('请先配置调度规则');
-          return false;
-        }
-        await dataApi.enableTaskSchedule(taskId, schedule, cronExpression);
-        notify.success(`任务 ${taskId} 调度已启用`);
-      } else {
-        await dataApi.disableTaskSchedule(taskId);
-        notify.success(`任务 ${taskId} 调度已禁用`);
-      }
-      await loadTaskScheduleInfo(taskId);
-      return true;
+      // 调度管理已迁移到 SchedulerCenter
+      // 此处保留接口以保持兼容性
+      notify.info('调度管理已迁移到调度中心，请在调度中心配置');
+      return false;
     } catch (error: any) {
       notify.error(`调度设置失败: ${error.response?.data?.detail || error.message}`);
       return false;
     }
-  }, [loadTaskScheduleInfo]);
+  }, []);
 
   return {
     syncTasks,
@@ -205,7 +187,6 @@ export const useSyncTasks = () => {
     loadSyncTasks,
     loadTaskStatus,
     setBatchTaskStatuses,
-    loadTaskScheduleInfo,
     syncTask,
     batchSyncTasks,
     deleteTask,

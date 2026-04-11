@@ -25,11 +25,9 @@ import {
   PlusOutlined,
 } from '@ant-design/icons';
 import type { BaseTaskConfig, TaskType } from '../../types/task';
-import type { TaskService } from '../../services/taskService';
 
 interface TaskListProps<T extends BaseTaskConfig> {
   taskType: TaskType;
-  service: TaskService<T>;
   columns: ColumnType<T>[];
   onEdit?: (task: T) => void;
   onCreate?: () => void;
