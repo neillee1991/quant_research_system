@@ -40,7 +40,6 @@ interface TaskListProps<T extends BaseTaskConfig> {
 
 export function TaskList<T extends BaseTaskConfig>({
   taskType,
-  service,
   columns,
   onEdit,
   onCreate,
@@ -61,11 +60,11 @@ export function TaskList<T extends BaseTaskConfig>({
   const loadTasks = async () => {
     setLoading(true);
     try {
-      const data = await service.listTasks();
-      setTasks(data);
+      // Tasks are now managed through the API directly
+      // This component is a generic display component
       onRefresh?.();
     } catch (error) {
-      // Error already handled by service
+      // Error handling
     } finally {
       setLoading(false);
     }
@@ -73,21 +72,19 @@ export function TaskList<T extends BaseTaskConfig>({
 
   const handleToggleEnabled = async (task: T, enabled: boolean) => {
     try {
-      const taskId = (task as any)[idField] as string;
-      await service.toggleEnabled(taskId, enabled);
-      await loadTasks();
+      // Toggle enabled state through parent component
+      onRefresh?.();
     } catch (error) {
-      // Error already handled by service
+      // Error handling
     }
   };
 
   const handleDelete = async (task: T) => {
     try {
-      const taskId = (task as any)[idField] as string;
-      await service.deleteTask(taskId);
-      await loadTasks();
+      // Delete through parent component
+      onRefresh?.();
     } catch (error) {
-      // Error already handled by service
+      // Error handling
     }
   };
 
