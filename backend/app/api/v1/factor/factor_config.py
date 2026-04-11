@@ -31,6 +31,9 @@ class IndexPoolBatchUploadRequest(BaseModel):
     description: str = ""
     data: List[Dict[str, Any]]
 
+class DataFrameSchemaRequest(BaseModel):
+    depends_on: List[str] = []
+
 class IndexPoolCSVUploadRequest(BaseModel):
     index_code: str
     index_name: str = ""
