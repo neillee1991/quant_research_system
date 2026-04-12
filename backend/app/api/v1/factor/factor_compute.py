@@ -7,7 +7,7 @@ import uuid
 import types
 import traceback
 from datetime import datetime
-from fastapi import APIRouter, HTTPException, Query, BackgroundTasks, Depends
+from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 import polars as pl
@@ -16,7 +16,6 @@ from store.dolphindb_client import db_client
 from app.services.factor_service import FactorComputeService, DEFAULT_PREPROCESS as _DEFAULT_PREPROCESS
 from engine.factor.registry import FactorDefinition, StorageConfig
 from app.core.logger import logger
-from app.core.auth import get_current_active_user, User
 from app.core.sandbox import check_security, SandboxSecurityError
 from app.core.utils import (
     DateUtils,
@@ -96,7 +95,6 @@ async def _run_factor_background(
 async def run_production(
     req: ProductionRunRequest,
     background_tasks: BackgroundTasks,
-    current_user: User = Depends(get_current_active_user)
 ):
     """运行生产任务（异步）
 
@@ -142,7 +140,6 @@ async def run_production(
 async def batch_run_production(
     req: BatchRunRequest,
     background_tasks: BackgroundTasks,
-    current_user: User = Depends(get_current_active_user)
 ):
     """批量计算因子（异步）
 
@@ -187,7 +184,6 @@ async def batch_run_production(
 @router.post("/factor/factors/test")
 async def test_factor_code(
     req: FactorTestRequest,
-    current_user: User = Depends(get_current_active_user)
 ):
     """编译并测试因子代码，返回计算结果预览
 

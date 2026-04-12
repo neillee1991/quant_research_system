@@ -1,38 +1,73 @@
 import React, { useState } from 'react';
 import { Menu } from 'antd';
 import {
-  DatabaseOutlined,
   ExperimentOutlined,
   LineChartOutlined,
   ScheduleOutlined,
   FundOutlined,
-  AppstoreOutlined,
   SettingOutlined,
+  SyncOutlined,
+  PlayCircleOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
-
-const menuItems = [
-  { key: '/market', label: '行情', icon: <FundOutlined /> },
-  { key: '/', label: '数据', icon: <DatabaseOutlined /> },
-  { key: '/factor', label: '因子', icon: <ExperimentOutlined /> },
-  { key: '/strategy', label: '策略', icon: <LineChartOutlined /> },
-  { key: '/scheduler', label: '调度', icon: <ScheduleOutlined /> },
-  { key: '/config', label: '配置', icon: <SettingOutlined /> },
-];
+import { useThemeStore, useNavStore } from '../../store';
 
 const Sidebar: React.FC = () => {
   const [collapsed, setCollapsed] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
+  const { mode } = useThemeStore();
+  const { dataTab, setDataTab } = useNavStore();
 
-  const selectedKey = () => {
+  const menuItems = [
+    {
+      type: 'group' as const,
+      label: '数据',
+      children: [
+        { key: 'data-sync', label: '同步任务', icon: <SyncOutlined /> },
+        { key: 'data-etl',  label: 'ETL 任务', icon: <PlayCircleOutlined /> },
+        { key: 'data-scheduler', label: '调度任务', icon: <ScheduleOutlined /> },
+      ],
+    },
+    {
+      type: 'group' as const,
+      label: '研究',
+      children: [
+        { key: '/market',   label: '行情', icon: <FundOutlined /> },
+        { key: '/factor',   label: '因子', icon: <ExperimentOutlined /> },
+        { key: '/strategy', label: '策略', icon: <LineChartOutlined /> },
+      ],
+    },
+    {
+      type: 'group' as const,
+      label: '系统',
+      children: [
+        { key: '/config', label: '系统配置', icon: <SettingOutlined /> },
+      ],
+    },
+  ];
+
+  const selectedKey = (): string => {
     const path = location.pathname;
-    if (path === '/') return '/';
-    if (path.startsWith('/market')) return '/market';
-    const match = menuItems.find(
-      (item) => item.key !== '/' && item.key !== '/market' && path.startsWith(item.key)
-    );
-    return match ? match.key : '/';
+    if (path === '/') return dataTab === '1' ? 'data-sync' : dataTab === '2' ? 'data-etl' : 'data-scheduler';
+    const routes = ['/market', '/factor', '/strategy', '/scheduler', '/config'];
+    const match = routes.find((r) => path.startsWith(r));
+    return match || 'data-sync';
+  };
+
+  const handleClick = ({ key }: { key: string }) => {
+    if (key === 'data-sync') {
+      setDataTab('1');
+      navigate('/');
+    } else if (key === 'data-etl') {
+      setDataTab('2');
+      navigate('/');
+    } else if (key === 'data-scheduler') {
+      setDataTab('3');
+      navigate('/');
+    } else {
+      navigate(key);
+    }
   };
 
   const sidebarStyle: React.CSSProperties = {
@@ -83,9 +118,9 @@ const Sidebar: React.FC = () => {
           inlineCollapsed={collapsed}
           selectedKeys={[selectedKey()]}
           items={menuItems}
-          onClick={({ key }) => navigate(key)}
+          onClick={handleClick}
           style={{ background: 'transparent', border: 'none', height: '100%' }}
-          theme="dark"
+          theme={mode === 'dark' ? 'dark' : 'light'}
         />
       </div>
       <div style={toggleBtnStyle} onClick={() => setCollapsed(!collapsed)}>

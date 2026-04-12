@@ -2,19 +2,16 @@ import React, { useEffect, useCallback, useState } from 'react';
 import {
   Badge,
   Button,
-  Popover,
   List,
   Spin,
   Tag,
   Empty,
   Typography,
   Space,
-  Tooltip,
   Collapse,
 } from 'antd';
 import { notify } from '../../utils/notify';
 import {
-  BellOutlined,
   LoadingOutlined,
   CheckCircleOutlined,
   CloseCircleOutlined,
@@ -72,7 +69,6 @@ const getTaskTypeLabel = (type: string): string => {
 const formatParams = (params: string | undefined): string => {
   if (!params) return '';
   try {
-    // 支持 JSON 和 Python dict 字符串
     const obj = JSON.parse(params.replace(/'/g, '"'));
     return Object.entries(obj)
       .filter(([, v]) => v != null && v !== '')
@@ -153,7 +149,7 @@ export const TaskMonitor: React.FC = () => {
     setLastFetched,
   } = useTaskMonitorStore();
 
-  const [popoverOpen, setPopoverOpen] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const [historyTasks, setHistoryTasks] = useState<TaskRun[]>([]);
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -168,7 +164,14 @@ export const TaskMonitor: React.FC = () => {
       const response = await taskMonitorApi.getRunningTasks();
       const newTasks = response.data.tasks;
 
-      // 检测刚完成的任务，显示通知
+      // 检测新开始的任务
+      newTasks.forEach((t) => {
+        if (!prevRunningIds.current.has(t.run_id)) {
+          notify.info(`任务 ${t.task_id} 开始执行`);
+        }
+      });
+
+      // 检测刚完成的任务
       prevRunningIds.current.forEach((id) => {
         const stillRunning = newTasks.find((t) => t.run_id === id);
         if (!stillRunning) {
@@ -229,23 +232,76 @@ export const TaskMonitor: React.FC = () => {
   }, [fetchRunningTasks]);
 
   useEffect(() => {
-    if (popoverOpen) {
+    if (expanded) {
       fetchRunningTasks();
       fetchHistory();
     }
-  }, [popoverOpen, fetchRunningTasks, fetchHistory]);
+  }, [expanded, fetchRunningTasks, fetchHistory]);
 
-  const content = (
-    <div style={{ width: 400, maxHeight: 520, overflow: 'auto' }}>
+  const hasRunning = runningTasks.length > 0;
+
+  // 收起态：圆形徽章
+  if (!expanded) {
+    return (
+      <div
+        onClick={() => setExpanded(true)}
+        style={{
+          position: 'fixed',
+          bottom: 24,
+          right: 24,
+          width: 44,
+          height: 44,
+          borderRadius: '50%',
+          background: hasRunning ? 'var(--color-primary)' : 'var(--bg-elevated)',
+          border: '1px solid var(--border-default)',
+          boxShadow: 'var(--shadow-md)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          cursor: 'pointer',
+          zIndex: 1000,
+          animation: hasRunning ? 'pulse-glow 2s infinite' : undefined,
+        }}
+      >
+        <Badge count={runningTasks.length} size="small" offset={[4, -4]}>
+          <SyncOutlined
+            spin={hasRunning}
+            style={{ fontSize: 18, color: hasRunning ? '#fff' : 'var(--text-secondary)' }}
+          />
+        </Badge>
+      </div>
+    );
+  }
+
+  // 展开态：悬浮卡片
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        bottom: 24,
+        right: 24,
+        width: 400,
+        maxHeight: 520,
+        background: 'var(--bg-elevated)',
+        border: '1px solid var(--border-default)',
+        borderRadius: 8,
+        boxShadow: 'var(--shadow-lg)',
+        display: 'flex',
+        flexDirection: 'column',
+        zIndex: 1000,
+        overflow: 'hidden',
+      }}
+    >
       {/* 头部 */}
       <div style={{
-        padding: '12px 16px',
+        padding: '10px 16px',
         borderBottom: '1px solid var(--border-default)',
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
+        flexShrink: 0,
       }}>
-        <Text strong>任务监控</Text>
+        <Text strong style={{ fontSize: '13px' }}>任务监控</Text>
         <Space size="small">
           <Button
             type="text"
@@ -263,91 +319,79 @@ export const TaskMonitor: React.FC = () => {
           >
             刷新
           </Button>
+          <Button
+            type="text"
+            size="small"
+            onClick={() => setExpanded(false)}
+            style={{ color: 'var(--text-secondary)' }}
+          >
+            ✕
+          </Button>
         </Space>
       </div>
 
-      {/* 运行中任务 */}
-      <div style={{ padding: '8px 0' }}>
-        <div style={{ padding: '4px 16px 4px', color: 'var(--text-secondary)', fontSize: '12px' }}>
-          运行中 ({runningTasks.length})
-        </div>
-        {isLoading && runningTasks.length === 0 ? (
-          <div style={{ padding: '24px 0', textAlign: 'center' }}>
-            <Spin size="small" />
+      {/* 内容区 */}
+      <div style={{ overflow: 'auto', flex: 1 }}>
+        {/* 运行中任务 */}
+        <div style={{ padding: '8px 0' }}>
+          <div style={{ padding: '4px 16px', color: 'var(--text-secondary)', fontSize: '12px' }}>
+            运行中 ({runningTasks.length})
           </div>
-        ) : runningTasks.length === 0 ? (
-          <Empty
-            image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description="暂无运行中的任务"
-            style={{ padding: '16px 0', margin: 0 }}
-          />
-        ) : (
-          <List
-            dataSource={runningTasks}
-            renderItem={(task) => <TaskItem key={task.run_id} task={task} />}
-          />
-        )}
-      </div>
-
-      {/* 历史任务（可折叠） */}
-      <Collapse
-        ghost
-        size="small"
-        onChange={(keys) => { if (keys.length > 0) fetchHistory(); }}
-        items={[{
-          key: 'history',
-          label: (
-            <Space size="small">
-              <HistoryOutlined />
-              <Text style={{ fontSize: '12px' }}>最近完成</Text>
-              {historyTasks.length > 0 && (
-                <Tag style={{ fontSize: '11px', lineHeight: '16px' }}>{historyTasks.length}</Tag>
-              )}
-            </Space>
-          ),
-          children: historyLoading ? (
-            <div style={{ padding: '16px 0', textAlign: 'center' }}>
+          {isLoading && runningTasks.length === 0 ? (
+            <div style={{ padding: '24px 0', textAlign: 'center' }}>
               <Spin size="small" />
             </div>
-          ) : historyTasks.length === 0 ? (
+          ) : runningTasks.length === 0 ? (
             <Empty
               image={Empty.PRESENTED_IMAGE_SIMPLE}
-              description="暂无历史记录"
-              style={{ padding: '12px 0', margin: 0 }}
+              description="暂无运行中的任务"
+              style={{ padding: '16px 0', margin: 0 }}
             />
           ) : (
             <List
-              dataSource={historyTasks}
+              dataSource={runningTasks}
               renderItem={(task) => <TaskItem key={task.run_id} task={task} />}
             />
-          ),
-        }]}
-        style={{ borderTop: '1px solid var(--border-default)' }}
-      />
-    </div>
-  );
+          )}
+        </div>
 
-  return (
-    <Popover
-      content={content}
-      title={null}
-      trigger="click"
-      open={popoverOpen}
-      onOpenChange={setPopoverOpen}
-      placement="bottomRight"
-      arrow={false}
-      overlayInnerStyle={{ padding: 0 }}
-    >
-      <Tooltip title="任务监控">
-        <Badge count={runningTasks.length} size="small" offset={[2, -2]}>
-          <Button
-            type="text"
-            icon={<BellOutlined />}
-            style={{ color: 'var(--text-primary)' }}
-          />
-        </Badge>
-      </Tooltip>
-    </Popover>
+        {/* 历史任务（可折叠） */}
+        <Collapse
+          ghost
+          size="small"
+          onChange={(keys) => { if (keys.length > 0) fetchHistory(); }}
+          items={[{
+            key: 'history',
+            label: (
+              <Space size="small">
+                <HistoryOutlined />
+                <Text style={{ fontSize: '12px' }}>最近完成</Text>
+                {historyTasks.length > 0 && (
+                  <Tag style={{ fontSize: '11px', lineHeight: '16px' }}>{historyTasks.length}</Tag>
+                )}
+              </Space>
+            ),
+            children: historyLoading ? (
+              <div style={{ padding: '16px 0', textAlign: 'center' }}>
+                <Spin size="small" />
+              </div>
+            ) : historyTasks.length === 0 ? (
+              <Empty
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+                description="暂无历史记录"
+                style={{ padding: '12px 0', margin: 0 }}
+              />
+            ) : (
+              <List
+                dataSource={historyTasks}
+                renderItem={(task) => <TaskItem key={task.run_id} task={task} />}
+              />
+            ),
+          }]}
+          style={{ borderTop: '1px solid var(--border-default)' }}
+        />
+      </div>
+    </div>
   );
 };
 

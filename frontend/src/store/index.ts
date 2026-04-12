@@ -89,3 +89,13 @@ export const useTaskMonitorStore = create<TaskMonitorState>((set) => ({
   setLoading: (loading) => set({ isLoading: loading }),
   setLastFetched: (time) => set({ lastFetched: time }),
 }));
+
+interface NavState {
+  dataTab: '1' | '2' | '3';
+  setDataTab: (tab: '1' | '2' | '3') => void;
+}
+
+export const useNavStore = create<NavState>((set) => ({
+  dataTab: '1',
+  setDataTab: (dataTab) => set({ dataTab }),
+}));

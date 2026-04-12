@@ -124,26 +124,7 @@ const StrategyCenter: React.FC = () => {
   };
 
   return (
-    <div style={{ padding: '16px', maxWidth: '1600px', margin: '0 auto' }}>
-      <div style={{ marginBottom: '16px' }}>
-        <h1 style={{
-          color: 'var(--color-primary)',
-          fontSize: '24px',
-          fontWeight: 700,
-          margin: 0,
-          letterSpacing: '1px'
-        }}>
-          策略
-        </h1>
-        <p style={{
-          color: 'var(--text-secondary)',
-          margin: '4px 0 0 0',
-          fontSize: '12px'
-        }}>
-          可视化策略构建、回测与模型训练
-        </p>
-      </div>
-
+    <div style={{ padding: '8px', maxWidth: '1600px', margin: '0 auto' }}>
       <Tabs defaultActiveKey="1" items={[
         {
           key: '1',

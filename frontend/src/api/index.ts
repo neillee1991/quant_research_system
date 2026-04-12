@@ -157,6 +157,7 @@ export const productionApi = {
   updateDataConfig: (mappings: DataFieldMapping[]) => api.put('/config/field-mappings', { mappings }),
   getResolvedDataConfig: () => api.get('/config/field-mappings/resolved'),
   getAvailableTables: () => api.get('/config/available-tables'),
+  getTableColumns: (tableName: string) => api.get(`/config/table-columns/${tableName}`),
 
   // 指数股票池管理（仅列表，上传功能已移除）
   listIndexPools: () => api.get('/config/index-pool/list'),

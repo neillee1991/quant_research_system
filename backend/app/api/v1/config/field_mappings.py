@@ -119,6 +119,25 @@ async def get_resolved_field_mappings():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/config/table-columns/{table_name}")
+async def get_table_columns(table_name: str):
+    """获取指定 DolphinDB 表的列名列表"""
+    from app.core.config import settings
+    cached = api_cache.get(f"production:table-columns:{table_name}")
+    if cached is not None:
+        return cached
+    try:
+        db_path = settings.database.db_path
+        df = db_client.query(f"schema(loadTable('{db_path}', '{table_name}')).colDefs")
+        columns = df["name"].to_list()
+        result = {"status": "success", "columns": columns}
+        api_cache.set(f"production:table-columns:{table_name}", result, ttl=300)
+        return result
+    except Exception as e:
+        logger.warning(f"Failed to get columns for table {table_name}: {e}")
+        return {"status": "success", "columns": []}
+
+
 @router.get("/config/available-tables")
 async def get_available_tables():
     """获取所有可用的数据表（sync/etl/factor，均从 PostgreSQL 查询）"""

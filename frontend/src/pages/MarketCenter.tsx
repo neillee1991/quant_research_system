@@ -46,27 +46,7 @@ const MarketCenter: React.FC = () => {
   ];
 
   return (
-    <div style={{ padding: '16px', maxWidth: '1600px', margin: '0 auto' }}>
-      <div style={{ marginBottom: '16px' }}>
-        <h1 style={{
-          color: 'var(--color-primary)',
-          fontSize: '24px',
-          fontWeight: 700,
-          margin: 0,
-          letterSpacing: '1px'
-        }}>
-          <FundOutlined style={{ marginRight: '8px' }} />
-          行情
-        </h1>
-        <p style={{
-          color: 'var(--text-secondary)',
-          margin: '4px 0 0 0',
-          fontSize: '12px'
-        }}>
-          实时行情数据管理与分析
-        </p>
-      </div>
-
+    <div style={{ padding: '8px', maxWidth: '1600px', margin: '0 auto' }}>
       <Card
         style={{
           background: 'var(--bg-card)',

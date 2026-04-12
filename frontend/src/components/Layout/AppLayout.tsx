@@ -2,6 +2,7 @@ import React from 'react';
 import { Layout } from 'antd';
 import Sidebar from './Sidebar';
 import TopBar from './TopBar';
+import TaskMonitor from './TaskMonitor';
 
 const { Content } = Layout;
 
@@ -25,6 +26,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
         >
           {children}
         </Content>
+        <TaskMonitor />
       </Layout>
     </Layout>
   );

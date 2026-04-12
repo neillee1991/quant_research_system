@@ -1,31 +1,33 @@
 import React from 'react';
 import { Breadcrumb, Button, Tooltip, Space } from 'antd';
-import { SunOutlined, MoonOutlined, SettingOutlined } from '@ant-design/icons';
-import { useLocation, useNavigate } from 'react-router-dom';
-import { useThemeStore } from '../../store';
-import TaskMonitor from './TaskMonitor';
+import { SunOutlined, MoonOutlined } from '@ant-design/icons';
+import { useLocation } from 'react-router-dom';
+import { useThemeStore, useNavStore } from '../../store';
 
-const routeNameMap: Record<string, string> = {
-  '/': '数据中心',
-  '/market': '行情中心',
-  '/factor': '因子中心',
-  '/strategy': '策略中心',
-  '/scheduler': '调度中心',
-  '/index-pool': '股票池',
+const routeMap: Record<string, { group: string; name: string }> = {
+  '/market':    { group: '研究', name: '行情' },
+  '/factor':    { group: '研究', name: '因子' },
+  '/strategy':  { group: '研究', name: '策略' },
+  '/scheduler': { group: '数据', name: '调度' },
+  '/config':    { group: '系统', name: '系统配置' },
 };
 
 const TopBar: React.FC = () => {
   const location = useLocation();
-  const navigate = useNavigate();
   const { mode, toggle } = useThemeStore();
+  const { dataTab } = useNavStore();
 
-  const currentName = () => {
+  const currentRoute = (): { group: string; name: string } => {
     const path = location.pathname;
-    const match = Object.keys(routeNameMap).find(
-      (key) => key !== '/' && path.startsWith(key)
-    );
-    return routeNameMap[match || '/'];
+    if (path === '/') {
+      const nameMap = { '1': '同步任务', '2': 'ETL 任务', '3': '调度任务' };
+      return { group: '数据', name: nameMap[dataTab] ?? '同步任务' };
+    }
+    const match = Object.keys(routeMap).find((key) => path.startsWith(key));
+    return match ? routeMap[match] : { group: '数据', name: '同步任务' };
   };
+
+  const route = currentRoute();
 
   const barStyle: React.CSSProperties = {
     height: 48,
@@ -42,20 +44,11 @@ const TopBar: React.FC = () => {
     <div style={barStyle}>
       <Breadcrumb
         items={[
-          { title: '量化研究系统' },
-          { title: currentName() },
+          { title: route.group },
+          { title: route.name },
         ]}
       />
       <Space size="small">
-        <TaskMonitor />
-        <Tooltip title="配置中心">
-          <Button
-            type="text"
-            icon={<SettingOutlined />}
-            onClick={() => navigate('/config')}
-            style={{ color: 'var(--text-primary)' }}
-          />
-        </Tooltip>
         <Tooltip title={mode === 'dark' ? '切换亮色模式' : '切换暗色模式'}>
           <Button
             type="text"

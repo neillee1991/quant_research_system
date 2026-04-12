@@ -4,7 +4,7 @@
 
 import { useState, useCallback, useEffect } from 'react';
 import { notify } from '../../../utils/notify';
-import { productionApi, dataApi } from '../../../api';
+import { productionApi } from '../../../api';
 import type { DataFieldMapping } from '../../../types';
 
 export const useDataConfig = () => {
@@ -30,8 +30,8 @@ export const useDataConfig = () => {
 
   const loadTables = useCallback(async () => {
     try {
-      const res = await dataApi.listTables();
-      const list: string[] = (res.data?.tables || []).map((t: any) => t.table_name || t.name || t);
+      const res = await productionApi.getAvailableTables();
+      const list: string[] = (res.data?.data || []).map((t: any) => t.value || t);
       setTables(list);
     } catch (error) {
       console.error('Failed to load tables:', error);
@@ -41,15 +41,12 @@ export const useDataConfig = () => {
   const loadColumnsForTable = async (tableName: string) => {
     if (!tableName) return;
 
-    // 检查缓存，但如果是空数组则重新加载
     const cached = tableColumns[tableName];
     if (cached && cached.length > 0) return;
 
     try {
-      const res = await dataApi.getTableInfo(tableName);
-      // 后端返回的 columns 已经是字符串数组，不需要 map
+      const res = await productionApi.getTableColumns(tableName);
       const cols: string[] = res.data?.columns || [];
-      console.log(`Loaded columns for ${tableName}:`, cols);
       setTableColumns(prev => ({ ...prev, [tableName]: cols }));
     } catch (error) {
       console.error(`Failed to load columns for table ${tableName}:`, error);

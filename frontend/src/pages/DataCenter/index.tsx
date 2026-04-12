@@ -5,9 +5,9 @@ import { notify } from '../../utils/notify';
  */
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Tabs, Modal, Button } from 'antd';
-import { SyncOutlined, PlayCircleOutlined, DatabaseOutlined } from '@ant-design/icons';
+import { SyncOutlined, PlayCircleOutlined, DatabaseOutlined, ScheduleOutlined } from '@ant-design/icons';
 import { useMessage } from '../../hooks/useMessage';
-import { useThemeStore } from '../../store';
+import { useThemeStore, useNavStore } from '../../store';
 import {
   SyncModal,
   BatchSyncModal,
@@ -25,9 +25,11 @@ import {
   createEtlTaskConfig,
 } from '../../config/taskTypes';
 import type { SyncTask, ETLTask } from '../../types';
+import SchedulerPanel from './SchedulerPanel';
 
 const DataCenter: React.FC = () => {
   const { mode } = useThemeStore();
+  const { dataTab, setDataTab } = useNavStore();
   const message = useMessage();
 
   // ========== 模态框状态 ==========
@@ -246,33 +248,10 @@ const DataCenter: React.FC = () => {
 
 
   return (
-    <div style={{ padding: '16px', maxWidth: '1600px', margin: '0 auto' }}>
-      <div style={{ marginBottom: '16px' }}>
-        <h1
-          style={{
-            color: 'var(--color-primary)',
-            fontSize: '24px',
-            fontWeight: 700,
-            margin: 0,
-            letterSpacing: '1px',
-          }}
-        >
-          <DatabaseOutlined style={{ marginRight: '8px' }} />
-          数据中心
-        </h1>
-        <p
-          style={{
-            color: 'var(--text-secondary)',
-            margin: '4px 0 0 0',
-            fontSize: '12px',
-          }}
-        >
-          数据同步管理
-        </p>
-      </div>
-
+    <div style={{ padding: '8px', maxWidth: '1600px', margin: '0 auto' }}>
       <Tabs
-        defaultActiveKey="1"
+        activeKey={dataTab}
+        onChange={(key) => setDataTab(key as '1' | '2' | '3')}
         items={[
           {
             key: '1',
@@ -302,6 +281,11 @@ const DataCenter: React.FC = () => {
                 onEditTask={handleOpenEtlDrawer}
               />
             ),
+          },
+          {
+            key: '3',
+            label: <span><ScheduleOutlined /> 调度任务</span>,
+            children: <SchedulerPanel />,
           },
         ]}
       />

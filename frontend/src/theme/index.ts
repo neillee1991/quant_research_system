@@ -63,6 +63,7 @@ export const lightTheme: ThemeConfig = {
     marginLG: 20,
   },
   components: {
+    Menu: { itemColor: '#1F2328', itemSelectedColor: '#1677FF', itemHoverColor: '#1677FF', itemSelectedBg: 'rgba(22,119,255,0.08)' },
     Table: { cellPaddingBlock: 6, cellPaddingInline: 10 },
     Tabs: { cardPadding: '6px 12px' },
     Card: { paddingLG: 12 },

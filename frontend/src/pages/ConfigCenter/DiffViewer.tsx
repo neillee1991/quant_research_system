@@ -90,39 +90,82 @@ const DiffViewer: React.FC<DiffViewerProps> = ({
   ];
 
   const renderItemContent = (record: ConfigItemDiff) => {
+    const preBase: React.CSSProperties = {
+      padding: 8,
+      marginTop: 8,
+      borderRadius: 4,
+      fontSize: 12,
+      fontFamily: 'var(--font-mono)',
+      color: 'var(--text-primary)',
+      overflowX: 'auto',
+      whiteSpace: 'pre-wrap',
+      wordBreak: 'break-all',
+    };
+
     if (record.status === 'new') {
       return (
         <div>
           <Text type="secondary">新增配置：</Text>
-          <pre style={{ background: '#f6ffed', padding: 8, marginTop: 8 }}>
+          <pre style={{ ...preBase, background: 'rgba(63,185,80,0.1)', border: '1px solid rgba(63,185,80,0.3)' }}>
             {JSON.stringify(record.imported, null, 2)}
           </pre>
         </div>
       );
     }
+
     if (record.status === 'modified') {
+      // 高亮两侧 JSON 中不同的 key
+      const currentObj = record.current as Record<string, any> ?? {};
+      const importedObj = record.imported as Record<string, any> ?? {};
+      const allKeys = new Set([...Object.keys(currentObj), ...Object.keys(importedObj)]);
+      const diffKeys = new Set([...allKeys].filter(k => JSON.stringify(currentObj[k]) !== JSON.stringify(importedObj[k])));
+
+      const renderHighlightedJson = (obj: Record<string, any>, side: 'current' | 'imported') => {
+        return Object.entries(obj).map(([k, v]) => {
+          const isDiff = diffKeys.has(k);
+          return (
+            <div
+              key={k}
+              style={isDiff ? {
+                background: side === 'current' ? 'rgba(248,81,73,0.15)' : 'rgba(63,185,80,0.15)',
+                borderLeft: `3px solid ${side === 'current' ? 'var(--color-loss)' : 'var(--color-gain)'}`,
+                paddingLeft: 6,
+                marginLeft: -6,
+              } : undefined}
+            >
+              <span style={{ color: 'var(--color-accent)' }}>{JSON.stringify(k)}</span>
+              <span style={{ color: 'var(--text-secondary)' }}>: </span>
+              <span style={{ color: isDiff ? (side === 'current' ? 'var(--color-loss)' : 'var(--color-gain)') : 'var(--text-primary)' }}>
+                {JSON.stringify(v, null, 2)}
+              </span>
+            </div>
+          );
+        });
+      };
+
       return (
         <Row gutter={16}>
           <Col span={12}>
             <Text type="secondary">当前：</Text>
-            <pre style={{ background: '#fff1f0', padding: 8, marginTop: 8 }}>
-              {JSON.stringify(record.current, null, 2)}
-            </pre>
+            <div style={{ ...preBase, background: 'rgba(248,81,73,0.06)', border: '1px solid rgba(248,81,73,0.2)' }}>
+              {renderHighlightedJson(currentObj, 'current')}
+            </div>
           </Col>
           <Col span={12}>
             <Text type="secondary">导入：</Text>
-            <pre style={{ background: '#fff7e6', padding: 8, marginTop: 8 }}>
-              {JSON.stringify(record.imported, null, 2)}
-            </pre>
+            <div style={{ ...preBase, background: 'rgba(63,185,80,0.06)', border: '1px solid rgba(63,185,80,0.2)' }}>
+              {renderHighlightedJson(importedObj, 'imported')}
+            </div>
           </Col>
         </Row>
       );
     }
+
     if (record.status === 'deleted') {
       return (
         <div>
           <Text type="secondary">将被删除：</Text>
-          <pre style={{ background: '#fff1f0', padding: 8, marginTop: 8 }}>
+          <pre style={{ ...preBase, background: 'rgba(248,81,73,0.06)', border: '1px solid rgba(248,81,73,0.2)' }}>
             {JSON.stringify(record.current, null, 2)}
           </pre>
         </div>

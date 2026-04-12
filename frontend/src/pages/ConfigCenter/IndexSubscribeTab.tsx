@@ -12,7 +12,7 @@ import {
   SearchOutlined, PlusOutlined, CheckOutlined,
   SaveOutlined, DeleteOutlined,
 } from '@ant-design/icons';
-import { indexApi, dataApi } from '../../api';
+import { indexApi, productionApi } from '../../api';
 import type { IndexInfo, UserPreference, FilterFieldConfig } from '../../types/indexSubscribe';
 
 const marketMap: Record<string, string> = {
@@ -43,11 +43,11 @@ const IndexSubscribeTab: React.FC = () => {
   // 加载可用表列表
   const loadAvailableTables = useCallback(async () => {
     try {
-      const res = await dataApi.listTables();
-      const tables = res.data.tables || [];
+      const res = await productionApi.getAvailableTables();
+      const tables = res.data?.data || [];
       const indexTables = tables
-        .filter((t: any) => t.table_name?.toLowerCase().includes('index'))
-        .map((t: any) => t.table_name);
+        .filter((t: any) => (t.value || '').toLowerCase().includes('index'))
+        .map((t: any) => t.value);
       setAvailableTables(indexTables);
     } catch (error) {
       console.error('Failed to load tables:', error);
@@ -59,8 +59,8 @@ const IndexSubscribeTab: React.FC = () => {
     if (!tableName) return;
     setLoadingColumns(true);
     try {
-      const res = await dataApi.getTableInfo(tableName);
-      const cols: string[] = res.data.columns || [];
+      const res = await productionApi.getTableColumns(tableName);
+      const cols: string[] = res.data?.columns || [];
       setTableColumns(cols);
       setFilterConfig(prev => {
         if (prev.length > 0) return prev;
