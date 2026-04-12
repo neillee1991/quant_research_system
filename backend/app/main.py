@@ -6,12 +6,10 @@ from fastapi.middleware.gzip import GZipMiddleware
 from app.core.config import settings
 from app.core.logger import logger
 from app.core.exceptions import QuantException, quant_exception_handler, general_exception_handler
-from app.api.v1 import strategy, ml, flows, versions, tasks, schema_tools
+from app.api.v1 import strategy, ml, flows, tasks, schema_tools
 from app.api.v1 import factor  # 使用拆分后的 factor 模块
 from app.api.v1 import data  # 使用拆分后的 data 模块
 from app.api.v1 import config_api  # 配置管理 API
-from app.api.v1.generic_task import create_task_router
-from app.services import sync_service, etl_service, factor_service
 from store.dolphindb_client import db_client
 from infrastructure.seed import SeedDataLoader, SeedDataManager
 
@@ -110,23 +108,11 @@ def create_app() -> FastAPI:
     app.include_router(ml.router, prefix=settings.api_v1_prefix, tags=["ml"])
     app.include_router(factor.router, prefix=settings.api_v1_prefix, tags=["factor"])
     app.include_router(flows.router, prefix=settings.api_v1_prefix, tags=["flows"])
-    app.include_router(versions.router, prefix=settings.api_v1_prefix, tags=["versions"])
     app.include_router(schema_tools.router, prefix=settings.api_v1_prefix, tags=["schema-tools"])
     app.include_router(config_api.router, prefix=settings.api_v1_prefix, tags=["config"])
 
     # 统一任务管理路由
     app.include_router(tasks.router, prefix=settings.api_v1_prefix, tags=["tasks"])
-
-    # 新的通用任务管理路由
-    app.include_router(
-        create_task_router(sync_service, f"{settings.api_v1_prefix}/sync", ["Sync Tasks"]),
-    )
-    app.include_router(
-        create_task_router(etl_service, f"{settings.api_v1_prefix}/etl", ["ETL Tasks"]),
-    )
-    app.include_router(
-        create_task_router(factor_service, f"{settings.api_v1_prefix}/factors", ["Factor Tasks"]),
-    )
 
     return app
 

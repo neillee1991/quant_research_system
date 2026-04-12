@@ -4,7 +4,7 @@
  */
 import React from 'react';
 import { SyncOutlined, PlayCircleOutlined, DeleteOutlined, HistoryOutlined } from '@ant-design/icons';
-import type { SyncTask, ETLTask, TaskStatus, ScheduleInfo, FactorDefinition } from '../types';
+import type { SyncTask, ETLTask, TaskStatus, FactorDefinition } from '../types';
 import type { ETLTaskStatus } from '../pages/DataCenter/types';
 import { dataApi, productionApi } from '../api';
 import { SyncTaskDrawer } from '../pages/DataCenter/SyncTaskDrawer';

@@ -4,14 +4,13 @@
 import { useState, useCallback } from 'react';
 import { notify } from '../../../utils/notify';
 import { dataApi } from '../../../api';
-import type { SyncTask, TaskStatus, ScheduleInfo } from '../../../types';
+import type { SyncTask, TaskStatus } from '../../../types';
 
 export const useSyncTasks = () => {
   const [syncTasks, setSyncTasks] = useState<SyncTask[]>([]);
   const [taskStatuses, setTaskStatuses] = useState<Record<string, TaskStatus>>({});
   const [syncingTasks, setSyncingTasks] = useState<Set<string>>(new Set());
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
-  const [scheduleInfo, setScheduleInfo] = useState<Record<string, ScheduleInfo>>({});
 
   const loadSyncTasks = useCallback(async () => {
     try {
@@ -50,15 +49,6 @@ export const useSyncTasks = () => {
 
   const setBatchTaskStatuses = useCallback((statuses: Record<string, TaskStatus>) => {
     setTaskStatuses(statuses);
-  }, []);
-
-  const loadTaskScheduleInfo = useCallback(async (taskId: string) => {
-    try {
-      const res = await dataApi.getTaskScheduleInfo(taskId);
-      setScheduleInfo((prev) => ({ ...prev, [taskId]: res.data }));
-    } catch (error) {
-      console.error(`Failed to load schedule info for ${taskId}:`, error);
-    }
   }, []);
 
   const syncTask = useCallback(async (
@@ -169,48 +159,19 @@ export const useSyncTasks = () => {
     }
   }, [loadSyncTasks]);
 
-  const toggleSchedule = useCallback(async (
-    taskId: string,
-    enabled: boolean,
-    schedule?: string,
-    cronExpression?: string
-  ) => {
-    try {
-      if (enabled) {
-        if (!schedule) {
-          notify.warning('请先配置调度规则');
-          return false;
-        }
-        await dataApi.enableTaskSchedule(taskId, schedule, cronExpression);
-        notify.success(`任务 ${taskId} 调度已启用`);
-      } else {
-        await dataApi.disableTaskSchedule(taskId);
-        notify.success(`任务 ${taskId} 调度已禁用`);
-      }
-      await loadTaskScheduleInfo(taskId);
-      return true;
-    } catch (error: any) {
-      notify.error(`调度设置失败: ${error.response?.data?.detail || error.message}`);
-      return false;
-    }
-  }, [loadTaskScheduleInfo]);
-
   return {
     syncTasks,
     taskStatuses,
     syncingTasks,
     selectedTaskIds,
-    scheduleInfo,
     setSelectedTaskIds,
     loadSyncTasks,
     loadTaskStatus,
     setBatchTaskStatuses,
-    loadTaskScheduleInfo,
     syncTask,
     batchSyncTasks,
     deleteTask,
     createTask,
     updateTask,
-    toggleSchedule,
   };
 };
