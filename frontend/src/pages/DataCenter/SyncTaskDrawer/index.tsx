@@ -272,14 +272,14 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
         label: '历史与数据',
         children: (
           <div>
-            <TaskLogTable
-              logs={syncLogs}
-              loading={syncLogsLoading}
-              taskIdLabel="任务ID"
-              onFilter={(f) => loadSyncLogs({ ...f, taskId: f.taskId || task.task_id })}
-            />
+            <SyncDataInspectTab taskId={task.task_id} />
             <div style={{ marginTop: 24 }}>
-              <SyncDataInspectTab taskId={task.task_id} />
+              <TaskLogTable
+                logs={syncLogs}
+                loading={syncLogsLoading}
+                taskIdLabel="任务ID"
+                onFilter={(f) => loadSyncLogs({ ...f, taskId: f.taskId || task.task_id })}
+              />
             </div>
           </div>
         ),

@@ -7,6 +7,7 @@ import DataCenter from './pages/DataCenter';
 import FactorCenter from './pages/FactorCenter/index';
 import StrategyCenter from './pages/StrategyCenter';
 import SchedulerCenter from './pages/SchedulerCenter';
+import ConfigCenter from './pages/ConfigCenter';
 import { useThemeStore } from './store';
 import { darkTheme, lightTheme } from './theme';
 import './styles/global.css';
@@ -26,6 +27,7 @@ const AppContent: React.FC = () => {
               <Route path="/factor" element={<FactorCenter />} />
               <Route path="/strategy" element={<StrategyCenter />} />
               <Route path="/scheduler" element={<SchedulerCenter />} />
+              <Route path="/config" element={<ConfigCenter />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </AppLayout>

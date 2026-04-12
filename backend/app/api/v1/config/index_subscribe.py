@@ -1,11 +1,4 @@
-"""
-指数订阅 API
-
-提供指数发现和订阅功能：
-- 查询可订阅的指数列表
-- 获取市场和发布机构筛选选项
-- 订阅/取消订阅指数
-"""
+"""指数订阅与股票池配置 API"""
 import json
 from typing import List, Optional
 from datetime import datetime
@@ -91,24 +84,18 @@ class UserSyncPreferenceResponse(BaseModel):
 # ==================== 辅助函数 ====================
 
 def _sanitize_index_code(index_code: str) -> str:
-    """
-    清理指数代码，生成合法的表名后缀
-
-    将 . 和 _ 替换为空，避免表名问题
-    """
+    """清理指数代码，生成合法的表名后缀"""
     return index_code.replace(".", "").replace("_", "")
 
 
-def _get_subscribed_indices() -> List[str]:
+async def _get_subscribed_indices() -> List[str]:
     """获取已订阅的指数列表"""
     try:
-        # 查询所有同步任务，找出指数权重任务
-        tasks = sync_service.list_tasks(enabled_only=False)
+        tasks = await sync_service.list_tasks(enabled_only=False)
         subscribed = []
         for task in tasks:
             task_id = task.task_id
             if task_id.startswith("sync_index_weight_"):
-                # 从任务配置中提取指数代码
                 try:
                     params = json.loads(task.params_json) if task.params_json else {}
                     index_code = params.get("index_code")
@@ -122,10 +109,10 @@ def _get_subscribed_indices() -> List[str]:
         return []
 
 
-def _get_subscription_task_map() -> dict:
+async def _get_subscription_task_map() -> dict:
     """获取指数代码到任务ID的映射"""
     try:
-        tasks = sync_service.list_tasks(enabled_only=False)
+        tasks = await sync_service.list_tasks(enabled_only=False)
         mapping = {}
         for task in tasks:
             task_id = task.task_id
@@ -143,9 +130,9 @@ def _get_subscription_task_map() -> dict:
         return {}
 
 
-# ==================== API 端点 ====================
+# ==================== 指数列表与订阅端点 ====================
 
-@router.get("/data/index/available", response_model=IndexListResponse)
+@router.get("/config/index/available", response_model=IndexListResponse)
 async def list_available_indices(
     search: Optional[str] = Query(None, description="搜索关键词（指数名称或代码）"),
     filters: Optional[str] = Query(None, description="JSON格式筛选条件，如 {\"market\":\"SSE\"}"),
@@ -153,13 +140,8 @@ async def list_available_indices(
     limit: int = Query(20, ge=1, le=100, description="每页数量"),
     show_subscribed_only: bool = Query(False, description="仅显示已订阅的指数"),
 ):
-    """
-    查询可订阅的指数列表
-
-    支持搜索、筛选和分页功能
-    """
+    """查询可订阅的指数列表，支持搜索、筛选和分页"""
     try:
-        # 构建查询条件
         conditions = []
         params = []
 
@@ -185,12 +167,10 @@ async def list_available_indices(
 
         where_clause = " AND ".join(conditions) if conditions else "1=1"
 
-        # 查询总数
         count_sql = f"SELECT COUNT(*) as total FROM sync_index_basic WHERE {where_clause}"
         count_df = db_client.query(count_sql, tuple(params) if params else None)
         total = count_df["total"][0] if not count_df.is_empty() else 0
 
-        # 查询数据（先查全部，再在Python中分页）
         data_sql = f"""
             SELECT ts_code, name, market, publisher, list_date, weight_rule, desc, exp_date
             FROM sync_index_basic
@@ -199,28 +179,23 @@ async def list_available_indices(
         """
         df = db_client.query(data_sql, tuple(params) if params else None)
 
-        # 获取已订阅的指数
-        subscribed_set = set(_get_subscribed_indices())
-        task_map = _get_subscription_task_map()
+        subscribed_set = set(await _get_subscribed_indices())
+        task_map = await _get_subscription_task_map()
 
-        # 已订阅的排在前面，再按 ts_code 排序
         all_rows = df.to_dicts() if not df.is_empty() else []
         all_rows.sort(key=lambda r: (0 if r.get("ts_code", "") in subscribed_set else 1, r.get("ts_code", "")))
 
         offset = (page - 1) * limit
         paginated_rows = all_rows[offset:offset + limit]
 
-        # 转换为响应模型
         indices = []
         for row in paginated_rows:
             index_code = row.get("ts_code", "")
             is_subscribed = index_code in subscribed_set
 
-            # 如果只显示已订阅的，跳过未订阅的
             if show_subscribed_only and not is_subscribed:
                 continue
 
-            # 格式化日期字段
             list_date = row.get("list_date")
             if list_date and hasattr(list_date, 'strftime'):
                 list_date = list_date.strftime("%Y%m%d")
@@ -246,16 +221,10 @@ async def list_available_indices(
                 subscribed_task_id=task_map.get(index_code) if is_subscribed else None
             ))
 
-        # 如果是仅显示已订阅，需要重新计算总数
         if show_subscribed_only:
             total = len(indices)
 
-        return IndexListResponse(
-            indices=indices,
-            total=total,
-            page=page,
-            limit=limit
-        )
+        return IndexListResponse(indices=indices, total=total, page=page, limit=limit)
     except HTTPException:
         raise
     except Exception as e:
@@ -263,20 +232,12 @@ async def list_available_indices(
         raise HTTPException(status_code=500, detail=f"查询指数列表失败: {str(e)}")
 
 
-@router.post("/data/index/subscribe", response_model=IndexSubscribeResponse)
+@router.post("/config/index/subscribe", response_model=IndexSubscribeResponse)
 async def subscribe_index(request: IndexSubscribeRequest):
-    """
-    订阅指数
-
-    1. 从模板 sync_index_weight_template 复制任务配置
-    2. 替换 $$INDEX_CODE$$ 为实际指数代码
-    3. 动态表名：sync_index_weight_{index_code}（清理后的代码）
-    4. 创建同步任务到 sync_task_config 表
-    """
+    """订阅指数：创建同步任务并建表"""
     index_code = request.index_code.strip()
 
     try:
-        # 1. 验证指数存在
         index_df = db_client.query(
             "SELECT ts_code, name FROM sync_index_basic WHERE ts_code = %s",
             (index_code,)
@@ -284,64 +245,53 @@ async def subscribe_index(request: IndexSubscribeRequest):
         if index_df.is_empty():
             raise HTTPException(status_code=404, detail=f"指数 {index_code} 不存在")
 
-        # 2. 检查是否已订阅
-        task_map = _get_subscription_task_map()
+        task_map = await _get_subscription_task_map()
         if index_code in task_map:
             raise HTTPException(
                 status_code=400,
                 detail=f"指数 {index_code} 已订阅，任务ID: {task_map[index_code]}"
             )
 
-        # 3. 获取模板配置
-        template = sync_service.get_task("sync_index_weight_template")
-        if not template:
-            raise HTTPException(status_code=500, detail="指数权重同步任务模板不存在")
-
-        # 4. 生成任务ID和表名
         sanitized_code = _sanitize_index_code(index_code)
         task_id = f"sync_index_weight_{sanitized_code}"
         table_name = f"sync_index_weight_{sanitized_code}"
 
-        # 5. 准备参数
-        try:
-            template_params = json.loads(template.params_json) if template.params_json else {}
-        except json.JSONDecodeError:
-            template_params = {}
+        template_params = {
+            "index_code": index_code,
+            "trade_date": "{date}",
+            "fields": "index_code,con_code,trade_date,weight"
+        }
 
-        # 替换指数代码参数
-        template_params["index_code"] = index_code
+        schema = {
+            "index_code": {"type": "SYMBOL", "nullable": False, "comment": "指数代码"},
+            "con_code": {"type": "SYMBOL", "nullable": False, "comment": "成分股代码"},
+            "trade_date": {"type": "DATE", "nullable": False, "comment": "交易日期"},
+            "weight": {"type": "DOUBLE", "nullable": True, "comment": "权重"}
+        }
 
-        # 6. 创建任务配置数据
         task_config_data = {
             "task_id": task_id,
             "description": f"指数 {index_code} 成分股权重同步",
-            "api_name": template.api_name,
-            "api_limit": template.api_limit,
-            "sync_type": template.sync_type,
+            "api_name": "index_weight",
+            "api_limit": 5000,
+            "sync_type": "incremental",
             "params_json": json.dumps(template_params),
-            "date_field": template.date_field,
-            "primary_keys_json": template.primary_keys_json,
+            "date_field": "trade_date",
+            "primary_keys_json": json.dumps(["index_code", "con_code", "trade_date"]),
             "table_name": table_name,
-            "schema_json": template.schema_json,
-            "column_mapping_json": template.column_mapping_json,
-            "enabled": True,
-            "created_at": datetime.now(),
-            "updated_at": datetime.now()
+            "schema_json": json.dumps(schema),
+            "enabled": True
         }
 
-        # 7. 保存任务配置
-        sync_service.create_task(
+        await sync_service.create_task(
             task_config_data,
             changed_by="api",
             change_reason=f"Subscribe index {index_code}"
         )
 
-        # 8. 确保表存在（使用schema创建表）
         try:
-            schema = json.loads(template.schema_json) if template.schema_json else {}
-            if schema:
-                db_client.create_table(table_name, schema, if_not_exists=True)
-                logger.info(f"Created table {table_name} for index {index_code}")
+            db_client.create_table(table_name, schema, if_not_exists=True)
+            logger.info(f"Created table {table_name} for index {index_code}")
         except Exception as table_err:
             logger.warning(f"Failed to create table {table_name}: {table_err}")
 
@@ -361,26 +311,19 @@ async def subscribe_index(request: IndexSubscribeRequest):
         raise HTTPException(status_code=500, detail=f"订阅指数失败: {str(e)}")
 
 
-@router.delete("/data/index/subscribe/{index_code}", response_model=IndexUnsubscribeResponse)
+@router.delete("/config/index/subscribe/{index_code}", response_model=IndexUnsubscribeResponse)
 async def unsubscribe_index(index_code: str):
-    """
-    取消订阅指数
-
-    1. 删除对应的同步任务
-    2. 删除对应的数据表（可选，默认保留数据）
-    """
+    """取消订阅指数：删除同步任务和数据表"""
     index_code = index_code.strip()
 
     try:
-        # 1. 获取任务映射
-        task_map = _get_subscription_task_map()
+        task_map = await _get_subscription_task_map()
         if index_code not in task_map:
             raise HTTPException(status_code=404, detail=f"指数 {index_code} 未订阅")
 
         task_id = task_map[index_code]
 
-        # 2. 删除任务配置及数据表（硬删除）
-        sync_service.delete_task(
+        await sync_service.delete_task(
             task_id,
             changed_by="api",
             change_reason=f"Unsubscribe index {index_code}",
@@ -402,13 +345,11 @@ async def unsubscribe_index(index_code: str):
         raise HTTPException(status_code=500, detail=f"取消订阅指数失败: {str(e)}")
 
 
-@router.get("/data/index/preference", response_model=UserSyncPreferenceResponse)
-async def get_user_preference():
-    """
-    获取用户的同步偏好配置
+# ==================== 用户偏好端点 ====================
 
-    使用固定的 "default" 用户，因为没有用户系统
-    """
+@router.get("/config/index/preference", response_model=UserSyncPreferenceResponse)
+async def get_user_preference():
+    """获取用户的同步偏好配置"""
     try:
         row = await DatabasePool.fetchrow(
             "SELECT user_id, index_table, filter_config FROM user_preferences WHERE user_id = $1",
@@ -416,7 +357,6 @@ async def get_user_preference():
         )
 
         if row is None:
-            logger.warning("No user preference found, returning default")
             return UserSyncPreferenceResponse(
                 user_id="default",
                 index_basic_table="sync_index_basic"
@@ -443,24 +383,17 @@ async def get_user_preference():
         raise HTTPException(status_code=500, detail=f"获取用户偏好失败: {str(e)}")
 
 
-@router.post("/data/index/preference", response_model=UserSyncPreferenceResponse)
+@router.post("/config/index/preference", response_model=UserSyncPreferenceResponse)
 async def save_user_preference(request: UserSyncPreference):
-    """
-    保存用户的同步偏好配置
-
-    使用固定的 "default" 用户，因为没有用户系统
-    """
+    """保存用户的同步偏好配置"""
     try:
-        # 验证表名（基本的安全检查）
         index_table = request.index_basic_table.strip()
         if not index_table or len(index_table) > 100:
             raise HTTPException(status_code=400, detail="表名不能为空且长度不能超过100个字符")
 
-        # 只允许字母、数字和下划线
         if not index_table.replace("_", "").isalnum():
             raise HTTPException(status_code=400, detail="表名只能包含字母、数字和下划线")
 
-        # 序列化 filter_config
         filter_config_json = ""
         if request.filter_config is not None:
             filter_config_json = json.dumps(
@@ -478,7 +411,6 @@ async def save_user_preference(request: UserSyncPreference):
             """,
             "default", index_table, filter_config_json or ""
         )
-        logger.info(f"Saved user preference for default user: index_table={index_table}")
 
         return UserSyncPreferenceResponse(
             user_id="default",
@@ -490,3 +422,28 @@ async def save_user_preference(request: UserSyncPreference):
     except Exception as e:
         logger.error(f"Failed to save user preference: {e}")
         raise HTTPException(status_code=500, detail=f"保存用户偏好失败: {str(e)}")
+
+
+# ==================== 指数股票池端点 ====================
+
+@router.get("/config/index-pool/list")
+async def list_index_pools():
+    """列出所有指数股票池（PostgreSQL index_configs）"""
+    try:
+        rows = await DatabasePool.fetch(
+            "SELECT index_code, index_name, description, stock_count, latest_date, "
+            "created_at, updated_at FROM index_configs ORDER BY index_code"
+        )
+        records = []
+        for row in rows:
+            r = dict(row)
+            for ts_field in ["created_at", "updated_at"]:
+                if r.get(ts_field):
+                    r[ts_field] = str(r[ts_field])
+            if r.get("latest_date"):
+                r["latest_date"] = str(r["latest_date"])
+            records.append(r)
+        return {"status": "success", "data": records}
+    except Exception as e:
+        logger.error(f"Failed to list index pools: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

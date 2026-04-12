@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 # Add backend to path
-backend_dir = Path(__file__).parent.parent.parent
+backend_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(backend_dir))
 
 import asyncio
@@ -20,12 +20,36 @@ async def run_migration_file(conn, file_path: Path):
     with open(file_path, "r") as f:
         sql = f.read()
 
-    # Split by semicolon and execute each statement
-    statements = [s.strip() for s in sql.split(";") if s.strip()]
+    # 按 ; 分割，但跳过 $$...$$  dollar-quoted 块内的分号
+    statements = []
+    current = []
+    in_dollar_quote = False
+    for line in sql.splitlines():
+        stripped = line.strip()
+        # 切换 dollar-quote 状态
+        if '$$' in stripped:
+            count = stripped.count('$$')
+            if count % 2 != 0:
+                in_dollar_quote = not in_dollar_quote
+        current.append(line)
+        if not in_dollar_quote and stripped.endswith(';'):
+            stmt = '\n'.join(current).strip().rstrip(';').strip()
+            # 去掉开头的注释行
+            lines = [l for l in stmt.splitlines() if not l.strip().startswith('--')]
+            stmt = '\n'.join(lines).strip()
+            if stmt:
+                statements.append(stmt)
+            current = []
+
+    # 处理末尾没有分号的语句
+    if current:
+        stmt = '\n'.join(current).strip()
+        lines = [l for l in stmt.splitlines() if not l.strip().startswith('--')]
+        stmt = '\n'.join(lines).strip()
+        if stmt:
+            statements.append(stmt)
+
     for stmt in statements:
-        # Skip comments
-        if stmt.startswith("--"):
-            continue
         try:
             await conn.execute(stmt)
         except Exception as e:
@@ -63,18 +87,36 @@ async def main():
 
         migrations_dir = backend_dir / "scripts" / "migrations"
 
+        # 按顺序执行的 SQL migration 文件列表
+        sql_migrations = [
+            "001_create_scheduler_tables.sql",
+            "002_add_target_date_to_task_run.sql",
+            "003_migrate_dolphindb_tables.sql",
+            "004_add_run_id_to_flow_runs.sql",
+            "005_fix_etl_task_configs.sql",
+            "006_add_constraints_and_triggers.sql",
+            "007_fix_missing_updated_at_columns.sql",
+        ]
+
         if not has_singular and not has_plural:
-            # Fresh database: run all migrations
             print("Fresh database - running all migrations...")
-            await run_migration_file(conn, migrations_dir / "001_create_scheduler_tables.sql")
-            await run_migration_file(conn, migrations_dir / "002_add_target_date_to_task_run.sql")
-            await run_migration_file(conn, migrations_dir / "003_migrate_dolphindb_tables.sql")
+            for f in sql_migrations:
+                path = migrations_dir / f
+                if path.exists():
+                    await run_migration_file(conn, path)
         elif has_singular and not has_plural:
-            # Need to run 003 only
-            print("Running migration 003 only...")
-            await run_migration_file(conn, migrations_dir / "003_migrate_dolphindb_tables.sql")
+            print("Running migration 003+ only...")
+            for f in sql_migrations[2:]:
+                path = migrations_dir / f
+                if path.exists():
+                    await run_migration_file(conn, path)
         else:
-            print("Migrations already applied - verifying all tables exist...")
+            # 已有复数表，只补跑 004 以后的（幂等）
+            print("Tables exist - applying incremental migrations...")
+            for f in sql_migrations[3:]:
+                path = migrations_dir / f
+                if path.exists():
+                    await run_migration_file(conn, path)
 
         # Verify tables
         tables = [

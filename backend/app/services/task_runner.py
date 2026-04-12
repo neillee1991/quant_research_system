@@ -30,7 +30,7 @@ class TaskRunner:
             await DatabasePool.execute("""
                 INSERT INTO task_runs
                   (run_id, task_type, task_id, task_name, status,
-                   started_at, finished_at, elapsed_sec, rows, error, params, extra, flow_run_id)
+                   started_at, finished_at, elapsed_sec, rows, error_message, params, extra, flow_run_id)
                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
             """,
                 run_id, task_type, task_id, task_name, "running",
@@ -81,7 +81,7 @@ class TaskRunner:
                 SET status      = 'failed',
                     finished_at = $2,
                     elapsed_sec = $3,
-                    error       = $4
+                    error_message = $4
                 WHERE run_id = $1
             """, run_id, datetime.now(), float(elapsed_sec), str(error)[:500])
         except Exception as e:
@@ -102,7 +102,7 @@ class TaskRunner:
                     UPDATE task_runs
                     SET status      = 'failed',
                         finished_at = $1,
-                        error       = $2
+                        error_message = $2
                     WHERE status = 'running'
                 """, datetime.now(), f"Task interrupted: {reason}")
             else:
@@ -111,7 +111,7 @@ class TaskRunner:
                     SET status      = 'failed',
                         finished_at = $1,
                         elapsed_sec = EXTRACT(EPOCH FROM ($1 - started_at)),
-                        error       = $2
+                        error_message = $2
                     WHERE status = 'running'
                       AND started_at < $1 - ($3 * INTERVAL '1 minute')
                 """, datetime.now(), f"Task interrupted: {reason}", timeout_minutes)

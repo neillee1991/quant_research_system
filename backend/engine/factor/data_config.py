@@ -32,19 +32,70 @@ _DEFAULTS: Dict[str, Dict[str, Any]] = {
 }
 
 
+# 单例实例和缓存
+_instance: Optional['DataConfigLoader'] = None
+_shared_cache: Optional[Dict[str, Dict[str, Any]]] = None
+_shared_cache_ts: float = 0.0
+
+
 class DataConfigLoader:
     """从 PostgreSQL factor_field_mappings 表加载字段映射配置，带内存缓存
 
     使用方式：
-    - 启动时 await data_config_loader.refresh()
-    - 运行时 data_config_loader.get(field_key)  # 纯同步，读缓存
+    - 启动时 await DataConfigLoader.get_instance(db_client).refresh()
+    - 运行时 DataConfigLoader.get_instance(db_client).get(field_key)  # 纯同步，读缓存
+
+    单例模式：所有实例共享同一份缓存
     """
 
-    def __init__(self, db_client):
+    def __new__(cls, db_client):
+        """单例模式：所有实例共享同一份缓存"""
+        global _instance
+        if _instance is None:
+            _instance = super().__new__(cls)
+            _instance._init_once(db_client)
+        return _instance
+
+    @classmethod
+    def get_instance(cls, db_client) -> 'DataConfigLoader':
+        """获取单例实例"""
+        return cls(db_client)
+
+    def _init_once(self, db_client):
+        """只初始化一次的代码"""
         # db_client 仍用于 load_field_data()（查询 DolphinDB 时序表）
         self.db = db_client
-        self._cache: Optional[Dict[str, Dict[str, Any]]] = None
-        self._cache_ts: float = 0.0
+
+    def __init__(self, db_client):
+        """注意：__init__ 会在每次调用 DataConfigLoader(db_client) 时都执行，
+        但实际初始化只在 _init_once 中执行一次。
+        """
+        # 实际初始化在 _init_once 中完成
+        pass
+
+    @property
+    def _cache(self) -> Optional[Dict[str, Dict[str, Any]]]:
+        """获取共享缓存"""
+        global _shared_cache
+        return _shared_cache
+
+    @_cache.setter
+    def _cache(self, value: Optional[Dict[str, Dict[str, Any]]]) -> None:
+        """设置共享缓存"""
+        global _shared_cache
+        _shared_cache = value
+
+    @property
+    def _cache_ts(self) -> float:
+        """获取共享缓存时间戳"""
+        global _shared_cache_ts
+        return _shared_cache_ts
+
+    @_cache_ts.setter
+    def _cache_ts(self, value: float) -> None:
+        """设置共享缓存时间戳"""
+        global _shared_cache_ts
+        _shared_cache_ts = value
 
     async def refresh(self) -> None:
         """从 PostgreSQL factor_field_mappings 预加载配置到内存缓存"""

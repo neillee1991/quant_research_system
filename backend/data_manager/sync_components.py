@@ -534,11 +534,13 @@ class SyncTaskExecutor(ISyncTaskExecutor):
         task: Dict[str, Any],
         target_date: Optional[str] = None,
         end_date: Optional[str] = None
-    ) -> bool:
-        """执行增量同步"""
+    ) -> int:
+        """执行增量同步，返回同步行数，-1 表示失败"""
         task_id = task["task_id"]
         api_name = task["api_name"]
         api_limit = task.get("api_limit", 5000)
+
+        logger.info(f"Starting incremental sync for {task_id}: target_date={target_date}, end_date={end_date}")
 
         # 确定日期范围
         if target_date is None:
@@ -566,9 +568,11 @@ class SyncTaskExecutor(ISyncTaskExecutor):
         if isinstance(target_date, datetime):
             target_date = target_date.strftime("%Y%m%d")
 
+        logger.info(f"[{task_id}] Date range: {start_date} to {target_date}")
+
         if start_date > target_date:
             logger.info(f"Task {task_id} already up to date")
-            return True
+            return 0
 
         # 按日期循环同步（优先使用交易日历过滤非交易日）
         from app.core.utils import TradingCalendar
@@ -577,11 +581,14 @@ class SyncTaskExecutor(ISyncTaskExecutor):
             dates = cal.get_trading_days(start_date, target_date)
         else:
             dates = DateUtils.get_date_range(start_date, target_date)
+
+        logger.info(f"[{task_id}] Trading days to sync: {len(dates)}")
         total_rows = 0
 
         for date_str in dates:
             params_str = f"type=incremental, date={date_str}, range={start_date}~{target_date}"
             try:
+                logger.info(f"[{task_id}] Syncing date: {date_str}")
                 params = self._format_params(task["params"], date_str)
                 df = self._fetch_with_pagination(task_id, api_name, params, api_limit)
 
@@ -608,10 +615,11 @@ class SyncTaskExecutor(ISyncTaskExecutor):
                     logger.info(f"Synced {task_id} for {date_str}: {rows_count} rows")
 
                 else:
-                    # 即使没有数据也记录
-                    pass
+                    logger.info(f"[{task_id}] No data for date {date_str}")
+
             except Exception as e:
-                logger.error(f"Sync {task_id} for {date_str} failed: {e}")
+                logger.error(f"Sync {task_id} for {date_str} failed: {e}", exc_info=True)
+                return -1
 
         logger.info(f"Incremental sync completed for {task_id}: {total_rows} total rows")
         return total_rows

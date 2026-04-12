@@ -34,20 +34,13 @@ export interface SyncTask {
   table_name: string;
   source?: string;
   enabled?: boolean;
-  schedule?: string;
-  cron_expression?: string;
-  config?: SyncTaskConfig;
-  created_at?: string;
-  updated_at?: string;
   // Index subscription fields
   params_json?: string;
   schema_json?: string;
   primary_keys_json?: string;
-  column_mapping_json?: string;
   params?: Record<string, unknown>;
   schema?: Record<string, unknown>;
   primary_keys?: string[];
-  column_mapping?: Record<string, string>;
   api_name?: string;
   date_field?: string;
   api_limit?: number;

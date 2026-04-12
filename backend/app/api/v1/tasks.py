@@ -11,6 +11,8 @@ import json
 from app.services.task_service import sync_service, etl_service, factor_service, TaskService
 from app.services.task_runner import TaskRunner, tracked_task
 from app.core.logger import logger
+from store.dolphindb_client import db_client
+from scheduler.db import DatabasePool
 
 router = APIRouter()
 
@@ -270,21 +272,6 @@ async def test_etl_script(payload: dict):
 
 
 
-@router.post("/tasks/etl/{task_id}/backfill")
-async def backfill_etl_task(
-    task_id: str = Path(..., description="任务ID"),
-    start_date: str = Query("", description="开始日期 YYYYMMDD"),
-    end_date: str = Query("", description="结束日期 YYYYMMDD"),
-):
-    """回溯执行 ETL 任务"""
-    try:
-        result = await etl_service.backfill(task_id, start_date, end_date)
-        return result
-    except Exception as e:
-        logger.error(f"Failed to backfill ETL task {task_id}: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
-
-
 @router.post("/tasks/etl/{task_id}/create-table")
 async def create_etl_table(
     task_id: str = Path(..., description="任务ID"),
@@ -506,7 +493,8 @@ async def update_task(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to update {task_type} task {task_id}: {e}")
+        import traceback
+        logger.error(f"Failed to update {task_type} task {task_id}: {e}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -532,7 +520,6 @@ async def delete_task(
                     logger.warning(f"Factor tasks use shared table, skipping drop_table for {task_id}")
 
                 if table_name:
-                    from store.dolphindb_client import db_client
                     try:
                         db_client.drop_table(table_name)
                         logger.info(f"Dropped table {table_name} for task {task_id}")
@@ -562,15 +549,22 @@ async def delete_task(
 @tracked_task("sync", task_id_kwarg="task_id")
 async def _execute_sync_task_background(task_id: str, start_date: Optional[str], end_date: Optional[str], run_id: str):
     """后台执行同步任务"""
+    logger.info(f"Starting background sync task: task_id={task_id}, run_id={run_id}, start_date={start_date}, end_date={end_date}")
     import asyncio
     from data_manager.refactored_sync_engine import sync_engine
-    rows = await asyncio.get_event_loop().run_in_executor(
-        None, lambda: sync_engine.sync_task(task_id=task_id, target_date=start_date, end_date=end_date)
-    )
-    if rows < 0:
-        raise RuntimeError(f"Sync task {task_id} failed")
-    logger.info(f"Sync task {task_id} completed: run_id={run_id}, rows={rows}")
-    return {"rows": rows, "extra": {"start_date": start_date, "end_date": end_date}}
+    try:
+        logger.info(f"Calling sync_engine.sync_task for {task_id}")
+        rows = await asyncio.get_event_loop().run_in_executor(
+            None, lambda: sync_engine.sync_task(task_id=task_id, target_date=start_date, end_date=end_date)
+        )
+        logger.info(f"sync_engine.sync_task returned {rows} rows for {task_id}")
+        if rows < 0:
+            raise RuntimeError(f"Sync task {task_id} failed")
+        logger.info(f"Sync task {task_id} completed: run_id={run_id}, rows={rows}")
+        return {"rows": rows, "extra": {"start_date": start_date, "end_date": end_date}}
+    except Exception as e:
+        logger.error(f"Error in background sync task {task_id}: {e}", exc_info=True)
+        raise
 
 
 @tracked_task("etl", task_id_kwarg="task_id")
@@ -602,25 +596,60 @@ async def _execute_etl_task_background(task_id: str, start_date: Optional[str], 
         finally:
             conn.close()
 
+        # 执行前确保目标表存在（仅当 schema 非空时建表）
+        table_name = task.get("table_name")
+        schema_json = task.get("schema_json") or "{}"
+        primary_keys_json = task.get("primary_keys_json") or "[]"
+        if table_name:
+            import json as _json
+            _schema = _json.loads(schema_json) if isinstance(schema_json, str) else schema_json
+            _pks = _json.loads(primary_keys_json) if isinstance(primary_keys_json, str) else primary_keys_json
+            if _schema:  # schema 为空时跳过，让 ETL 脚本自行处理
+                from data_manager.sync_components import TableManager as SyncTableManager
+                _tm = SyncTableManager(db_client)
+                _tm.ensure_table_exists({
+                    "table_name": table_name,
+                    "schema_json": _json.dumps(_schema),
+                    "primary_keys_json": _json.dumps(_pks),
+                })
+
         script_template = task.get("script", "")
         if not script_template or not script_template.strip():
             raise ValueError("ETL script is empty")
 
-        # 将 YYYYMMDD 转为 DolphinDB 日期格式 YYYY.MM.DD
+        # 替换占位符
         if start_date and len(start_date) == 8:
             date_str = f"{start_date[:4]}.{start_date[4:6]}.{start_date[6:]}"
         else:
             from datetime import datetime
             date_str = datetime.now().strftime("%Y.%m.%d")
 
-        script = script_template.replace("{date}", date_str)
+        from app.core.config import settings as _settings
+        db_path = _settings.database.db_path
+        script = (script_template
+                  .replace("{date}", date_str)
+                  .replace("{db_ts}", db_path)
+                  .replace("{db_meta}", db_path))
 
-        # 执行 ETL 脚本并写入结果
+        # 执行 ETL 脚本，将结果写入目标表
         try:
             result = db_client.query(script)
-            if result is not None and hasattr(result, '__len__'):
-                return len(result)
-            return 0
+            if result is None or result.is_empty():
+                return 0
+
+            # 写入目标表
+            if table_name:
+                import json as _json
+                _pks = _json.loads(primary_keys_json) if isinstance(primary_keys_json, str) else primary_keys_json
+                is_full = task.get("sync_type", "incremental") == "full"
+                db_client.upsert(
+                    table_name=table_name,
+                    df=result,
+                    key_columns=_pks,
+                    is_full_sync=is_full,
+                    trade_date=date_str.replace(".", "") if not is_full else None,
+                )
+            return len(result)
         except Exception as e:
             logger.error(f"Failed to execute ETL script for {task_id}: {e}")
             raise
@@ -662,6 +691,7 @@ async def execute_task(
     立即返回 run_id，后台执行任务。使用 /tasks/{task_type}/status/{run_id} 查询状态。
     """
     try:
+        logger.info(f"Received execute request for {task_type} task {task_id}")
         service = _get_service(task_type)
 
         task = await service.get_task(task_id)
@@ -674,6 +704,8 @@ async def execute_task(
         # 调度器传入 run_id 时直接使用，否则自己生成
         run_id = (request.run_id if request and request.run_id
                   else f"{task_id}_{int(time.time() * 1000)}")
+
+        logger.info(f"Generated run_id: {run_id} for task {task_id}")
 
         params_dict = {
             "start_date": request.start_date if request else None,
@@ -697,6 +729,7 @@ async def execute_task(
         )
 
         if task_type == "sync":
+            logger.info(f"Adding sync task {task_id} to background tasks")
             background_tasks.add_task(_execute_sync_task_background, **task_kwargs)
             message = f"Sync task {task_id} started in background"
         elif task_type == "etl":
@@ -706,6 +739,7 @@ async def execute_task(
             background_tasks.add_task(_execute_factor_task_background, **task_kwargs)
             message = f"Factor task {task_id} started in background"
 
+        logger.info(f"Returning response for {task_type} task {task_id}, run_id={run_id}")
         return TaskExecuteResponse(
             status="success",
             message=message,

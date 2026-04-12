@@ -88,30 +88,6 @@ def delete_flow(name: str, hard: bool = Query(default=False, description="Hard d
         logger.error(f"Failed to delete flow {name}: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete flow")
 
-@router.post("/flows/{name}/trigger")
-async def trigger_flow(
-    name: str,
-    target_date: Optional[str] = Query(None, description="Target date YYYYMMDD (override date offset)"),
-):
-    """Trigger a flow manually (returns flow_run_id)"""
-    try:
-        scheduler = get_scheduler()
-        flow_run_id = await scheduler.trigger_flow_manual(name, target_date)
-
-        if not flow_run_id:
-            raise HTTPException(status_code=404, detail=f"Flow '{name}' not found")
-
-        return {
-            "status": "success",
-            "message": f"Flow '{name}' triggered",
-            "flow_run_id": flow_run_id,
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to trigger flow {name}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to trigger flow")
-
 @router.post("/flows/{name}/backfill")
 async def backfill_flow(name: str, body: BackfillRequest, background_tasks: BackgroundTasks):
     """回溯模式：按交易日串行触发多个 FlowRun（后台执行）"""
@@ -151,7 +127,7 @@ async def get_flow_run_detail(name: str, flow_run_id: str):
         task_rows = await DatabasePool.fetch("""
             SELECT run_id, task_id, task_type, status,
                    started_at, finished_at, elapsed_sec,
-                   rows, params, extra, error
+                   rows, params, extra, error_message
             FROM task_runs
             WHERE flow_run_id = $1 AND run_id IS NOT NULL
             ORDER BY COALESCE(started_at, created_at)
@@ -173,7 +149,7 @@ async def get_flow_run_detail(name: str, flow_run_id: str):
                 "rows": r["rows"],
                 "params": r["params"],
                 "extra": r["extra"],
-                "error": r["error"],
+                "error": r["error_message"],
             })
 
         duration_sec = None

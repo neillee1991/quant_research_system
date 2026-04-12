@@ -230,7 +230,7 @@ export const createEtlTaskConfig = (
     updateTask: dataApi.updateEtlTask,
     deleteTask: dataApi.deleteEtlTask,
     runTask: (taskId, params) =>
-      dataApi.backfillEtlTask(taskId, params?.startDate || '', params?.endDate || ''),
+      dataApi.runEtlTask(taskId, params?.startDate, params?.endDate),
   },
 
   columns: [

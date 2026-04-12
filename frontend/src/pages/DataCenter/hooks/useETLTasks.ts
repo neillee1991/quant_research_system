@@ -119,12 +119,8 @@ export const useETLTasks = () => {
 
     setRunningEtlTasks((prev) => new Set(prev).add(taskId));
     try {
-      // 全量任务不传日期参数
-      if (isFullTask) {
-        await dataApi.backfillEtlTask(taskId, '', '');
-      } else {
-        await dataApi.backfillEtlTask(taskId, startDate, endDate);
-      }
+      // 全量任务不传日期参数，增量任务传日期范围
+      await dataApi.runEtlTask(taskId, isFullTask ? undefined : startDate, isFullTask ? undefined : endDate);
       notify.success(`任务 ${taskId} 回溯已启动`);
       setTimeout(() => {
         loadEtlLogs();
@@ -167,10 +163,10 @@ export const useETLTasks = () => {
 
     notify.info(`开始回溯 ${taskIds.length} 个任务`);
 
-    // 先执行全量任务（只执行一次，不传日期参数）
+    // 先执行全量任务（不传日期参数）
     for (const taskId of fullIds) {
       try {
-        await dataApi.backfillEtlTask(taskId, '', '');
+        await dataApi.runEtlTask(taskId);
         notify.success(`全量任务 ${taskId} 回溯成功`);
       } catch (error: any) {
         notify.error(`任务 ${taskId} 回溯失败: ${error.response?.data?.detail || error.message}`);
@@ -180,7 +176,7 @@ export const useETLTasks = () => {
     // 再执行增量任务（按日期范围执行）
     for (const taskId of incrementalIds) {
       try {
-        await dataApi.backfillEtlTask(taskId, startDate, endDate);
+        await dataApi.runEtlTask(taskId, startDate, endDate);
         notify.success(`增量任务 ${taskId} 回溯成功`);
       } catch (error: any) {
         notify.error(`任务 ${taskId} 回溯失败: ${error.response?.data?.detail || error.message}`);

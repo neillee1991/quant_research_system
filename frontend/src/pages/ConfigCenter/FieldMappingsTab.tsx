@@ -1,15 +1,15 @@
 /**
- * 数据配置面板
+ * 数据字段映射配置 Tab
+ * 从 FactorCenter/DataConfigPanel.tsx 迁移
  */
-
 import React from 'react';
 import {
-  Card, Button, Spin, Empty, Select, Tag,
+  Button, Spin, Empty, Select, Tag,
 } from 'antd';
 import { ReloadOutlined, SaveOutlined } from '@ant-design/icons';
 import { useDataConfig } from './hooks/useDataConfig';
 
-const DataConfigPanel: React.FC = () => {
+const FieldMappingsTab: React.FC = () => {
   const {
     mappings,
     loading,
@@ -24,7 +24,7 @@ const DataConfigPanel: React.FC = () => {
   } = useDataConfig();
 
   return (
-    <Card style={{ background: 'var(--bg-card)' }}>
+    <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <div>
           <span style={{ color: 'var(--color-primary)', fontWeight: 600, fontSize: 15 }}>数据字段映射</span>
@@ -37,7 +37,6 @@ const DataConfigPanel: React.FC = () => {
             刷新
           </Button>
           <Button
-           
             type="primary"
             icon={<SaveOutlined />}
             disabled={!changed}
@@ -88,7 +87,6 @@ const DataConfigPanel: React.FC = () => {
                       {Object.entries(enumValues).map(([k, v]) => (
                         <Tag
                           key={k}
-                         
                           style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px' }}
                           color={k === '0' ? 'green' : k === '1' ? 'red' : k === '-1' ? 'blue' : 'grey'}
                         >
@@ -122,7 +120,6 @@ const DataConfigPanel: React.FC = () => {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span style={{ color: 'var(--text-muted)', fontSize: 11, flexShrink: 0 }}>数据表</span>
                   <Select
-                   
                     style={{ width: 240 }}
                     placeholder="选择数据表"
                     allowClear
@@ -136,7 +133,6 @@ const DataConfigPanel: React.FC = () => {
                   />
                   <span style={{ color: 'var(--text-muted)', fontSize: 11, flexShrink: 0 }}>列</span>
                   <Select
-                   
                     style={{ width: 200 }}
                     placeholder="选择列"
                     allowClear
@@ -156,8 +152,8 @@ const DataConfigPanel: React.FC = () => {
         </div>
         {mappings.length === 0 && !loading && <Empty description="暂无配置数据" />}
       </Spin>
-    </Card>
+    </div>
   );
 };
 
-export default DataConfigPanel;
+export default FieldMappingsTab;

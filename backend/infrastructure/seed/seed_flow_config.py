@@ -5,7 +5,7 @@ Seed data for flow_configs table
 DEFAULT_FLOWS = [
     {
         "name": "daily_data_sync",
-        "description": "每日数据同步流水线: 同步行情 → 计算因子",
+        "description": "每日数据同步流水线: 同步行情 → ETL宽表 → 计算因子",
         "cron": "0 18 * * 1-5",
         "tags": ["data-sync", "daily"],
         "enabled": True,
@@ -14,6 +14,9 @@ DEFAULT_FLOWS = [
             {"id": "sync_daily", "type": "sync", "depends_on": []},
             {"id": "sync_daily_basic", "type": "sync", "depends_on": []},
             {"id": "sync_adj_factor", "type": "sync", "depends_on": []},
+            {"id": "etl_index_member", "type": "etl", "depends_on": []},
+            {"id": "etl_index_member_daily", "type": "etl", "depends_on": ["sync_daily", "etl_index_member"]},
+            {"id": "etl_stock_daily_info", "type": "etl", "depends_on": ["sync_daily_basic", "etl_index_member_daily"]},
             {"id": "factor_ma_20", "type": "factor", "depends_on": ["sync_daily"]},
             {"id": "factor_pe_rank", "type": "factor", "depends_on": ["sync_daily_basic"]},
         ],

@@ -54,8 +54,8 @@ const SchedulerCenter: React.FC = () => {
     try {
       const res = await flowApi.getRunDetail(record.flow_name, key);
       setRunDetails(prev => ({ ...prev, [key]: res.data }));
-    } catch {
-      // 展开失败静默处理
+    } catch (e) {
+      console.error('展开执行详情失败:', e);
     } finally {
       setExpandLoading(prev => ({ ...prev, [key]: false }));
     }

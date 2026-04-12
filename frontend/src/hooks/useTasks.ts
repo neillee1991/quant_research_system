@@ -6,6 +6,7 @@ import { useState, useCallback, useMemo } from 'react';
 import { notify } from '../utils/notify';
 import type { TaskTypeConfig, GenericTaskStatus } from '../config/taskTypes';
 import { useTaskLogs } from './useTaskLogs';
+import { useTaskMonitorStore } from '../store';
 
 export interface UseTasksOptions<TTask, TStatus extends GenericTaskStatus, TRunParams extends Record<string, unknown> = Record<string, unknown>> {
   config: TaskTypeConfig<TTask, TStatus, TRunParams>;
@@ -43,9 +44,22 @@ export function useTasks<TTask, TStatus extends GenericTaskStatus, TRunParams ex
 }: UseTasksOptions<TTask, TStatus, TRunParams>): UseTasksResult<TTask, TStatus, TRunParams> {
   const [tasks, setTasks] = useState<TTask[]>([]);
   const [taskStatuses, setTaskStatuses] = useState<Record<string, TStatus>>({});
-  const [runningTasks, setRunningTasks] = useState<Set<string>>(new Set());
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+
+  // 使用 TaskMonitorStore 的 runningTasks，保持同步
+  const monitorRunningTasks = useTaskMonitorStore((state) => state.runningTasks);
+
+  // 将 monitorRunningTasks 转换为 Set<string>，只包含当前任务类型的任务
+  const runningTasks = useMemo(() => {
+    const taskIds = new Set<string>();
+    monitorRunningTasks.forEach((task) => {
+      if (task.task_type === config.type) {
+        taskIds.add(task.task_id);
+      }
+    });
+    return taskIds;
+  }, [monitorRunningTasks, config.type]);
 
   const { logs, loading: logsLoading, loadLogs } = useTaskLogs(config.type);
 
@@ -98,10 +112,11 @@ export function useTasks<TTask, TStatus extends GenericTaskStatus, TRunParams ex
 
   // 运行单个任务
   const runTask = useCallback(async (taskId: string, params?: TRunParams): Promise<boolean> => {
-    setRunningTasks((prev) => new Set(prev).add(taskId));
     try {
       await config.api.runTask(taskId, params);
       notify.success(`${config.label} ${taskId} 已启动`);
+      // TaskMonitor 会通过轮询 /tasks/running 来更新状态
+      // 这里只在2秒后刷新任务状态和日志
       setTimeout(() => {
         loadLogs();
         loadTaskStatus(taskId);
@@ -110,12 +125,6 @@ export function useTasks<TTask, TStatus extends GenericTaskStatus, TRunParams ex
     } catch (error: any) {
       notify.error(`${config.label} ${taskId} 启动失败: ${error.response?.data?.detail || error.message}`);
       return false;
-    } finally {
-      setRunningTasks((prev) => {
-        const newSet = new Set(prev);
-        newSet.delete(taskId);
-        return newSet;
-      });
     }
   }, [config, loadLogs, loadTaskStatus]);
 
@@ -140,10 +149,6 @@ export function useTasks<TTask, TStatus extends GenericTaskStatus, TRunParams ex
       // 例如：同步任务需要日期范围，ETL 任务也需要日期范围
     }
 
-    taskIds.forEach((taskId) => {
-      setRunningTasks((prev) => new Set(prev).add(taskId));
-    });
-
     notify.info(`开始执行 ${taskIds.length} 个 ${config.label}`);
 
     // 执行全量任务
@@ -166,13 +171,10 @@ export function useTasks<TTask, TStatus extends GenericTaskStatus, TRunParams ex
       }
     }
 
+    // TaskMonitor 会通过轮询 /tasks/running 来更新状态
+    // 这里只在2秒后刷新任务状态和日志
     setTimeout(() => {
       taskIds.forEach((taskId) => {
-        setRunningTasks((prev) => {
-          const newSet = new Set(prev);
-          newSet.delete(taskId);
-          return newSet;
-        });
         loadTaskStatus(taskId);
       });
       loadLogs();

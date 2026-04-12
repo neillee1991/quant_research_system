@@ -143,12 +143,25 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
     setTestResult(null);
     try {
       const res = await dataApi.testEtlScript(config.script, testDate || undefined);
-      const data = res.data;
+      const data = res.data?.data ?? res.data;
+
+      const POLARS_TO_DDB: Record<string, string> = {
+        'Int8': 'SHORT', 'Int16': 'SHORT', 'Int32': 'INT', 'Int64': 'LONG',
+        'UInt8': 'SHORT', 'UInt16': 'INT', 'UInt32': 'LONG', 'UInt64': 'LONG',
+        'Float32': 'FLOAT', 'Float64': 'DOUBLE',
+        'Boolean': 'BOOL', 'Bool': 'BOOL',
+        'Utf8': 'STRING', 'String': 'STRING', 'Categorical': 'SYMBOL',
+        'Date': 'DATE', 'Datetime': 'TIMESTAMP', 'Time': 'TIME',
+      };
+      const toDdbType = (t: string) => POLARS_TO_DDB[t] ?? t.toUpperCase();
+
       let newFields: FieldType[] = [];
       if (data.field_types && data.field_types.length > 0) {
-        newFields = data.field_types;
+        newFields = data.field_types.map((f: any) => ({ ...f, type: toDdbType(f.type) }));
       } else if (data.columns && data.columns.length > 0) {
-        newFields = data.columns.map((col: string) => ({ name: col, type: 'STRING' }));
+        newFields = data.columns.map((col: any) =>
+          typeof col === 'string' ? { name: col, type: 'STRING' } : { ...col, type: toDdbType(col.type) }
+        );
       }
       setTestFields(newFields);
       if (tableExists && currentFields.length > 0) {
@@ -156,8 +169,9 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
       } else {
         setFieldDiffs([]);
       }
-      setTestResult({ status: 'success', rows: data.rows || 0, preview: data.preview || [] });
-      notify.success(`测试通过: ${data.rows || 0} 行`);
+      const rowCount = data.row_count ?? data.rows ?? 0;
+      setTestResult({ status: 'success', rows: rowCount, preview: data.sample_data ?? data.preview ?? [] });
+      notify.success(`测试通过: ${rowCount} 行`);
     } catch (error: any) {
       const errorMsg = error.response?.data?.detail || '脚本测试失败';
       setTestResult({ status: 'error', error: errorMsg });
@@ -202,44 +216,10 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
         onSave();
         onClose();
       } else {
-        const response = await dataApi.updateEtlTask(config.task_id, saveConfig);
-        const result = response.data;
-        if (result.status === 'warning' && result.require_confirmation) {
-          Modal.confirm({
-            title: '表结构已变更',
-            content: (
-              <div>
-                <p>{result.message}</p>
-                {result.changes && (
-                  <div style={{ marginTop: 12 }}>
-                    <p><strong>变更详情：</strong></p>
-                    {result.changes.script_changed && <p>• ETL 脚本已修改</p>}
-                    {result.changes.primary_keys_changed && <p>• 主键配置已修改</p>}
-                    {result.changes.old_columns && result.changes.new_columns && (
-                      <>
-                        <p>• 旧字段: {result.changes.old_columns.join(', ')}</p>
-                        <p>• 新字段: {result.changes.new_columns.join(', ')}</p>
-                        {result.changes.removed?.length > 0 && <p style={{ color: 'red' }}>• 删除字段: {result.changes.removed.join(', ')}</p>}
-                        {result.changes.added?.length > 0 && <p style={{ color: 'green' }}>• 新增字段: {result.changes.added.join(', ')}</p>}
-                      </>
-                    )}
-                    <p style={{ marginTop: 12, color: 'orange' }}>
-                      <strong>警告：</strong>确认后将删除表 {result.table_name} 的所有历史数据！
-                    </p>
-                  </div>
-                )}
-              </div>
-            ),
-            okText: '确认并清空数据',
-            cancelText: '取消',
-            okButtonProps: { danger: true },
-            onOk: () => handleSave(true),
-          });
-        } else if (result.status === 'success') {
-          notify.success(`ETL 任务 ${config.task_id} 更新成功`);
-          onSave();
-          onClose();
-        }
+        await dataApi.updateEtlTask(config.task_id, saveConfig);
+        notify.success(`ETL 任务 ${config.task_id} 更新成功`);
+        onSave();
+        onClose();
       }
     } catch (error: any) {
       notify.error(error.response?.data?.detail || '保存配置失败');

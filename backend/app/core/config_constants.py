@@ -8,20 +8,18 @@ from app.models.config_import_export import ConfigType
 CONFIG_TYPE_TABLE_MAP: Dict[ConfigType, str] = {
     ConfigType.SYNC_TASKS: "sync_task_configs",
     ConfigType.ETL_TASKS: "etl_task_configs",
-    ConfigType.FACTOR_METADATA: "factor_configs",        # 旧值映射到新表
     ConfigType.FACTOR_CONFIGS: "factor_configs",
-    ConfigType.FACTOR_DATA_CONFIG: "factor_field_mappings",  # 旧值映射到新表
     ConfigType.FACTOR_FIELD_MAPPINGS: "factor_field_mappings",
+    ConfigType.FLOW_CONFIGS: "flow_configs",
 }
 
 # 配置类型到ID字段的映射
 CONFIG_TYPE_ID_FIELD_MAP: Dict[ConfigType, str] = {
     ConfigType.SYNC_TASKS: "task_id",
     ConfigType.ETL_TASKS: "task_id",
-    ConfigType.FACTOR_METADATA: "factor_id",
     ConfigType.FACTOR_CONFIGS: "factor_id",
-    ConfigType.FACTOR_DATA_CONFIG: "field_key",
     ConfigType.FACTOR_FIELD_MAPPINGS: "field_key",
+    ConfigType.FLOW_CONFIGS: "name",
 }
 
 # 允许的表名白名单

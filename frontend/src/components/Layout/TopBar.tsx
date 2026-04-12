@@ -1,10 +1,9 @@
-import React, { useState } from 'react';
-import { Breadcrumb, Button, Tooltip, Space, Drawer } from 'antd';
+import React from 'react';
+import { Breadcrumb, Button, Tooltip, Space } from 'antd';
 import { SunOutlined, MoonOutlined, SettingOutlined } from '@ant-design/icons';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useThemeStore } from '../../store';
 import TaskMonitor from './TaskMonitor';
-import ConfigManagement from '../../pages/ConfigManagement';
 
 const routeNameMap: Record<string, string> = {
   '/': '数据中心',
@@ -17,8 +16,8 @@ const routeNameMap: Record<string, string> = {
 
 const TopBar: React.FC = () => {
   const location = useLocation();
+  const navigate = useNavigate();
   const { mode, toggle } = useThemeStore();
-  const [configOpen, setConfigOpen] = useState(false);
 
   const currentName = () => {
     const path = location.pathname;
@@ -49,11 +48,11 @@ const TopBar: React.FC = () => {
       />
       <Space size="small">
         <TaskMonitor />
-        <Tooltip title="配置管理">
+        <Tooltip title="配置中心">
           <Button
             type="text"
             icon={<SettingOutlined />}
-            onClick={() => setConfigOpen(true)}
+            onClick={() => navigate('/config')}
             style={{ color: 'var(--text-primary)' }}
           />
         </Tooltip>
@@ -66,15 +65,6 @@ const TopBar: React.FC = () => {
           />
         </Tooltip>
       </Space>
-      <Drawer
-        title="配置管理"
-        open={configOpen}
-        onClose={() => setConfigOpen(false)}
-        width={900}
-        destroyOnClose
-      >
-        <ConfigManagement />
-      </Drawer>
     </div>
   );
 };

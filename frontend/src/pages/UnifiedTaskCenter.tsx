@@ -19,8 +19,8 @@ import {
   BatchSyncModal,
   ETLBackfillModal,
   DeleteConfirmModal,
-  IndexSubscribeDrawer,
 } from './DataCenter/index.components';
+import QuickSubscribeModal from './DataCenter/QuickSubscribeModal';
 
 const UnifiedTaskCenter: React.FC = () => {
   // ========== 模态框状态 ==========
@@ -343,12 +343,10 @@ const UnifiedTaskCenter: React.FC = () => {
         onSave={handleSaveEtlTask}
       />
 
-      <IndexSubscribeDrawer
+      <QuickSubscribeModal
         visible={indexSubscribeDrawerVisible}
         onClose={() => setIndexSubscribeDrawerVisible(false)}
-        onSubscribeSuccess={handleIndexSubscribeSuccess}
-        onUnsubscribeSuccess={handleIndexSubscribeSuccess}
-        onSubscribe={() => {}}
+        onSuccess={handleIndexSubscribeSuccess}
       />
     </div>
   );

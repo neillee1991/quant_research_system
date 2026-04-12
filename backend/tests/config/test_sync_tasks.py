@@ -30,16 +30,6 @@ def test_sync_index_basic_task_exists():
     assert "sync_index_basic" in task_ids, "sync_index_basic 任务应该存在"
 
 
-def test_sync_index_weight_template_task_exists():
-    """测试 sync_index_weight_template 任务存在"""
-    config_path = Path(__file__).parent.parent.parent / "config/seed_data/sync_tasks.json"
-    with open(config_path, "r", encoding="utf-8") as f:
-        tasks = json.load(f)
-
-    task_ids = [t["task_id"] for t in tasks]
-    assert "sync_index_weight_template" in task_ids, "sync_index_weight_template 任务应该存在"
-
-
 def test_task_structure():
     """测试任务配置有正确的结构"""
     config_path = Path(__file__).parent.parent.parent / "config/seed_data/sync_tasks.json"
@@ -73,14 +63,3 @@ def test_index_basic_task_has_correct_schema():
     for field in expected_fields:
         assert field in schema, f"schema 缺少字段: {field}"
 
-
-def test_index_weight_template_has_is_template_flag():
-    """测试 sync_index_weight_template 有 _is_template 标记"""
-    config_path = Path(__file__).parent.parent.parent / "config/seed_data/sync_tasks.json"
-    with open(config_path, "r", encoding="utf-8") as f:
-        tasks = json.load(f)
-
-    weight_template_task = next((t for t in tasks if t["task_id"] == "sync_index_weight_template"), None)
-    assert weight_template_task is not None, "找不到 sync_index_weight_template 任务"
-
-    assert weight_template_task.get("_is_template") is True, "模板任务应该有 _is_template: true"

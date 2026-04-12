@@ -31,7 +31,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - ${POSTGRES_DATA_DIR:-./data/postgres}:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
     environment:
       POSTGRES_DB: quantsystem
       POSTGRES_USER: quant
@@ -50,4 +50,7 @@ services:
 networks:
   quant_network:
     driver: bridge
+
+volumes:
+  postgres_data:
 

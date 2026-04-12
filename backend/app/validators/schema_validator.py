@@ -28,7 +28,7 @@ class SchemaValidator:
         "TIME",
     }
 
-    REQUIRED_FIELD_KEYS = {"type", "nullable", "comment"}
+    REQUIRED_FIELD_KEYS = {"type"}
 
     @classmethod
     def validate_schema(

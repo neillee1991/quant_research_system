@@ -10,7 +10,7 @@ import type {
   ImportVerifyResponse,
   ImportApplyRequest,
   ImportApplyResponse,
-} from '../pages/ConfigManagement/types';
+} from '../pages/ConfigCenter/types';
 
 // 因子计算预处理选项
 export interface PreprocessOptions {
@@ -46,7 +46,7 @@ export const dataApi = {
     api.get('/data/daily', { params: { ts_code: tsCode, start_date: startDate, end_date: endDate, limit } }),
 
   // 同步任务管理
-  listSyncTasks: () => api.get('/tasks/sync').then(res => ({
+  listSyncTasks: () => api.get('/tasks/sync', { params: { enabled_only: true } }).then(res => ({
     data: {
       tasks: res.data.tasks,
       total: res.data.total
@@ -63,6 +63,7 @@ export const dataApi = {
     }
   })),
   getSyncTaskStatus: (taskId: string) => api.get(`/tasks/sync/${taskId}/status`),
+  getTaskRunStatus: (taskType: string, runId: string) => api.get(`/tasks/${taskType}/status/${runId}`),
   createSyncTask: (config: any) => api.post('/tasks/sync', { config_data: config }).then(res => ({
     data: res.data.task
   })),
@@ -72,7 +73,7 @@ export const dataApi = {
   deleteTask: (taskId: string, dropTable?: boolean) => api.delete(`/tasks/sync/${taskId}`, { params: { drop_table: dropTable } }),
 
   // ETL 任务管理
-  listEtlTasks: () => api.get('/tasks/etl').then(res => ({
+  listEtlTasks: () => api.get('/tasks/etl', { params: { enabled_only: true } }).then(res => ({
     data: {
       tasks: res.data.tasks,
       total: res.data.total
@@ -81,28 +82,22 @@ export const dataApi = {
   createEtlTask: (config: any) => api.post('/tasks/etl', { config_data: config }).then(res => ({
     data: res.data.task
   })),
-  updateEtlTask: (taskId: string, config: any) => api.put(`/tasks/etl/${taskId}`, { config_data: config }).then(res => ({
-    data: res.data.task
-  })),
+  updateEtlTask: (taskId: string, config: any) => api.put(`/tasks/etl/${taskId}`, { config_data: config }),
   deleteEtlTask: (taskId: string, dropTable?: boolean) => api.delete(`/tasks/etl/${taskId}`, { params: { drop_table: dropTable } }),
   getEtlTaskStatus: (taskId: string) => api.get(`/tasks/etl/${taskId}/status`),
   getEtlTableSchema: (taskId: string) => api.get(`/tasks/etl/${taskId}/schema`),
   runEtlTask: (taskId: string, startDate?: string, endDate?: string) =>
-    longRunningApi.post(`/tasks/etl/${taskId}/execute`, { start_date: startDate, end_date: endDate }),
-  testEtlScript: (script: string, date?: string) => api.post('/tasks/etl/test', { script, date }),
-  backfillEtlTask: (taskId: string, startDate: string, endDate: string) =>
-    longRunningApi.post(`/tasks/etl/${taskId}/backfill`, null, {
-      params: { start_date: startDate, end_date: endDate }
+    longRunningApi.post(`/tasks/etl/${taskId}/execute`, {
+      start_date: startDate || null,
+      end_date: endDate || null,
     }),
+  testEtlScript: (script: string, date?: string) => api.post('/tasks/etl/test', { script, date }),
   createEtlTable: (taskId: string, tableName: string, fields: any[]) =>
     api.post(`/tasks/etl/${taskId}/create-table`, { table_name: tableName, fields }),
 
   // 数据库管理
   listTables: () => api.get('/data/tables'),
   getTableInfo: (tableName: string) => api.get(`/data/tables/${tableName}/info`),
-  truncateTable: (tableName: string) => api.delete(`/data/tables/${tableName}`),
-  executeQuery: (sql: string, limit = 1000) =>
-    api.post('/data/query', null, { params: { sql, limit } }),
 };
 
 export const strategyApi = {
@@ -146,9 +141,7 @@ export const productionApi = {
   updateFactorCode: (factorId: string, filename: string, code: string) =>
     api.put(`/factor/factors/${factorId}/code`, { filename, code }),
 
-  // DataFrame schema 预览
-  getDataFrameSchema: (dependsOn: string[]) =>
-    api.post('/factor/dataframe-schema', { depends_on: dependsOn }),
+  // DataFrame schema 预览 — 已删除（无 UI 入口）
 
   // 因子代码测试
   testFactorCode: (data: { code: string; start_date: string; end_date: string; depends_on?: string[]; params?: Record<string, any>; preprocess?: PreprocessOptions; lookback_days?: number }) =>
@@ -160,17 +153,13 @@ export const productionApi = {
   getFactorStats: (factorId: string) => api.get(`/factor/factors/${factorId}/stats`),
 
   // 数据配置
-  getDataConfig: () => api.get('/factor/data-config'),
-  updateDataConfig: (mappings: DataFieldMapping[]) => api.put('/factor/data-config', { mappings }),
-  getResolvedDataConfig: () => api.get('/factor/data-config/resolved'),
-  getAvailableTables: () => api.get('/factor/available-tables'),
+  getDataConfig: () => api.get('/config/field-mappings'),
+  updateDataConfig: (mappings: DataFieldMapping[]) => api.put('/config/field-mappings', { mappings }),
+  getResolvedDataConfig: () => api.get('/config/field-mappings/resolved'),
+  getAvailableTables: () => api.get('/config/available-tables'),
 
-  // 指数股票池管理
-  listIndexPools: () => api.get('/factor/index-pool/list'),
-  batchUploadIndexPool: (data: { index_code: string; index_name?: string; description?: string; data: any[] }) =>
-    api.post('/factor/index-pool/batch-upload', data),
-  csvUploadIndexPool: (data: { index_code: string; index_name?: string; description?: string; csv_content: string }) =>
-    api.post('/factor/index-pool/csv-upload', data),
+  // 指数股票池管理（仅列表，上传功能已移除）
+  listIndexPools: () => api.get('/config/index-pool/list'),
 
   // Alphalens 分析 API
   runAlphalensAnalysis: (data: {
@@ -209,7 +198,7 @@ export const indexApi = {
     show_subscribed_only?: boolean;
   }) => {
     const { filters, ...rest } = params || {};
-    return api.get('/data/index/available', {
+    return api.get('/config/index/available', {
       params: {
         ...rest,
         filters: filters ? JSON.stringify(filters) : undefined,
@@ -219,19 +208,19 @@ export const indexApi = {
 
   // 订阅指数
   subscribeIndex: (data: { index_code: string }) =>
-    api.post('/data/index/subscribe', data),
+    api.post('/config/index/subscribe', data),
 
   // 取消订阅指数
   unsubscribeIndex: (indexCode: string) =>
-    api.delete(`/data/index/subscribe/${indexCode}`),
+    api.delete(`/config/index/subscribe/${indexCode}`),
 
   // 获取用户偏好配置
   getUserPreference: () =>
-    api.get('/data/index/preference'),
+    api.get('/config/index/preference'),
 
   // 保存用户偏好配置
   saveUserPreference: (data: { index_basic_table: string; filter_config?: Array<{ field: string; label: string; enabled: boolean; default_value: string | null }> }) =>
-    api.post('/data/index/preference', data),
+    api.post('/config/index/preference', data),
 };
 
 // Flow 配置管理
@@ -324,8 +313,6 @@ export const flowApi = {
   create: (config: FlowConfig) => api.post<FlowConfig>('/flows', config),
   update: (name: string, config: Partial<FlowConfig>) => api.put<FlowConfig>(`/flows/${name}`, config),
   delete: (name: string, hard = false) => api.delete(`/flows/${name}`, { params: { hard } }),
-  trigger: (name: string, targetDate?: string) =>
-    api.post<{ status: string; flow_run_id: string }>(`/flows/${name}/trigger`, null, { params: { target_date: targetDate } }),
   backfill: (name: string, startDate: string, endDate: string) =>
     api.post(`/flows/${name}/backfill`, { start_date: startDate, end_date: endDate }),
   listRuns: (name: string, limit = 50) =>

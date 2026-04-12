@@ -1,0 +1,388 @@
+{
+  "version": "1.0",
+  "exported_at": "2026-04-11 19:04:44.450289",
+  "system_version": "1.0.0",
+  "configs": {
+    "sync_tasks": [
+      {
+        "task_id": "sync_stock_basic",
+        "api_name": "stock_basic",
+        "description": "股票基础信息（代码、名称、行业、上市日期等）",
+        "sync_type": "full",
+        "params_json": "{\"exchange\": \"\", \"list_status\": \"\", \"fields\": \"ts_code,symbol,name,area,industry,market,list_date\"}",
+        "date_field": "",
+        "primary_keys_json": "[\"ts_code\"]",
+        "table_name": "sync_stock_basic",
+        "schema_json": "{\"ts_code\": {\"type\": \"SYMBOL\"}, \"symbol\": {\"type\": \"STRING\"}, \"name\": {\"type\": \"STRING\"}, \"area\": {\"type\": \"STRING\"}, \"industry\": {\"type\": \"STRING\"}, \"market\": {\"type\": \"STRING\"}, \"list_date\": {\"type\": \"STRING\"}}",
+        "enabled": true,
+        "api_limit": 5000
+      },
+      {
+        "task_id": "sync_trade_cal",
+        "api_name": "trade_cal",
+        "description": "交易日历（A股交易日、休市日）",
+        "sync_type": "full",
+        "params_json": "{\"exchange\": \"SSE\", \"start_date\": \"20100101\", \"end_date\": \"20301231\", \"fields\": \"exchange,cal_date,is_open,pretrade_date\"}",
+        "date_field": "cal_date",
+        "primary_keys_json": "[\"exchange\", \"cal_date\"]",
+        "table_name": "sync_trade_cal",
+        "schema_json": "{\"exchange\": {\"type\": \"SYMBOL\"}, \"cal_date\": {\"type\": \"DATE\"}, \"is_open\": {\"type\": \"INT\"}, \"pretrade_date\": {\"type\": \"DATE\"}}",
+        "enabled": true,
+        "api_limit": 10000
+      },
+      {
+        "task_id": "sync_daily_data",
+        "api_name": "daily",
+        "description": "日线行情（开高低收、成交量、成交额）",
+        "sync_type": "incremental",
+        "params_json": "{\"trade_date\": \"{date}\", \"fields\": \"ts_code,trade_date,open,high,low,close,pre_close,change,pct_chg,vol,amount\"}",
+        "date_field": "trade_date",
+        "primary_keys_json": "[\"ts_code\", \"trade_date\"]",
+        "table_name": "sync_daily_data",
+        "schema_json": "{\"ts_code\": {\"type\": \"SYMBOL\"}, \"trade_date\": {\"type\": \"DATE\"}, \"open\": {\"type\": \"DOUBLE\"}, \"high\": {\"type\": \"DOUBLE\"}, \"low\": {\"type\": \"DOUBLE\"}, \"close\": {\"type\": \"DOUBLE\"}, \"pre_close\": {\"type\": \"DOUBLE\"}, \"change\": {\"type\": \"DOUBLE\"}, \"pct_chg\": {\"type\": \"DOUBLE\"}, \"vol\": {\"type\": \"DOUBLE\"}, \"amount\": {\"type\": \"DOUBLE\"}}",
+        "enabled": true,
+        "api_limit": 5000
+      },
+      {
+        "task_id": "sync_adj_factor",
+        "api_name": "adj_factor",
+        "description": "复权因子（用于前复权、后复权计算）",
+        "sync_type": "incremental",
+        "params_json": "{\"trade_date\": \"{date}\", \"fields\": \"ts_code,trade_date,adj_factor\"}",
+        "date_field": "trade_date",
+        "primary_keys_json": "[\"ts_code\", \"trade_date\"]",
+        "table_name": "sync_adj_factor",
+        "schema_json": "{\"ts_code\": {\"type\": \"SYMBOL\"}, \"trade_date\": {\"type\": \"DATE\"}, \"adj_factor\": {\"type\": \"DOUBLE\"}}",
+        "enabled": true,
+        "api_limit": 5000
+      },
+      {
+        "task_id": "sync_daily_basic",
+        "api_name": "daily_basic",
+        "description": "每日指标（换手率、量比、市盈率、市净率、市值等）",
+        "sync_type": "incremental",
+        "params_json": "{\"trade_date\": \"{date}\", \"fields\": \"ts_code,trade_date,close,turnover_rate,turnover_rate_f,volume_ratio,pe,pe_ttm,pb,ps,ps_ttm,dv_ratio,dv_ttm,total_share,float_share,free_share,total_mv,circ_mv\"}",
+        "date_field": "trade_date",
+        "primary_keys_json": "[\"ts_code\", \"trade_date\"]",
+        "table_name": "sync_daily_basic",
+        "schema_json": "{\"ts_code\": {\"type\": \"SYMBOL\"}, \"trade_date\": {\"type\": \"DATE\"}, \"close\": {\"type\": \"DOUBLE\"}, \"turnover_rate\": {\"type\": \"DOUBLE\"}, \"turnover_rate_f\": {\"type\": \"DOUBLE\"}, \"volume_ratio\": {\"type\": \"DOUBLE\"}, \"pe\": {\"type\": \"DOUBLE\"}, \"pe_ttm\": {\"type\": \"DOUBLE\"}, \"pb\": {\"type\": \"DOUBLE\"}, \"ps\": {\"type\": \"DOUBLE\"}, \"ps_ttm\": {\"type\": \"DOUBLE\"}, \"dv_ratio\": {\"type\": \"DOUBLE\"}, \"dv_ttm\": {\"type\": \"DOUBLE\"}, \"total_share\": {\"type\": \"DOUBLE\"}, \"float_share\": {\"type\": \"DOUBLE\"}, \"free_share\": {\"type\": \"DOUBLE\"}, \"total_mv\": {\"type\": \"DOUBLE\"}, \"circ_mv\": {\"type\": \"DOUBLE\"}}",
+        "enabled": true,
+        "api_limit": 6000
+      },
+      {
+        "task_id": "sync_stk_limit",
+        "api_name": "stk_limit",
+        "description": "每日涨跌停价格（涨停价、跌停价、昨日收盘价）",
+        "sync_type": "incremental",
+        "params_json": "{\"trade_date\": \"{date}\", \"fields\": \"ts_code,trade_date,pre_close,up_limit,down_limit\"}",
+        "date_field": "trade_date",
+        "primary_keys_json": "[\"ts_code\", \"trade_date\"]",
+        "table_name": "sync_stk_limit",
+        "schema_json": "{\"ts_code\": {\"type\": \"SYMBOL\"}, \"trade_date\": {\"type\": \"DATE\"}, \"pre_close\": {\"type\": \"DOUBLE\"}, \"up_limit\": {\"type\": \"DOUBLE\"}, \"down_limit\": {\"type\": \"DOUBLE\"}}",
+        "enabled": true,
+        "api_limit": 5000
+      },
+      {
+        "task_id": "sync_stock_st",
+        "api_name": "stock_st",
+        "description": "ST股票列表（每日ST/退市风险警示股票）",
+        "sync_type": "incremental",
+        "params_json": "{\"trade_date\": \"{date}\", \"fields\": \"ts_code,name,trade_date,type,type_name\"}",
+        "date_field": "trade_date",
+        "primary_keys_json": "[\"ts_code\", \"trade_date\"]",
+        "table_name": "sync_stock_st",
+        "schema_json": "{\"ts_code\": {\"type\": \"SYMBOL\"}, \"name\": {\"type\": \"STRING\"}, \"trade_date\": {\"type\": \"DATE\"}, \"type\": {\"type\": \"STRING\"}, \"type_name\": {\"type\": \"STRING\"}}",
+        "enabled": true,
+        "api_limit": 1000
+      },
+      {
+        "task_id": "sync_sw_index_member_N",
+        "api_name": "index_member_all",
+        "description": "申万行业成分构成（三级分类，含纳入/剔除日期）",
+        "sync_type": "full",
+        "params_json": "{\"is_new\": \"N\", \"fields\": \"l1_code,l1_name,l2_code,l2_name,l3_code,l3_name,ts_code,name,in_date,out_date,is_new\"}",
+        "date_field": "",
+        "primary_keys_json": "[]",
+        "table_name": "sync_sw_index_member_N",
+        "schema_json": "{\"l1_code\": {\"type\": \"SYMBOL\"}, \"l1_name\": {\"type\": \"STRING\"}, \"l2_code\": {\"type\": \"SYMBOL\"}, \"l2_name\": {\"type\": \"STRING\"}, \"l3_code\": {\"type\": \"SYMBOL\"}, \"l3_name\": {\"type\": \"STRING\"}, \"ts_code\": {\"type\": \"SYMBOL\"}, \"name\": {\"type\": \"STRING\"}, \"in_date\": {\"type\": \"DATE\"}, \"out_date\": {\"type\": \"DATE\"}, \"is_new\": {\"type\": \"STRING\"}}",
+        "enabled": true,
+        "api_limit": 2000
+      },
+      {
+        "task_id": "sync_sw_index_member_Y",
+        "api_name": "index_member_all",
+        "description": "申万行业成分构成（三级分类，含纳入/剔除日期）",
+        "sync_type": "full",
+        "params_json": "{\"is_new\": \"Y\", \"fields\": \"l1_code,l1_name,l2_code,l2_name,l3_code,l3_name,ts_code,name,in_date,out_date,is_new\"}",
+        "date_field": "",
+        "primary_keys_json": "[]",
+        "table_name": "sync_sw_index_member_Y",
+        "schema_json": "{\"l1_code\": {\"type\": \"SYMBOL\"}, \"l1_name\": {\"type\": \"STRING\"}, \"l2_code\": {\"type\": \"SYMBOL\"}, \"l2_name\": {\"type\": \"STRING\"}, \"l3_code\": {\"type\": \"SYMBOL\"}, \"l3_name\": {\"type\": \"STRING\"}, \"ts_code\": {\"type\": \"SYMBOL\"}, \"name\": {\"type\": \"STRING\"}, \"in_date\": {\"type\": \"DATE\"}, \"out_date\": {\"type\": \"DATE\"}, \"is_new\": {\"type\": \"STRING\"}}",
+        "enabled": true,
+        "api_limit": 2000
+      },
+      {
+        "task_id": "sync_ci_index_member_N",
+        "api_name": "ci_index_member",
+        "description": "中信行业成分构成（三级分类，含纳入/剔除日期）",
+        "sync_type": "full",
+        "params_json": "{\"is_new\": \"N\", \"fields\": \"l1_code,l1_name,l2_code,l2_name,l3_code,l3_name,ts_code,name,in_date,out_date,is_new\"}",
+        "date_field": "",
+        "primary_keys_json": "[]",
+        "table_name": "sync_ci_index_member_N",
+        "schema_json": "{\"l1_code\": {\"type\": \"SYMBOL\"}, \"l1_name\": {\"type\": \"STRING\"}, \"l2_code\": {\"type\": \"SYMBOL\"}, \"l2_name\": {\"type\": \"STRING\"}, \"l3_code\": {\"type\": \"SYMBOL\"}, \"l3_name\": {\"type\": \"STRING\"}, \"ts_code\": {\"type\": \"SYMBOL\"}, \"name\": {\"type\": \"STRING\"}, \"in_date\": {\"type\": \"DATE\"}, \"out_date\": {\"type\": \"DATE\"}, \"is_new\": {\"type\": \"STRING\"}}",
+        "enabled": true,
+        "api_limit": 2000
+      },
+      {
+        "task_id": "sync_ci_index_member_Y",
+        "api_name": "ci_index_member",
+        "description": "中信行业成分构成（三级分类，含纳入/剔除日期）",
+        "sync_type": "full",
+        "params_json": "{\"is_new\": \"Y\", \"fields\": \"l1_code,l1_name,l2_code,l2_name,l3_code,l3_name,ts_code,name,in_date,out_date,is_new\"}",
+        "date_field": "",
+        "primary_keys_json": "[]",
+        "table_name": "sync_ci_index_member_Y",
+        "schema_json": "{\"l1_code\": {\"type\": \"SYMBOL\"}, \"l1_name\": {\"type\": \"STRING\"}, \"l2_code\": {\"type\": \"SYMBOL\"}, \"l2_name\": {\"type\": \"STRING\"}, \"l3_code\": {\"type\": \"SYMBOL\"}, \"l3_name\": {\"type\": \"STRING\"}, \"ts_code\": {\"type\": \"SYMBOL\"}, \"name\": {\"type\": \"STRING\"}, \"in_date\": {\"type\": \"DATE\"}, \"out_date\": {\"type\": \"DATE\"}, \"is_new\": {\"type\": \"STRING\"}}",
+        "enabled": true,
+        "api_limit": 2000
+      },
+      {
+        "task_id": "sync_index_basic",
+        "api_name": "index_basic",
+        "description": "指数基础信息列表",
+        "sync_type": "full",
+        "params_json": "{\"market\": \"\", \"publisher\": \"\", \"fields\": \"ts_code,name,market,publisher,list_date,weight_rule,desc,exp_date\"}",
+        "date_field": "",
+        "primary_keys_json": "[\"ts_code\"]",
+        "table_name": "sync_index_basic",
+        "schema_json": "{\"ts_code\": {\"type\": \"SYMBOL\"}, \"name\": {\"type\": \"STRING\"}, \"market\": {\"type\": \"SYMBOL\"}, \"publisher\": {\"type\": \"STRING\"}, \"list_date\": {\"type\": \"DATE\"}, \"weight_rule\": {\"type\": \"STRING\"}, \"desc\": {\"type\": \"STRING\"}, \"exp_date\": {\"type\": \"DATE\"}, \"updated_at\": {\"type\": \"TIMESTAMP\"}}",
+        "enabled": true,
+        "api_limit": 5000
+      },
+      {
+        "task_id": "sync_index_weight_template",
+        "api_name": "index_weight",
+        "description": "指数成分股权重（模板，订阅时动态生成实际任务）",
+        "sync_type": "incremental",
+        "params_json": "{\"index_code\": \"$$INDEX_CODE$$\", \"trade_date\": \"{date}\", \"fields\": \"index_code,con_code,trade_date,weight\"}",
+        "date_field": "trade_date",
+        "primary_keys_json": "[\"index_code\", \"con_code\", \"trade_date\"]",
+        "table_name": "sync_index_weight",
+        "schema_json": "{\"index_code\": {\"type\": \"SYMBOL\"}, \"con_code\": {\"type\": \"SYMBOL\"}, \"trade_date\": {\"type\": \"DATE\"}, \"weight\": {\"type\": \"DOUBLE\"}}",
+        "enabled": true,
+        "api_limit": 5000
+      },
+      {
+        "task_id": "sync_index_weight_000300SH",
+        "api_name": "index_weight",
+        "description": "指数 000300.SH 成分股权重同步",
+        "sync_type": "incremental",
+        "params_json": "{\"index_code\": \"000300.SH\", \"trade_date\": \"{date}\", \"fields\": \"index_code,con_code,trade_date,weight\"}",
+        "date_field": "trade_date",
+        "primary_keys_json": "[\"index_code\", \"con_code\", \"trade_date\"]",
+        "table_name": "sync_index_weight_000300SH",
+        "schema_json": "{\"index_code\": {\"type\": \"SYMBOL\", \"nullable\": false, \"comment\": \"\\u6307\\u6570\\u4ee3\\u7801\"}, \"con_code\": {\"type\": \"SYMBOL\", \"nullable\": false, \"comment\": \"\\u6210\\u5206\\u80a1\\u4ee3\\u7801\"}, \"trade_date\": {\"type\": \"DATE\", \"nullable\": false, \"comment\": \"\\u4ea4\\u6613\\u65e5\\u671f\"}, \"weight\": {\"type\": \"DOUBLE\", \"nullable\": true, \"comment\": \"\\u6743\\u91cd\"}}",
+        "enabled": true,
+        "api_limit": 5000
+      },
+      {
+        "task_id": "sync_index_weight_399303SZ",
+        "api_name": "index_weight",
+        "description": "指数 399303.SZ 成分股权重同步",
+        "sync_type": "incremental",
+        "params_json": "{\"index_code\": \"399303.SZ\", \"trade_date\": \"{date}\", \"fields\": \"index_code,con_code,trade_date,weight\"}",
+        "date_field": "trade_date",
+        "primary_keys_json": "[\"index_code\", \"con_code\", \"trade_date\"]",
+        "table_name": "sync_index_weight_399303SZ",
+        "schema_json": "{\"index_code\": {\"type\": \"SYMBOL\", \"nullable\": false, \"comment\": \"\\u6307\\u6570\\u4ee3\\u7801\"}, \"con_code\": {\"type\": \"SYMBOL\", \"nullable\": false, \"comment\": \"\\u6210\\u5206\\u80a1\\u4ee3\\u7801\"}, \"trade_date\": {\"type\": \"DATE\", \"nullable\": false, \"comment\": \"\\u4ea4\\u6613\\u65e5\\u671f\"}, \"weight\": {\"type\": \"DOUBLE\", \"nullable\": true, \"comment\": \"\\u6743\\u91cd\"}}",
+        "enabled": true,
+        "api_limit": 5000
+      }
+    ],
+    "etl_tasks": [
+      {
+        "task_id": "etl_stock_daily_info",
+        "description": "行情+基本面+行业宽表（每日全量刷新）",
+        "script": "daily = select trade_date, ts_code, open, high, low, close, pre_close, pct_chg, vol, amount from loadTable(\"{db_ts}\", \"sync_daily_data\"); basic = select trade_date, ts_code, pe_ttm, pb, total_mv, circ_mv, turnover_rate from loadTable(\"{db_ts}\", \"sync_daily_basic\"); ind = select trade_date, ts_code, source, l1_code, l1_name, l2_code, l2_name, l3_code, l3_name from loadTable(\"{db_meta}\", \"etl_index_member_daily\"); t1 = lj(daily, basic, `trade_date`ts_code); lj(t1, ind, `trade_date`ts_code)",
+        "sync_type": "full",
+        "date_field": "trade_date",
+        "primary_keys_json": "[\"trade_date\", \"ts_code\", \"source\"]",
+        "table_name": "etl_stock_daily_info",
+        "enabled": true,
+        "schema_json": "{}"
+      },
+      {
+        "task_id": "etl_index_member",
+        "description": "合并申万+中信行业成员表（当前有效分类）",
+        "script": "t_sw = select l1_code, l1_name, l2_code, l2_name, l3_code, l3_name, ts_code, in_date, out_date, \"sw\" as source from loadTable(\"dfs://quant\", \"sync_sw_index_member_Y\"); \nt_ci = select l1_code, l1_name, l2_code, l2_name, l3_code, l3_name, ts_code, in_date, out_date, \"ci\" as source from loadTable(\"dfs://quant\", \"sync_ci_index_member_Y\"); \nunionAll([t_sw, t_ci], false);\n",
+        "sync_type": "full",
+        "date_field": "",
+        "primary_keys_json": "[]",
+        "table_name": "etl_index_member",
+        "enabled": true,
+        "schema_json": "{\"l1_code\": {\"type\": \"STRING\"}, \"l1_name\": {\"type\": \"STRING\"}, \"l2_code\": {\"type\": \"STRING\"}, \"l2_name\": {\"type\": \"STRING\"}, \"l3_code\": {\"type\": \"STRING\"}, \"l3_name\": {\"type\": \"STRING\"}, \"ts_code\": {\"type\": \"SYMBOL\"}, \"in_date\": {\"type\": \"DATE\"}, \"out_date\": {\"type\": \"DATE\"}, \"source\": {\"type\": \"STRING\"}}"
+      },
+      {
+        "task_id": "etl_index_member_daily",
+        "description": "每只股票每个交易日所属行业（行情左关联行业成员）",
+        "script": "daily = select trade_date, ts_code \nfrom loadTable(\"dfs://quant\", \"sync_daily_data\")\nwhere trade_date={date};\n\netl = select ts_code, source, l1_code, l1_name, l2_code, l2_name, l3_code, l3_name, in_date, out_date \nfrom loadTable(\"dfs://quant\", \"etl_index_member\")\nwhere source='sw'; \n\njoined = lj(daily, etl, `ts_code); \n\nselect trade_date, ts_code, l1_name,l2_name\nfrom joined \nwhere (isNull(in_date) or trade_date >= in_date )\nand (isNull(out_date) or trade_date < out_date)",
+        "sync_type": "incremental",
+        "date_field": "trade_date",
+        "primary_keys_json": "[]",
+        "table_name": "etl_index_member_daily",
+        "enabled": true,
+        "schema_json": "{\"trade_date\": {\"type\": \"DATE\"}, \"ts_code\": {\"type\": \"SYMBOL\"}, \"l1_name\": {\"type\": \"STRING\"}, \"l2_name\": {\"type\": \"STRING\"}}"
+      }
+    ],
+    "factor_configs": [
+      {
+        "factor_id": "factor_pb_rank",
+        "description": "PB百分位排名（截面，0~1）",
+        "category": "value",
+        "compute_mode": "incremental",
+        "storage_target": "factor_values",
+        "depends_on": "[\"etl_stock_daily_info\", \"sync_daily_basic\"]",
+        "params": "{\"preprocess\": {\"adjust_price\": \"forward\", \"filter_st\": true, \"filter_new_stock\": true, \"new_stock_days\": 60, \"mark_limit\": true, \"handle_suspension\": true}, \"lookback_days\": 1}",
+        "code": "import polars as pl\ndef compute(df, params):\n    return (\n        df.sort(['trade_date', 'ts_code'])\n        .with_columns(\n            pl.col('pb').rank(method='average').over('trade_date','l1_name').alias('_rank'),\n            pl.col('pb').count().over('trade_date','l1_name').alias('_total'),\n        )\n        .with_columns(\n            (pl.col('_rank') / pl.col('_total')).alias('factor_value')\n        )\n        .select(['ts_code', 'trade_date', 'factor_value'])\n    )\n",
+        "enabled": true,
+        "align_calendar": false
+      },
+      {
+        "factor_id": "factor_ma_20",
+        "description": "20日移动平均线",
+        "category": "technical",
+        "compute_mode": "incremental",
+        "storage_target": "factor_values",
+        "depends_on": "[\"sync_daily_data\"]",
+        "params": "{\"window\": 20}",
+        "code": "import polars as pl\ndef compute(df, params):\n    window = params.get('window', 20)\n    return (\n        df.sort(['ts_code', 'trade_date'])\n        .with_columns(\n            pl.col('close').rolling_mean(window_size=window)\n            .over('ts_code')\n            .alias('factor_value')\n        )\n        .select(['ts_code', 'trade_date', 'factor_value'])\n    )\n",
+        "enabled": true,
+        "align_calendar": false
+      },
+      {
+        "factor_id": "factor_ma_5",
+        "description": "5日移动平均线",
+        "category": "technical",
+        "compute_mode": "incremental",
+        "storage_target": "factor_values",
+        "depends_on": "[\"sync_daily_data\"]",
+        "params": "{\"window\": 5}",
+        "code": "import polars as pl\ndef compute(df, params):\n    window = params.get('window', 5)\n    return (\n        df.sort(['ts_code', 'trade_date'])\n        .with_columns(\n            pl.col('close').rolling_mean(window_size=window)\n            .over('ts_code')\n            .alias('factor_value')\n        )\n        .select(['ts_code', 'trade_date', 'factor_value'])\n    )\n",
+        "enabled": true,
+        "align_calendar": false
+      },
+      {
+        "factor_id": "factor_momentum_20",
+        "description": "20日价格动量（当日收盘价 / 20日前收盘价 - 1）",
+        "category": "momentum",
+        "compute_mode": "incremental",
+        "storage_target": "factor_values",
+        "depends_on": "[\"sync_daily_data\"]",
+        "params": "{\"window\": 20}",
+        "code": "import polars as pl\ndef compute(df, params):\n    window = params.get('window', 20)\n    return (\n        df.sort(['ts_code', 'trade_date'])\n        .with_columns(\n            (pl.col('close') / pl.col('close').shift(window).over('ts_code') - 1)\n            .alias('factor_value')\n        )\n        .select(['ts_code', 'trade_date', 'factor_value'])\n    )\n",
+        "enabled": true,
+        "align_calendar": false
+      },
+      {
+        "factor_id": "factor_pe",
+        "description": "pe_ttm",
+        "category": "value",
+        "compute_mode": "incremental",
+        "storage_target": "factor_values",
+        "depends_on": "[\"sync_daily_basic\"]",
+        "params": "{\"preprocess\": {\"adjust_price\": \"forward\", \"filter_st\": true, \"filter_new_stock\": true, \"new_stock_days\": 60, \"mark_limit\": true}, \"lookback_days\": 1}",
+        "code": "\"\"\"自定义因子\"\"\"\nimport polars as pl\n\ndef compute(df, params):\n    return (\n        df.sort(['trade_date', 'ts_code'])\n        .with_columns(\n            pl.col('pe_ttm').alias('factor_value'),\n        ).select(['ts_code', 'trade_date', 'factor_value'])\n    )\n",
+        "enabled": true,
+        "align_calendar": false
+      },
+      {
+        "factor_id": "factor_rsi_14",
+        "description": "14日相对强弱指数（RSI，Wilder EWM法）",
+        "category": "technical",
+        "compute_mode": "incremental",
+        "storage_target": "factor_values",
+        "depends_on": "[\"sync_daily_data\"]",
+        "params": "{\"window\": 14, \"preprocess\": {\"adjust_price\": \"forward\", \"filter_st\": true, \"filter_new_stock\": true, \"new_stock_days\": 60, \"mark_limit\": true}, \"lookback_days\": 14}",
+        "code": "import polars as pl\ndef compute(df, params):\n    window = params.get('window', 14)\n    alpha = 1.0 / window\n    return (\n        df.sort(['ts_code', 'trade_date'])\n        .with_columns(\n            pl.col('close').diff().over('ts_code').alias('delta')\n        )\n        .with_columns(\n            pl.when(pl.col('delta') > 0).then(pl.col('delta')).otherwise(0.0).alias('gain'),\n            pl.when(pl.col('delta') < 0).then(-pl.col('delta')).otherwise(0.0).alias('loss'),\n        )\n        .with_columns(\n            pl.col('gain').ewm_mean(alpha=alpha, adjust=False).over('ts_code').alias('avg_gain'),\n            pl.col('loss').ewm_mean(alpha=alpha, adjust=False).over('ts_code').alias('avg_loss'),\n        )\n        .with_columns(\n            (100.0 - 100.0 / (1.0 + pl.col('avg_gain') / (pl.col('avg_loss') + 1e-10)))\n            .alias('factor_value')\n        )\n        .select(['ts_code', 'trade_date', 'factor_value'])\n    )\n",
+        "enabled": true,
+        "align_calendar": false
+      },
+      {
+        "factor_id": "factor_volatility_10",
+        "description": "10日收益率波动率（年化）",
+        "category": "technical",
+        "compute_mode": "incremental",
+        "storage_target": "factor_values",
+        "depends_on": "[\"sync_daily_data\"]",
+        "params": "{\"window\": 10, \"preprocess\": {\"adjust_price\": \"forward\", \"filter_st\": true, \"filter_new_stock\": true, \"new_stock_days\": 60, \"mark_limit\": true}, \"lookback_days\": 10}",
+        "code": "import polars as pl\ndef compute(df, params):\n    window = params.get('window', 10)\n    return (\n        df.sort(['ts_code', 'trade_date'])\n        .with_columns(\n            pl.col('close').pct_change().over('ts_code').alias('ret')\n        )\n        .with_columns(\n            (pl.col('ret').rolling_std(window_size=window).over('ts_code') * (252 ** 0.5))\n            .alias('factor_value')\n        )\n        .select(['ts_code', 'trade_date', 'factor_value'])\n    )\n",
+        "enabled": true,
+        "align_calendar": false
+      },
+      {
+        "factor_id": "factor_volatility_20",
+        "description": "20日收益率波动率（年化）",
+        "category": "technical",
+        "compute_mode": "incremental",
+        "storage_target": "factor_values",
+        "depends_on": "[\"sync_daily_data\"]",
+        "params": "{\"window\": 20, \"preprocess\": {\"adjust_price\": \"forward\", \"filter_st\": true, \"filter_new_stock\": true, \"new_stock_days\": 60, \"mark_limit\": true}, \"lookback_days\": 20}",
+        "code": "import polars as pl\ndef compute(df, params):\n    window = params.get('window', 20)\n    return (\n        df.sort(['ts_code', 'trade_date'])\n        .with_columns(\n            pl.col('close').pct_change().over('ts_code').alias('ret')\n        )\n        .with_columns(\n            (pl.col('ret').rolling_std(window_size=window).over('ts_code') * (252 ** 0.5))\n            .alias('factor_value')\n        )\n        .select(['ts_code', 'trade_date', 'factor_value'])\n    )\n",
+        "enabled": true,
+        "align_calendar": false
+      }
+    ],
+    "factor_field_mappings": [
+      {
+        "field_key": "adj_factor",
+        "description": "复权因子",
+        "table_name": "sync_adj_factor",
+        "column_name": "adj_factor",
+        "extra_config": "{}"
+      },
+      {
+        "field_key": "list_date",
+        "description": "股票上市日期",
+        "table_name": "sync_stock_basic",
+        "column_name": "list_date",
+        "extra_config": "{}"
+      },
+      {
+        "field_key": "is_st",
+        "description": "是否ST（0=正常, 1=ST/*ST/退市风险警示）",
+        "table_name": "sync_stock_st",
+        "column_name": "ts_code",
+        "extra_config": "{\"mode\": \"exists_in_table\", \"values\": {\"0\": \"正常\", \"1\": \"ST/*ST/退市风险警示\"}}"
+      },
+      {
+        "field_key": "is_limit",
+        "description": "涨跌停状态（0=未涨跌停, 1=涨停, -1=跌停）",
+        "table_name": "sync_stk_limit",
+        "column_name": "up_limit,down_limit",
+        "extra_config": "{\"mode\": \"compare_with_price\", \"price_table\": \"sync_daily_data\", \"price_column\": \"close\", \"values\": {\"0\": \"未涨跌停\", \"1\": \"涨停\", \"-1\": \"跌停\"}}"
+      },
+      {
+        "field_key": "industry_l1",
+        "description": "股票一级行业",
+        "table_name": "sync_stock_basic",
+        "column_name": "industry",
+        "extra_config": "{}"
+      },
+      {
+        "field_key": "industry_l2",
+        "description": "股票二级行业",
+        "table_name": "",
+        "column_name": "",
+        "extra_config": "{}"
+      },
+      {
+        "field_key": "market_cap",
+        "description": "股票总市值（万元）",
+        "table_name": "sync_daily_basic",
+        "column_name": "total_mv",
+        "extra_config": "{}"
+      }
+    ]
+  }
+}

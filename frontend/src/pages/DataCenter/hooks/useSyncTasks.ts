@@ -1,10 +1,16 @@
 /**
  * 同步任务管理 Hook
  */
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { notify } from '../../../utils/notify';
 import { dataApi } from '../../../api';
 import type { SyncTask, TaskStatus, ScheduleInfo } from '../../../types';
+
+// 跟踪正在执行的任务
+interface RunningTaskInfo {
+  runId: string;
+  pollTimer: ReturnType<typeof setInterval>;
+}
 
 export const useSyncTasks = () => {
   const [syncTasks, setSyncTasks] = useState<SyncTask[]>([]);
@@ -12,6 +18,69 @@ export const useSyncTasks = () => {
   const [syncingTasks, setSyncingTasks] = useState<Set<string>>(new Set());
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
   const [scheduleInfo, setScheduleInfo] = useState<Record<string, ScheduleInfo>>({});
+
+  // 跟踪每个任务的 runId 和轮询定时器
+  const runningTasksRef = useRef<Map<string, RunningTaskInfo>>(new Map());
+
+  // 组件卸载时清除所有定时器
+  useEffect(() => {
+    return () => {
+      runningTasksRef.current.forEach((info) => {
+        clearInterval(info.pollTimer);
+      });
+    };
+  }, []);
+
+  const loadTaskStatus = useCallback(async (taskId: string) => {
+    try {
+      const res = await dataApi.getSyncTaskStatus(taskId);
+      if (res.data?.data) {
+        setTaskStatuses((prev) => ({ ...prev, [taskId]: res.data.data }));
+      }
+    } catch (error) {
+      console.error(`Failed to load status for ${taskId}:`, error);
+    }
+  }, []);
+
+  // 轮询任务执行状态
+  const pollTaskStatus = useCallback((taskId: string, runId: string) => {
+    const pollTimer = setInterval(async () => {
+      try {
+        const res = await dataApi.getTaskRunStatus('sync', runId);
+        const status = res.data?.data?.status;
+
+        if (status === 'success' || status === 'failed') {
+          // 任务完成，清除定时器
+          const info = runningTasksRef.current.get(taskId);
+          if (info) {
+            clearInterval(info.pollTimer);
+            runningTasksRef.current.delete(taskId);
+          }
+
+          // 更新同步状态
+          setSyncingTasks((prev) => {
+            const newSet = new Set(prev);
+            newSet.delete(taskId);
+            return newSet;
+          });
+
+          // 刷新任务数据状态
+          loadTaskStatus(taskId);
+
+          if (status === 'success') {
+            notify.success(`任务 ${taskId} 同步完成`);
+          } else {
+            const error = res.data?.data?.error || '未知错误';
+            notify.error(`任务 ${taskId} 同步失败: ${error}`);
+          }
+        }
+      } catch (error) {
+        console.error(`Failed to poll status for ${taskId}:`, error);
+      }
+    }, 2000); // 每2秒轮询一次
+
+    return pollTimer;
+  }, [loadTaskStatus]);
 
   const loadSyncTasks = useCallback(async () => {
     try {
@@ -37,17 +106,6 @@ export const useSyncTasks = () => {
     }
   }, []);
 
-  const loadTaskStatus = useCallback(async (taskId: string) => {
-    try {
-      const res = await dataApi.getSyncTaskStatus(taskId);
-      if (res.data?.data) {
-        setTaskStatuses((prev) => ({ ...prev, [taskId]: res.data.data }));
-      }
-    } catch (error) {
-      console.error(`Failed to load status for ${taskId}:`, error);
-    }
-  }, []);
-
   const setBatchTaskStatuses = useCallback((statuses: Record<string, TaskStatus>) => {
     setTaskStatuses(statuses);
   }, []);
@@ -60,22 +118,36 @@ export const useSyncTasks = () => {
   ) => {
     setSyncingTasks((prev) => new Set(prev).add(taskId));
     try {
-      await dataApi.syncTask(taskId, targetDate, startDate, endDate);
+      const res = await dataApi.syncTask(taskId, targetDate, startDate, endDate);
+      const runId = res.data?.result?.run_id;
+
       notify.success(`任务 ${taskId} 同步已启动`);
-      setTimeout(() => {
-        loadTaskStatus(taskId);
-      }, 2000);
+
+      // 保存 runId 并开始轮询
+      if (runId) {
+        const pollTimer = pollTaskStatus(taskId, runId);
+        runningTasksRef.current.set(taskId, { runId, pollTimer });
+      } else {
+        // 如果没有返回 runId，2秒后刷新状态并清除 syncing 状态
+        setTimeout(() => {
+          loadTaskStatus(taskId);
+          setSyncingTasks((prev) => {
+            const newSet = new Set(prev);
+            newSet.delete(taskId);
+            return newSet;
+          });
+        }, 2000);
+      }
     } catch (error: any) {
       notify.error(`任务 ${taskId} 同步失败: ${error.response?.data?.detail || error.message}`);
-      throw error;
-    } finally {
       setSyncingTasks((prev) => {
         const newSet = new Set(prev);
         newSet.delete(taskId);
         return newSet;
       });
+      throw error;
     }
-  }, [loadTaskStatus]);
+  }, [loadTaskStatus, pollTaskStatus]);
 
   const batchSyncTasks = useCallback(async (
     taskIds: string[],
@@ -93,39 +165,51 @@ export const useSyncTasks = () => {
       return false;
     }
 
+    // 标记所有任务为同步中
     taskIds.forEach(taskId => {
       setSyncingTasks((prev) => new Set(prev).add(taskId));
     });
 
     notify.info(`开始同步 ${taskIds.length} 个任务`);
 
-    for (const taskId of taskIds) {
+    // 并行执行所有同步任务
+    const syncPromises = taskIds.map(async (taskId) => {
       const isFull = fullIds.includes(taskId);
       try {
-        if (isFull) {
-          await dataApi.syncTask(taskId);
+        const res = isFull
+          ? await dataApi.syncTask(taskId)
+          : await dataApi.syncTask(taskId, undefined, startDate, endDate);
+
+        const runId = res.data?.result?.run_id;
+        if (runId) {
+          const pollTimer = pollTaskStatus(taskId, runId);
+          runningTasksRef.current.set(taskId, { runId, pollTimer });
         } else {
-          await dataApi.syncTask(taskId, undefined, startDate, endDate);
+          // 如果没有 runId，稍后清除 syncing 状态
+          setTimeout(() => {
+            loadTaskStatus(taskId);
+            setSyncingTasks((prev) => {
+              const newSet = new Set(prev);
+              newSet.delete(taskId);
+              return newSet;
+            });
+          }, 2000);
         }
       } catch (error: any) {
         notify.error(`任务 ${taskId} 同步失败: ${error.response?.data?.detail || error.message}`);
-      }
-    }
-
-    setTimeout(() => {
-      taskIds.forEach((taskId) => {
-        loadTaskStatus(taskId);
         setSyncingTasks((prev) => {
           const newSet = new Set(prev);
           newSet.delete(taskId);
           return newSet;
         });
-      });
-      setSelectedTaskIds([]);
-    }, 2000);
+      }
+    });
+
+    await Promise.all(syncPromises);
+    setSelectedTaskIds([]);
 
     return true;
-  }, [syncTasks, loadTaskStatus]);
+  }, [syncTasks, loadTaskStatus, pollTaskStatus]);
 
   const deleteTask = useCallback(async (taskId: string, dropTable = true) => {
     try {

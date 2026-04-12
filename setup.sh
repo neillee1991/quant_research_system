@@ -23,9 +23,7 @@ load_config() {
     DOLPHINDB_PORT="8848"
     DOLPHINDB_USER="admin"
     DOLPHINDB_PASSWORD="123456"
-    PREFECT_API_URL="http://localhost:4200/api"
     REACT_APP_API_BASE_URL="http://localhost:8000"
-    REACT_APP_PREFECT_URL="http://localhost:4200"
     BACKEND_PORT="8000"
     FRONTEND_PORT="3000"
 
@@ -46,15 +44,11 @@ load_config() {
                 DOLPHINDB_USER)     DOLPHINDB_USER="$value" ;;
                 DOLPHINDB_PASSWORD) DOLPHINDB_PASSWORD="$value" ;;
                 DOLPHINDB_DATA_DIR) DOLPHINDB_DATA_DIR="$value" ;;
-                PREFECT_API_URL)    PREFECT_API_URL="$value" ;;
                 REACT_APP_API_BASE_URL) REACT_APP_API_BASE_URL="$value" ;;
-                REACT_APP_PREFECT_URL)  REACT_APP_PREFECT_URL="$value" ;;
             esac
         done < "$SCRIPT_DIR/.env"
     fi
 
-    # 从 PREFECT_API_URL 提取 host:port
-    PREFECT_URL=$(echo "$PREFECT_API_URL" | sed 's|/api$||')
     # 从 REACT_APP_API_BASE_URL 提取端口
     BACKEND_PORT=$(echo "$REACT_APP_API_BASE_URL" | grep -oE '[0-9]+$' || echo "8000")
     # DolphinDB Web 管理端口 = 数据端口 + 1
@@ -62,7 +56,6 @@ load_config() {
 
     # Export 环境变量，确保 docker-compose 可以访问
     export DOLPHINDB_DATA_DIR
-    export PREFECT_DATA_DIR="${PREFECT_DATA_DIR:-./data/prefect}"
 }
 
 print_header() {
@@ -291,22 +284,32 @@ setup_env() {
 # ==================== 步骤 3: 启动基础服务 ====================
 
 start_docker_services() {
-    print_step "3/8" "启动 Docker 服务 (DolphinDB + Prefect)..."
+    print_step "3/7" "启动 Docker 服务 (DolphinDB + PostgreSQL)..."
 
     cd "$SCRIPT_DIR"
 
-    # 确保 DolphinDB 数据目录存在并设置权限
-    if [ ! -d "$DOLPHINDB_DATA_DIR" ]; then
-        print_warning "创建 DolphinDB 数据目录: $DOLPHINDB_DATA_DIR"
-        mkdir -p "$DOLPHINDB_DATA_DIR"
+    # 确保 DolphinDB 顶层数据目录存在（子目录由容器自行初始化）
+    mkdir -p "$DOLPHINDB_DATA_DIR"
+    chmod 777 "$DOLPHINDB_DATA_DIR"
+
+    # PostgreSQL 数据目录处理
+    # postgres 容器内用户 uid=999，若目录权限不对会报 "Operation not permitted"
+    POSTGRES_DATA_DIR="${SCRIPT_DIR}/data/postgres"
+    if [ -d "$POSTGRES_DATA_DIR" ]; then
+        # 检查目录是否为空或损坏（pg_filenode.map 不可读是典型症状）
+        if [ ! -f "$POSTGRES_DATA_DIR/PG_VERSION" ]; then
+            print_warning "PostgreSQL 数据目录存在但不完整，清理后重新初始化..."
+            rm -rf "$POSTGRES_DATA_DIR"
+            mkdir -p "$POSTGRES_DATA_DIR"
+        else
+            # 目录完整，修复权限
+            chmod 700 "$POSTGRES_DATA_DIR"
+        fi
+    else
+        mkdir -p "$POSTGRES_DATA_DIR"
     fi
-
-    # 创建必要的子目录结构
-    mkdir -p "$DOLPHINDB_DATA_DIR/local8848/storage"
-    mkdir -p "$DOLPHINDB_DATA_DIR/local8848/storage/LOG"
-
-    # 设置目录权限（确保容器可写）
-    chmod -R 777 "$DOLPHINDB_DATA_DIR"
+    # 确保宿主机目录对容器内 postgres 用户(uid=999)可写
+    chmod 777 "$POSTGRES_DATA_DIR"
 
     export DOLPHINDB_DATA_DIR
     docker-compose up -d
@@ -316,7 +319,7 @@ start_docker_services() {
 # ==================== 步骤 4: 等待服务就绪 ====================
 
 wait_for_services() {
-    print_step "4/8" "等待服务就绪..."
+    print_step "4/7" "等待服务就绪..."
 
     # 等待 DolphinDB
     echo -n "  等待 DolphinDB ($DOLPHINDB_HOST:$DOLPHINDB_PORT)"
@@ -330,12 +333,12 @@ wait_for_services() {
         sleep 2
     done
 
-    # 等待 Prefect
-    echo -n "  等待 Prefect Server ($PREFECT_URL)"
+    # 等待 PostgreSQL
+    echo -n "  等待 PostgreSQL"
     for i in $(seq 1 30); do
-        if curl -sf "${PREFECT_API_URL}/health" > /dev/null 2>&1; then
+        if docker exec quant_postgres pg_isready -U quant -d quantsystem -h localhost > /dev/null 2>&1; then
             echo ""
-            print_success "Prefect Server 已就绪"
+            print_success "PostgreSQL 已就绪"
             break
         fi
         echo -n "."
@@ -346,7 +349,7 @@ wait_for_services() {
 # ==================== 步骤 5: Python 环境 ====================
 
 setup_python() {
-    print_step "5/8" "配置 Python 环境..."
+    print_step "5/7" "配置 Python 环境..."
 
     cd "$SCRIPT_DIR/backend"
 
@@ -369,7 +372,7 @@ setup_python() {
 # ==================== 步骤 6: 初始化数据库 ====================
 
 init_database() {
-    print_step "6/8" "初始化 DolphinDB 数据库..."
+    print_step "6/7" "初始化数据库..."
 
     cd "$SCRIPT_DIR/backend"
     source .venv/bin/activate
@@ -377,30 +380,16 @@ init_database() {
     # 步骤 6a: 创建 DolphinDB 数据库（dfs://quant）
     python database/init_dolphindb.py
 
-    # 步骤 6b: 创建元数据表并写入种子任务配置
-    # ensure_meta_tables() 创建 sync_task_config 等维度表
-    # seed_sync_task_config() 写入默认同步任务定义
-    # seed_factor_data_config() 写入因子数据配置
-    python database/init_meta_tables.py
+    # 步骤 6b: 建 PostgreSQL 表结构
+    python database/init_postgres.py
+
     print_success "数据库初始化完成"
 }
 
-# ==================== 步骤 7: 配置 Prefect ====================
-
-setup_prefect() {
-    print_step "7/8" "配置 Prefect..."
-
-    cd "$SCRIPT_DIR/backend"
-    source .venv/bin/activate
-
-    export PREFECT_API_URL="${PREFECT_API_URL}"
-    print_success "Prefect API URL 已配置: ${PREFECT_API_URL}"
-}
-
-# ==================== 步骤 8: 前端依赖 ====================
+# ==================== 步骤 7: 前端依赖 ====================
 
 setup_frontend() {
-    print_step "8/8" "安装前端依赖..."
+    print_step "7/7" "安装前端依赖..."
 
     cd "$SCRIPT_DIR/frontend"
 
@@ -426,13 +415,13 @@ show_completion() {
     echo -e "${BLUE}访问地址（启动后）:${NC}"
     echo -e "  前端界面:    http://localhost:${FRONTEND_PORT}"
     echo -e "  API 文档:    ${REACT_APP_API_BASE_URL}/docs"
-    echo -e "  Prefect UI:  ${PREFECT_URL}"
     echo -e "  DolphinDB:   http://${DOLPHINDB_HOST}:${DOLPHINDB_WEB_PORT}"
     echo ""
     echo -e "${BLUE}首次使用建议:${NC}"
     echo -e "  1. 启动系统: ./start.sh"
-    echo -e "  2. 访问前端数据中心，执行全量数据同步"
-    echo -e "  3. 在调度中心查看 Prefect 任务状态"
+    echo -e "  2. 访问配置中心 (/config)，导入 backend/config/initial_config.json"
+    echo -e "  3. 访问数据中心，执行全量数据同步"
+    echo -e "  4. 在调度中心配置并启动 daily_task"
     echo ""
 }
 
@@ -448,7 +437,6 @@ main() {
     wait_for_services
     setup_python
     init_database
-    setup_prefect
     setup_frontend
     show_completion
 }

@@ -79,6 +79,7 @@ class SharedTableValidator:
             "sharing_tasks": []
         }
 
+        from store.dolphindb_client import db_client
         if not db_client.table_exists(table_name):
             return result
 

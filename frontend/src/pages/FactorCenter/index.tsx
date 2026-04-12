@@ -4,10 +4,9 @@
 
 import React from 'react';
 import { Tabs } from 'antd';
-import { BarChartOutlined, SettingOutlined, UnorderedListOutlined } from '@ant-design/icons';
+import { BarChartOutlined, UnorderedListOutlined } from '@ant-design/icons';
 import FactorManageTab from './FactorManageTab';
 import AnalysisPanel from './AnalysisPanel';
-import DataConfigPanel from './DataConfigPanel';
 
 const FactorCenter: React.FC = () => (
   <div style={{ padding: '16px', maxWidth: '1600px', margin: '0 auto' }}>
@@ -39,11 +38,6 @@ const FactorCenter: React.FC = () => (
         key: 'analysis',
         label: <span><BarChartOutlined /> 因子分析</span>,
         children: <AnalysisPanel />,
-      },
-      {
-        key: 'dataconfig',
-        label: <span><SettingOutlined /> 数据配置</span>,
-        children: <DataConfigPanel />,
       },
     ]} />
   </div>

@@ -5,11 +5,9 @@ import { notify } from '../../utils/notify';
  */
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Tabs, Modal, Button } from 'antd';
-import { SyncOutlined, PlayCircleOutlined, CodeOutlined, DatabaseOutlined } from '@ant-design/icons';
+import { SyncOutlined, PlayCircleOutlined, DatabaseOutlined } from '@ant-design/icons';
 import { useMessage } from '../../hooks/useMessage';
 import { useThemeStore } from '../../store';
-import { DataTable } from './DataTable';
-import { useDataQuery } from './hooks/useDataQuery';
 import {
   SyncModal,
   BatchSyncModal,
@@ -17,7 +15,7 @@ import {
   DeleteConfirmModal,
   SchemaChangeConfirmModal,
 } from './Modals';
-import { IndexSubscribeDrawer } from './IndexSubscribeDrawer';
+import QuickSubscribeModal from './QuickSubscribeModal';
 import { SyncTaskDrawer } from './SyncTaskDrawer';
 import { ETLTaskDrawer } from './ETLTaskDrawer';
 import { TaskPanel } from '../../components/TaskPanel';
@@ -72,8 +70,8 @@ const DataCenter: React.FC = () => {
   const [etlDrawerTask, setEtlDrawerTask] = useState<ETLTask | null>(null);
   const [etlDrawerIsNew, setEtlDrawerIsNew] = useState(false);
 
-  // 指数订阅抽屉状态
-  const [indexSubscribeDrawerVisible, setIndexSubscribeDrawerVisible] = useState(false);
+  // 快速订阅 Modal 状态
+  const [quickSubscribeVisible, setQuickSubscribeVisible] = useState(false);
 
   // Refs to hold latest tasks without creating circular dependencies
   const syncTasksRef = useRef<SyncTask[]>([]);
@@ -101,7 +99,7 @@ const DataCenter: React.FC = () => {
       setBatchSyncModalVisible(true);
     },
     onNewIndexSubscribe: () => {
-      setIndexSubscribeDrawerVisible(true);
+      setQuickSubscribeVisible(true);
     },
   }), []);
 
@@ -140,8 +138,6 @@ const DataCenter: React.FC = () => {
   syncTasksRef.current = syncTasksHook.tasks;
   etlTasksRef.current = etlTasksHook.tasks;
 
-  // ========== 数据查询 Hook ==========
-  const dataQueryHook = useDataQuery();
 
   // ========== 初始化加载 ==========
   const loadInitialData = useCallback(async () => {
@@ -149,12 +145,11 @@ const DataCenter: React.FC = () => {
       await Promise.all([
         syncTasksHook.loadTasks(),
         etlTasksHook.loadTasks(),
-        dataQueryHook.loadTables(),
       ]);
     } catch (error) {
       console.error('Failed to load initial data:', error);
     }
-  }, [syncTasksHook.loadTasks, etlTasksHook.loadTasks, dataQueryHook.loadTables, message]);
+  }, [syncTasksHook.loadTasks, etlTasksHook.loadTasks, message]);
 
   useEffect(() => {
     loadInitialData();
@@ -249,22 +244,6 @@ const DataCenter: React.FC = () => {
     syncTasksHook.loadTasks();
   };
 
-  // ========== 数据表处理函数 ==========
-  const handleTruncateTable = (tableName: string) => {
-    Modal.confirm({
-      title: '清空表数据',
-      content: `确定要清空表 "${tableName}" 的所有数据吗？此操作不可撤销。`,
-      okText: '确定清空',
-      cancelText: '取消',
-      onOk: async () => {
-        try {
-          await dataQueryHook.truncateTable(tableName);
-        } catch {
-          // Error already handled in hook
-        }
-      },
-    });
-  };
 
   return (
     <div style={{ padding: '16px', maxWidth: '1600px', margin: '0 auto' }}>
@@ -288,7 +267,7 @@ const DataCenter: React.FC = () => {
             fontSize: '12px',
           }}
         >
-          数据同步管理与 SQL 查询
+          数据同步管理
         </p>
       </div>
 
@@ -321,24 +300,6 @@ const DataCenter: React.FC = () => {
                 tasksHook={etlTasksHook}
                 onNewTask={handleNewEtlTask}
                 onEditTask={handleOpenEtlDrawer}
-              />
-            ),
-          },
-          {
-            key: '3',
-            label: <span><CodeOutlined /> SQL 查询</span>,
-            children: (
-              <DataTable
-                tables={dataQueryHook.tables}
-                sqlQuery={dataQueryHook.sqlQuery}
-                queryResult={dataQueryHook.queryResult}
-                queryColumns={dataQueryHook.queryColumns}
-                queryLoading={dataQueryHook.queryLoading}
-                onSqlQueryChange={dataQueryHook.setSqlQuery}
-                onExecuteQuery={dataQueryHook.executeQuery}
-                onTruncateTable={handleTruncateTable}
-                onRefreshTables={dataQueryHook.loadTables}
-                theme={mode}
               />
             ),
           },
@@ -421,12 +382,10 @@ const DataCenter: React.FC = () => {
         onSave={handleSaveEtlTask}
       />
 
-      <IndexSubscribeDrawer
-        visible={indexSubscribeDrawerVisible}
-        onClose={() => setIndexSubscribeDrawerVisible(false)}
-        onSubscribeSuccess={handleIndexSubscribeSuccess}
-        onUnsubscribeSuccess={handleIndexSubscribeSuccess}
-        onSubscribe={() => {}}
+      <QuickSubscribeModal
+        visible={quickSubscribeVisible}
+        onClose={() => setQuickSubscribeVisible(false)}
+        onSuccess={handleIndexSubscribeSuccess}
       />
     </div>
   );

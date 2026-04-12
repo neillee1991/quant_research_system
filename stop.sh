@@ -49,8 +49,8 @@ kill_service() {
 # 停止后端（匹配 uvicorn app.main:app）
 kill_service "后端服务" "$BACKEND_PID" "uvicorn app.main:app"
 
-# 停止前端（匹配 react-scripts start）
-kill_service "前端服务" "$FRONTEND_PID" "react-scripts start"
+# 停止前端（匹配 react-app-rewired start）
+kill_service "前端服务" "$FRONTEND_PID" "react-app-rewired"
 
 # 等待端口释放
 sleep 1

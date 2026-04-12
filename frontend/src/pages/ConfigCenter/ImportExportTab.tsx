@@ -1,23 +1,13 @@
+/**
+ * 配置导入导出 Tab
+ * 从 ConfigManagement/index.tsx 迁移
+ */
 import { notify } from '../../utils/notify';
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
-  Card,
-  Row,
-  Col,
-  Checkbox,
-  Button,
-  Radio,
-  Upload,
-  Space,
-  Alert,
-  Divider,
-  Typography,
-  message,
+  Card, Row, Col, Checkbox, Button, Radio, Upload, Space, Alert, Divider, Typography,
 } from 'antd';
-import {
-  DownloadOutlined,
-  UploadOutlined,
-} from '@ant-design/icons';
+import { DownloadOutlined, UploadOutlined } from '@ant-design/icons';
 import type { UploadFile, UploadProps } from 'antd/es/upload/interface';
 import {
   ConfigType,
@@ -60,16 +50,13 @@ function downloadFile(content: string, filename: string) {
 // 工具函数：读取文件为 Base64
 function readFileAsBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
-    // 添加文件大小检查 (10MB)
     if (file.size > 10 * 1024 * 1024) {
       notify.error('文件太大，请选择小于10MB的文件');
       return reject(new Error('File too large'));
     }
-
     const reader = new FileReader();
     reader.onload = () => {
       const result = reader.result as string;
-      // 去掉 data:application/json;base64, 前缀
       const base64 = result.split(',')[1];
       resolve(base64);
     };
@@ -78,7 +65,7 @@ function readFileAsBase64(file: File): Promise<string> {
   });
 }
 
-const ConfigManagement: React.FC = () => {
+const ImportExportTab: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [configTypes, setConfigTypes] = useState<ConfigTypeOption[]>([]);
 
@@ -105,19 +92,17 @@ const ConfigManagement: React.FC = () => {
     try {
       const response = await configApi.getConfigTypes();
       setConfigTypes(response.data);
-      // 默认全选
       setSelectedExportTypes(response.data.map(t => t.value));
     } catch (error) {
+      // 静默处理
     }
   };
 
-  // 导出处理
   const handleExport = async () => {
     if (selectedExportTypes.length === 0) {
       notify.warning('请至少选择一种配置类型');
       return;
     }
-
     setLoading(true);
     try {
       const request: ExportRequest = { config_types: selectedExportTypes };
@@ -132,7 +117,6 @@ const ConfigManagement: React.FC = () => {
     }
   };
 
-  // 导入文件选择
   const uploadProps: UploadProps = {
     beforeUpload: async (file) => {
       const isValidFileType = file.type === 'application/json' ||
@@ -141,12 +125,10 @@ const ConfigManagement: React.FC = () => {
         notify.error('请上传 JSON 文件');
         return false;
       }
-
       setImportFile(file);
       setVerifyResult(null);
       setImportResult(null);
       setSelectedItems({} as Record<ConfigType, string[]>);
-
       try {
         const content = await readFileAsBase64(file);
         setImportContent(content);
@@ -154,30 +136,22 @@ const ConfigManagement: React.FC = () => {
         const errorMsg = error instanceof Error ? error.message : '读取文件失败';
         notify.error(`读取文件失败: ${errorMsg}`);
       }
-
       return false;
     },
     fileList: importFile ? [importFile] : [],
     maxCount: 1,
   };
 
-  // 验证导入
   const handleVerify = async () => {
     if (!importContent) {
       notify.warning('请先选择文件');
       return;
     }
-
     setLoading(true);
     try {
-      const request: ImportVerifyRequest = {
-        content: importContent,
-        mode: importMode,
-      };
+      const request: ImportVerifyRequest = { content: importContent, mode: importMode };
       const response = await configApi.verifyImport(request);
       setVerifyResult(response.data);
-
-      // 默认选中所有新增和修改的项
       if (response.data.diffs) {
         const selections: Record<ConfigType, string[]> = {} as Record<ConfigType, string[]>;
         for (const diff of response.data.diffs) {
@@ -187,7 +161,6 @@ const ConfigManagement: React.FC = () => {
         }
         setSelectedItems(selections);
       }
-
       if (response.data.valid) {
         notify.success('验证通过');
       } else {
@@ -201,13 +174,11 @@ const ConfigManagement: React.FC = () => {
     }
   };
 
-  // 执行导入
   const handleApply = async () => {
     if (!verifyResult?.valid) {
       notify.warning('请先通过验证');
       return;
     }
-
     setLoading(true);
     try {
       const request: ImportApplyRequest = {
@@ -217,7 +188,6 @@ const ConfigManagement: React.FC = () => {
       };
       const response = await configApi.applyImport(request);
       setImportResult(response.data);
-
       if (response.data.success) {
         notify.success('导入成功');
       } else {
@@ -231,7 +201,6 @@ const ConfigManagement: React.FC = () => {
     }
   };
 
-  // 切换选中项
   const toggleItemSelection = (configType: ConfigType, itemId: string, checked: boolean) => {
     setSelectedItems(prev => {
       const current = prev[configType] || [];
@@ -244,20 +213,14 @@ const ConfigManagement: React.FC = () => {
     });
   };
 
-  // 全选/取消全选
   const toggleSelectAll = (configType: ConfigType, items: ConfigItemDiff[], checked: boolean) => {
     if (checked) {
       setSelectedItems(prev => ({
         ...prev,
-        [configType]: items
-          .filter(item => item.status !== 'unchanged')
-          .map(item => item.item_id)
+        [configType]: items.filter(item => item.status !== 'unchanged').map(item => item.item_id)
       }));
     } else {
-      setSelectedItems(prev => ({
-        ...prev,
-        [configType]: []
-      }));
+      setSelectedItems(prev => ({ ...prev, [configType]: [] }));
     }
   };
 
@@ -268,13 +231,10 @@ const ConfigManagement: React.FC = () => {
   return (
     <div>
       <Row gutter={24}>
-        {/* 导出配置 */}
         <Col span={12}>
           <Card title="导出配置" extra={<DownloadOutlined />}>
             <Space direction="vertical" style={{ width: '100%' }}>
-              <div>
-                <Text strong>选择要导出的配置类型：</Text>
-              </div>
+              <div><Text strong>选择要导出的配置类型：</Text></div>
               <CheckboxGroup
                 options={configTypes}
                 value={selectedExportTypes}
@@ -292,14 +252,10 @@ const ConfigManagement: React.FC = () => {
             </Space>
           </Card>
         </Col>
-
-        {/* 导入配置 */}
         <Col span={12}>
           <Card title="导入配置" extra={<UploadOutlined />}>
             <Space direction="vertical" style={{ width: '100%' }}>
-              <div>
-                <Text strong>导入模式：</Text>
-              </div>
+              <div><Text strong>导入模式：</Text></div>
               <RadioGroup
                 value={importMode}
                 onChange={(e) => {
@@ -308,30 +264,18 @@ const ConfigManagement: React.FC = () => {
                   setImportResult(null);
                 }}
               >
-                <Radio value={ImportMode.FAST}>
-                  快速模式 - 直接覆盖
-                </Radio>
-                <Radio value={ImportMode.SAFE}>
-                  安全模式 - 预览差异
-                </Radio>
+                <Radio value={ImportMode.FAST}>快速模式 - 直接覆盖</Radio>
+                <Radio value={ImportMode.SAFE}>安全模式 - 预览差异</Radio>
               </RadioGroup>
-
-              <div>
-                <Text strong>选择备份文件：</Text>
-              </div>
+              <div><Text strong>选择备份文件：</Text></div>
               <Upload {...uploadProps}>
                 <Button icon={<UploadOutlined />}>
                   {importFile ? '重新选择文件' : '选择 JSON 文件'}
                 </Button>
               </Upload>
-
               {importFile && (
                 <Space>
-                  <Button
-                    type="primary"
-                    onClick={handleVerify}
-                    loading={loading}
-                  >
+                  <Button type="primary" onClick={handleVerify} loading={loading}>
                     验证文件
                   </Button>
                 </Space>
@@ -341,7 +285,6 @@ const ConfigManagement: React.FC = () => {
         </Col>
       </Row>
 
-      {/* 验证结果 */}
       {verifyResult && (
         <>
           <Divider />
@@ -361,7 +304,6 @@ const ConfigManagement: React.FC = () => {
                 style={{ marginBottom: 16 }}
               />
             )}
-
             {verifyResult.valid && verifyResult.diffs && (
               <>
                 <DiffViewer
@@ -372,18 +314,12 @@ const ConfigManagement: React.FC = () => {
                   getConfigTypeLabel={getConfigTypeLabel}
                 />
                 <div style={{ marginTop: 16 }}>
-                  <Button
-                    type="primary"
-                    size="large"
-                    onClick={handleApply}
-                    loading={loading}
-                  >
+                  <Button type="primary" size="large" onClick={handleApply} loading={loading}>
                     确认导入
                   </Button>
                 </div>
               </>
             )}
-
             {verifyResult.valid && !verifyResult.diffs && (
               <>
                 <Alert
@@ -393,12 +329,7 @@ const ConfigManagement: React.FC = () => {
                   showIcon
                   style={{ marginBottom: 16 }}
                 />
-                <Button
-                  type="primary"
-                  size="large"
-                  onClick={handleApply}
-                  loading={loading}
-                >
+                <Button type="primary" size="large" onClick={handleApply} loading={loading}>
                   确认导入（快速模式）
                 </Button>
               </>
@@ -407,7 +338,6 @@ const ConfigManagement: React.FC = () => {
         </>
       )}
 
-      {/* 导入结果 */}
       {importResult && (
         <>
           <Divider />
@@ -418,4 +348,4 @@ const ConfigManagement: React.FC = () => {
   );
 };
 
-export default ConfigManagement;
+export default ImportExportTab;

@@ -357,3 +357,33 @@ pre {
   font-family: var(--font-mono);
   font-size: 13px;
 }
+
+/* --- Notify: 右下角一行小字 --- */
+.ant-notification-notice {
+  width: fit-content !important;
+  min-width: 0 !important;
+  max-width: 420px !important;
+  padding: 0 14px !important;
+  background: var(--notify-bg) !important;
+  border: 1px solid var(--notify-border) !important;
+  border-radius: 6px !important;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.2) !important;
+  display: flex !important;
+  align-items: center !important;
+  height: 32px !important;
+}
+.ant-notification-notice-content {
+  width: fit-content !important;
+  display: flex !important;
+  align-items: center !important;
+}
+.ant-notification-notice-message {
+  display: none !important;
+}
+.ant-notification-notice-description {
+  font-size: 12px !important;
+  line-height: 20px !important;
+  margin: 0 !important;
+  white-space: nowrap !important;
+  color: var(--notify-color) !important;
+}

@@ -124,15 +124,14 @@ export const ETLScriptTestTab: React.FC<ETLScriptTestTabProps> = ({
           />
         </div>
         <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center' }}>
-          {syncType === 'incremental' && (
-            <QuantDatePicker
-              mode="single"
-              placeholder="测试日期（可选）"
-              style={{ width: 160 }}
-              disableFuture={false}
-              onChange={(d) => onTestDateChange(d)}
-            />
-          )}
+          <QuantDatePicker
+            mode="single"
+            placeholder="测试日期（可选）"
+            style={{ width: 160 }}
+            disableFuture={false}
+            value={testDate}
+            onChange={(d) => onTestDateChange(d)}
+          />
           <Button onClick={onTestScript} loading={testLoading}>测试脚本</Button>
           {testResult?.status === 'success' && (
             <span style={{ fontSize: '12px', color: 'var(--color-gain)' }}>测试通过: {testResult.rows} 行</span>

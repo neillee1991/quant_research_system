@@ -3,6 +3,7 @@
 提供统一的 CRUD 操作，使用 PostgreSQL（asyncpg）
 """
 import json
+from datetime import datetime
 from typing import TypeVar, Generic, Type, List, Optional, Dict, Any
 
 from app.models.base_task import BaseTaskConfig, SyncTaskConfig, ETLTaskConfig, FactorConfig
@@ -63,7 +64,17 @@ class TaskService(Generic[T]):
 
         existing = await self.get_task(task_id)
         if existing:
-            raise ValueError(f"Task {task_id} already exists")
+            # 如果任务已存在但被软删除了，恢复它
+            if not getattr(existing, "enabled", True):
+                from scheduler.db import DatabasePool
+                await DatabasePool.execute(
+                    f"UPDATE {self.table_name} SET enabled = true WHERE {self.id_field} = $1",
+                    task_id,
+                )
+                logger.info(f"Restored soft-deleted {self.task_type} task {task_id}")
+                return await self.get_task(task_id)
+            else:
+                raise ValueError(f"Task {task_id} already exists")
 
         await self._validate_schema(config_data, task_id)
 
@@ -149,28 +160,29 @@ class TaskService(Generic[T]):
         if not task:
             raise ValueError(f"Task {task_id} not found")
 
-        schema_json = getattr(task, 'schema_json', None)
-        if not schema_json:
+        task_data = task.model_dump()
+        schema_json = task_data.get('schema_json')
+        if not schema_json or not isinstance(schema_json, str):
             return {
                 "status": "success",
                 "data": {
                     "task_id": task_id,
-                    "table_name": getattr(task, 'table_name', None),
+                    "table_name": task_data.get('table_name'),
                     "columns": [],
                     "message": "No schema defined yet"
                 }
             }
 
         try:
-            schema = json.loads(schema_json) if isinstance(schema_json, str) else schema_json
+            schema = json.loads(schema_json)
             columns = schema.get("columns", []) if isinstance(schema, dict) else []
             return {
                 "status": "success",
                 "data": {
                     "task_id": task_id,
-                    "table_name": getattr(task, 'table_name', None),
+                    "table_name": task_data.get('table_name'),
                     "columns": columns,
-                    "primary_keys": self._parse_primary_keys({"primary_keys_json": getattr(task, 'primary_keys_json', '[]')})
+                    "primary_keys": self._parse_primary_keys(task_data)
                 }
             }
         except Exception as e:
@@ -188,7 +200,16 @@ class TaskService(Generic[T]):
             raise ValueError("Script cannot be empty")
 
         try:
-            result = db_client.query(script)
+            # 替换日期占位符，生成 DolphinDB 原生日期字面量（如 2026.04.09）
+            raw_date = date or datetime.now().strftime("%Y%m%d")
+            ddb_date = f"{raw_date[:4]}.{raw_date[4:6]}.{raw_date[6:8]}"
+            from app.core.config import settings as _settings
+            db_path = _settings.database.db_path
+            resolved_script = (script
+                               .replace("{date}", ddb_date)
+                               .replace("{db_ts}", db_path)
+                               .replace("{db_meta}", db_path))
+            result = db_client.query(resolved_script)
             columns = []
             if not result.is_empty():
                 for col_name in result.columns:
@@ -240,17 +261,18 @@ class TaskService(Generic[T]):
         if not task:
             raise ValueError(f"Task {task_id} not found")
 
-        table_name = getattr(task, 'table_name', None)
+        task_data = task.model_dump()
+        table_name = task_data.get('table_name')
         if not table_name:
             raise ValueError(f"Task {task_id} does not have a table_name")
 
-        schema_json = getattr(task, 'schema_json', None)
-        if not schema_json:
+        schema_json = task_data.get('schema_json')
+        if not schema_json or not isinstance(schema_json, str):
             raise ValueError(f"Task {task_id} does not have a schema defined")
 
         try:
-            schema = json.loads(schema_json) if isinstance(schema_json, str) else schema_json
-            primary_keys = self._parse_primary_keys({"primary_keys_json": getattr(task, 'primary_keys_json', '[]')})
+            schema = json.loads(schema_json)
+            primary_keys = self._parse_primary_keys(task_data)
 
             if db_client.table_exists(table_name):
                 return {
@@ -413,15 +435,16 @@ class TaskService(Generic[T]):
         if not new_schema_json:
             return
         new_schema = json.loads(new_schema_json) if isinstance(new_schema_json, str) else new_schema_json
-        old_schema_json = getattr(existing, "schema_json", None)
-        if old_schema_json:
-            old_schema = json.loads(old_schema_json) if isinstance(old_schema_json, str) else old_schema_json
-            primary_keys = self._parse_primary_keys(current_dict)
-            is_valid, errors = SchemaValidator.validate_schema_evolution(
-                old_schema=old_schema, new_schema=new_schema, primary_keys=primary_keys
-            )
-            if not is_valid:
-                raise ValueError(f"Schema evolution failed: {'; '.join(errors)}")
+        old_schema_json = existing.model_dump().get("schema_json")
+        if old_schema_json and isinstance(old_schema_json, str):
+            old_schema = json.loads(old_schema_json)
+            if old_schema:  # 旧 schema 为空时跳过 evolution 检查
+                primary_keys = self._parse_primary_keys(current_dict)
+                is_valid, errors = SchemaValidator.validate_schema_evolution(
+                    old_schema=old_schema, new_schema=new_schema, primary_keys=primary_keys
+                )
+                if not is_valid:
+                    raise ValueError(f"Schema evolution failed: {'; '.join(errors)}")
         table_name = current_dict.get("table_name")
         if table_name:
             result = shared_table_validator.validate_shared_schema(

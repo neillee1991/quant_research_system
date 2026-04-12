@@ -20,7 +20,7 @@ export const SyncDataInspectTab: React.FC<SyncDataInspectTabProps> = ({ taskId }
   const handleInspectData = async () => {
     setInspectionLoading(true);
     try {
-      const response = await axios.get(`/api/v1/tasks/sync/${taskId}/inspect`);
+      const response = await axios.get(`/tasks/sync/${taskId}/inspect`);
       const data = response.data;
       setInspectionData(data);
     } catch (error) {

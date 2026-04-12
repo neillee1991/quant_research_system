@@ -87,7 +87,7 @@ stop_services() {
 
 # 检查 Docker
 check_docker() {
-    print_step "1/6" "检查 Docker 环境..."
+    print_step "1/5" "检查 Docker 环境..."
 
     if ! command -v docker &> /dev/null; then
         print_error "Docker 未安装"
@@ -104,23 +104,23 @@ check_docker() {
 
 # 启动基础服务
 start_infrastructure() {
-    print_step "2/6" "启动基础服务 (DolphinDB + PostgreSQL)..."
+    print_step "2/5" "启动基础服务 (DolphinDB + PostgreSQL)..."
 
     cd "$SCRIPT_DIR"
     DOLPHINDB_DATA_DIR="/Users/lisheng/Code/application/dolphin"
 
-    # 确保 DolphinDB 数据目录存在并设置权限
-    if [ ! -d "$DOLPHINDB_DATA_DIR" ]; then
-        print_warning "创建 DolphinDB 数据目录: $DOLPHINDB_DATA_DIR"
-        mkdir -p "$DOLPHINDB_DATA_DIR"
+    # 确保 DolphinDB 顶层数据目录存在（子目录由容器自行初始化）
+    mkdir -p "$DOLPHINDB_DATA_DIR"
+    chmod 777 "$DOLPHINDB_DATA_DIR"
+
+    # PostgreSQL 数据目录权限修复
+    POSTGRES_DATA_DIR="${SCRIPT_DIR}/data/postgres"
+    if [ -d "$POSTGRES_DATA_DIR" ] && [ ! -f "$POSTGRES_DATA_DIR/PG_VERSION" ]; then
+        print_warning "PostgreSQL 数据目录不完整，清理重建..."
+        rm -rf "$POSTGRES_DATA_DIR"
     fi
-
-    # 创建必要的子目录结构
-    mkdir -p "$DOLPHINDB_DATA_DIR/local8848/storage"
-    mkdir -p "$DOLPHINDB_DATA_DIR/local8848/storage/LOG"
-
-    # 设置目录权限（确保容器可写）
-    chmod -R 777 "$DOLPHINDB_DATA_DIR"
+    mkdir -p "$POSTGRES_DATA_DIR"
+    chmod 777 "$POSTGRES_DATA_DIR"
 
     export DOLPHINDB_DATA_DIR
     docker-compose up -d dolphindb postgres
@@ -162,7 +162,7 @@ start_infrastructure() {
 
 # 检查 Python 环境
 check_python() {
-    print_step "3/6" "检查 Python 环境..."
+    print_step "3/5" "检查 Python 环境..."
 
     if command -v python3.11 &> /dev/null; then
         PYTHON_CMD="python3.11"
@@ -187,7 +187,7 @@ check_python() {
 
 # 初始化后端
 init_backend() {
-    print_step "4/6" "初始化后端环境..."
+    print_step "4/5" "初始化后端环境..."
 
     cd "$BACKEND_DIR"
 
@@ -211,7 +211,7 @@ init_backend() {
 
 # 启动后端
 start_backend() {
-    print_step "5/6" "启动后端服务..."
+    print_step "5/5" "启动后端和前端服务..."
 
     cd "$BACKEND_DIR"
     source "$VENV_DIR/bin/activate"
@@ -232,8 +232,6 @@ start_backend() {
 
 # 启动前端
 start_frontend() {
-    print_step "6/6" "启动前端服务..."
-
     cd "$FRONTEND_DIR"
 
     # 检查 node_modules 是否存在且完整（验证关键包）

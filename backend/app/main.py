@@ -14,13 +14,11 @@ from app.core.auth import (
     fake_users_db,
 )
 from app.core.rate_limit import setup_rate_limiter
-from app.api.v1 import strategy, ml, flows, tasks, schema_tools
+from app.api.v1 import strategy, ml, flows, tasks
 from app.api.v1 import factor  # 使用拆分后的 factor 模块
 from app.api.v1 import data  # 使用拆分后的 data 模块
-from app.api.v1 import config_api  # 配置管理 API
-from app.api.v1 import config_api  # 配置管理 API
+from app.api.v1 import config  # 统一配置中心 API
 from store.dolphindb_client import db_client
-from infrastructure.seed import SeedDataLoader, SeedDataManager
 
 
 @asynccontextmanager
@@ -45,13 +43,6 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"创建维度表失败: {e}")
         raise  # 表结构创建失败应该终止启动
-
-    # Seed 数据到 PostgreSQL（失败不影响启动）
-    try:
-        seed_manager = SeedDataManager(loader=SeedDataLoader())
-        await seed_manager.seed_all()
-    except Exception as e:
-        logger.error(f"Seed 数据失败: {e}", exc_info=True)
 
     # 预加载因子字段映射缓存
     try:
@@ -140,8 +131,7 @@ def create_app() -> FastAPI:
     app.include_router(ml.router, prefix=settings.api_v1_prefix, tags=["ml"])
     app.include_router(factor.router, prefix=settings.api_v1_prefix, tags=["factor"])
     app.include_router(flows.router, prefix=settings.api_v1_prefix, tags=["flows"])
-    app.include_router(schema_tools.router, prefix=settings.api_v1_prefix, tags=["schema-tools"])
-    app.include_router(config_api.router, prefix=settings.api_v1_prefix, tags=["config"])
+    app.include_router(config.router, prefix=settings.api_v1_prefix, tags=["config"])
 
     # 统一任务管理路由
     app.include_router(tasks.router, prefix=settings.api_v1_prefix, tags=["tasks"])
