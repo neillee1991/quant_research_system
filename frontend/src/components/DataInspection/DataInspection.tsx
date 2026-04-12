@@ -52,7 +52,7 @@ export const DataInspection: React.FC<DataInspectionProps> = ({ taskType, taskId
     setLoading(true);
     try {
       const response = await fetch(
-        `http://localhost:8000/api/v1/tasks/${taskType}/${taskId}/inspect`
+        `/api/v1/tasks/${taskType}/${taskId}/inspect`
       );
       const data = await response.json();
       setInspectionData(data);
