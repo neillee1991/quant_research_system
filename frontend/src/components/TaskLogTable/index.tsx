@@ -40,9 +40,16 @@ function renderJsonCell(v: string | null) {
 }
 
 function renderTime(v: string | null) {
+  if (!v) return <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>-</span>;
+  const d = new Date(v);
+  const formatted = isNaN(d.getTime()) ? v.slice(0, 19) : d.toLocaleString('zh-CN', {
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hour12: false,
+  });
   return (
     <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-      {v ? v.slice(0, 19) : '-'}
+      {formatted}
     </span>
   );
 }

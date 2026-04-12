@@ -5,14 +5,23 @@
 import asyncio
 import json
 import time
-from datetime import datetime
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from functools import wraps
 from typing import Callable, Optional
 
 from app.core.logger import logger
 
 
-class TaskRunner:
+_TZ = ZoneInfo("Asia/Shanghai")
+
+
+def _now() -> datetime:
+    """返回带时区的当前上海时间"""
+    return datetime.now(_TZ)
+
+
+
     """统一任务状态管理，所有方法失败只 warning，不影响主业务"""
 
     @staticmethod
@@ -34,7 +43,7 @@ class TaskRunner:
                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
             """,
                 run_id, task_type, task_id, task_name, "running",
-                datetime.now(), None, 0.0, 0, "", params, "", flow_run_id,
+                _now(), None, 0.0, 0, "", params, "", flow_run_id,
             )
         except Exception as e:
             logger.warning(f"TaskRunner.start failed for {run_id}: {e}")
@@ -67,7 +76,7 @@ class TaskRunner:
                     rows        = $4,
                     extra       = $5
                 WHERE run_id = $1
-            """, run_id, datetime.now(), float(elapsed_sec), int(rows), extra or "")
+            """, run_id, _now(), float(elapsed_sec), int(rows), extra or "")
         except Exception as e:
             logger.warning(f"TaskRunner.finish failed for {run_id}: {e}")
 
@@ -83,7 +92,7 @@ class TaskRunner:
                     elapsed_sec = $3,
                     error_message = $4
                 WHERE run_id = $1
-            """, run_id, datetime.now(), float(elapsed_sec), str(error)[:500])
+            """, run_id, _now(), float(elapsed_sec), str(error)[:500])
         except Exception as e:
             logger.warning(f"TaskRunner.fail failed for {run_id}: {e}")
 
@@ -104,7 +113,7 @@ class TaskRunner:
                         finished_at = $1,
                         error_message = $2
                     WHERE status = 'running'
-                """, datetime.now(), f"Task interrupted: {reason}")
+                """, _now(), f"Task interrupted: {reason}")
             else:
                 result = await DatabasePool.execute("""
                     UPDATE task_runs
@@ -114,7 +123,7 @@ class TaskRunner:
                         error_message = $2
                     WHERE status = 'running'
                       AND started_at < $1 - ($3 * INTERVAL '1 minute')
-                """, datetime.now(), f"Task interrupted: {reason}", timeout_minutes)
+                """, _now(), f"Task interrupted: {reason}", timeout_minutes)
             # asyncpg returns "UPDATE N" string
             cleaned = int(result.split()[-1]) if result and result.startswith("UPDATE") else 0
             return cleaned

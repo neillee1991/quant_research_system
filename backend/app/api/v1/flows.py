@@ -5,6 +5,7 @@ from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
 from pydantic import BaseModel
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from app.core.logger import logger
 from app.models.flow_config import (
@@ -134,7 +135,12 @@ async def get_flow_run_detail(name: str, flow_run_id: str):
         """, flow_run["id"])
 
         def fmt_time(t):
-            return t.isoformat() if t else None
+            if not t:
+                return None
+            # 如果是 naive datetime，附加上海时区
+            if t.tzinfo is None:
+                t = t.replace(tzinfo=ZoneInfo("Asia/Shanghai"))
+            return t.isoformat()
 
         tasks = []
         for r in task_rows:
@@ -197,8 +203,8 @@ async def list_flow_runs(
                 "status": run["status"],
                 "trigger_type": "scheduled" if run["trigger_type"] == "cron" else run["trigger_type"],
                 "target_date": run["target_date"],
-                "started_at": run["started_at"].isoformat() if run.get("started_at") else None,
-                "finished_at": run["ended_at"].isoformat() if run.get("ended_at") else None,
+                "started_at": (run["started_at"].replace(tzinfo=ZoneInfo("Asia/Shanghai")) if run["started_at"].tzinfo is None else run["started_at"]).isoformat() if run.get("started_at") else None,
+                "finished_at": (run["ended_at"].replace(tzinfo=ZoneInfo("Asia/Shanghai")) if run["ended_at"].tzinfo is None else run["ended_at"]).isoformat() if run.get("ended_at") else None,
                 "duration_sec": duration_sec,
                 "error": run.get("error_message"),
             })

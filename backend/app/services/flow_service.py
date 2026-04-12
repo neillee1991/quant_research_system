@@ -3,11 +3,18 @@ Flow Configuration Service (PostgreSQL 版本)
 """
 from typing import List, Optional, Dict, Any
 from datetime import datetime
+from zoneinfo import ZoneInfo
 import json
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
 from app.core.logger import logger
+
+_TZ = ZoneInfo("Asia/Shanghai")
+
+
+def _now() -> datetime:
+    return datetime.now(_TZ)
 from app.core.config import settings
 from app.models.flow_config import (
     FlowConfigCreate,
@@ -116,7 +123,7 @@ class FlowService:
             if existing:
                 raise ValueError(f"Flow with name '{config.name}' already exists")
 
-            now = datetime.now()
+            now = _now()
             with get_db_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
@@ -177,7 +184,7 @@ class FlowService:
                 return existing
 
             # Update in database
-            update_data["updated_at"] = datetime.now()
+            update_data["updated_at"] = _now()
             update_data["version"] = existing.version + 1
 
             # Build update SQL
@@ -205,7 +212,7 @@ class FlowService:
             if not existing:
                 raise ValueError(f"Flow '{name}' not found")
 
-            now = datetime.now()
+            now = _now()
             with get_db_connection() as conn:
                 with conn.cursor() as cur:
                     if soft_delete:
