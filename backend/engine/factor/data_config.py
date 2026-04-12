@@ -24,11 +24,13 @@ _CACHE_TTL_SECONDS = 300  # 5 分钟后自动失效
 
 # 内置默认值（只包含需要特殊处理的字段）
 _DEFAULTS: Dict[str, Dict[str, Any]] = {
-    "list_date": {"table_name": "sync_stock_basic", "column_name": "list_date", "extra_config": {}},
-    "is_st": {"table_name": "", "column_name": "is_st", "extra_config": {}},
-    "is_limit": {"table_name": "", "column_name": "is_limit", "extra_config": {}},
-    "industry_l1": {"table_name": "", "column_name": "", "extra_config": {}},
-    "industry_l2": {"table_name": "", "column_name": "", "extra_config": {}},
+    "adj_factor":  {"table_name": "", "column_name": "adj_factor",  "extra_config": {}},
+    "industry_l1": {"table_name": "", "column_name": "",            "extra_config": {}},
+    "industry_l2": {"table_name": "", "column_name": "",            "extra_config": {}},
+    "is_limit":    {"table_name": "", "column_name": "is_limit",    "extra_config": {}},
+    "is_st":       {"table_name": "", "column_name": "is_st",       "extra_config": {}},
+    "list_date":   {"table_name": "sync_stock_basic", "column_name": "list_date", "extra_config": {}},
+    "market_cap":  {"table_name": "", "column_name": "market_cap",  "extra_config": {}},
 }
 
 

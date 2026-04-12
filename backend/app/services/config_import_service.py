@@ -232,8 +232,9 @@ class ConfigImportService:
         item['created_at'] = now
         item['updated_at'] = now
 
+        # psycopg2 不能直接插入 dict/list，需序列化为 JSON 字符串
         keys = list(item.keys())
-        values = list(item.values())
+        values = [json.dumps(v) if isinstance(v, (dict, list)) else v for v in item.values()]
         placeholders = ", ".join(["%s"] * len(keys))
         cols = ", ".join(keys)
 
@@ -258,7 +259,8 @@ class ConfigImportService:
         for key, value in item.items():
             if key != id_field:
                 update_pairs.append(f"{key} = %s")
-                values.append(value)
+                # psycopg2 不能直接插入 dict/list，需序列化为 JSON 字符串
+                values.append(json.dumps(value) if isinstance(value, (dict, list)) else value)
         values.append(item_id)
 
         sql = f"UPDATE {table_name} SET {', '.join(update_pairs)} WHERE {id_field} = %s"

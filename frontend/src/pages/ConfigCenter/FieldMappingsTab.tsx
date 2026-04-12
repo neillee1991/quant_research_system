@@ -1,11 +1,8 @@
 /**
  * 数据字段映射配置 Tab
- * 从 FactorCenter/DataConfigPanel.tsx 迁移
  */
 import React from 'react';
-import {
-  Button, Spin, Empty, Select, Tag,
-} from 'antd';
+import { Button, Spin, Select, Tag } from 'antd';
 import { ReloadOutlined, SaveOutlined } from '@ant-design/icons';
 import { useDataConfig } from './hooks/useDataConfig';
 
@@ -29,13 +26,11 @@ const FieldMappingsTab: React.FC = () => {
         <div>
           <span style={{ color: 'var(--color-primary)', fontWeight: 600, fontSize: 15 }}>数据字段映射</span>
           <span style={{ color: 'var(--text-muted)', fontSize: 11, marginLeft: 8 }}>
-            配置因子计算引擎使用的数据表和字段映射。主键: trade_date + ts_code。留空表示使用引擎内置逻辑。
+            配置因子计算引擎使用的数据表和字段映射。留空表示使用引擎内置逻辑。
           </span>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <Button icon={<ReloadOutlined />} onClick={loadConfig}>
-            刷新
-          </Button>
+          <Button icon={<ReloadOutlined />} onClick={loadConfig}>刷新</Button>
           <Button
             type="primary"
             icon={<SaveOutlined />}
@@ -52,11 +47,7 @@ const FieldMappingsTab: React.FC = () => {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {mappings.map((m, idx) => {
             const extra = (() => {
-              try {
-                return JSON.parse(m.extra_config || '{}');
-              } catch {
-                return {};
-              }
+              try { return JSON.parse(m.extra_config || '{}'); } catch { return {}; }
             })();
             const hasTable = !!m.table_name;
             const enumValues: Record<string, string> | undefined = extra.values;
@@ -80,7 +71,7 @@ const FieldMappingsTab: React.FC = () => {
                     {m.field_key}
                   </code>
                   <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>
-                    {m.description?.split('。')[0]}
+                    {m.description}
                   </span>
                   {enumValues && (
                     <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
@@ -101,17 +92,9 @@ const FieldMappingsTab: React.FC = () => {
                         {m.table_name}{m.column_name ? `.${m.column_name}` : ''}
                       </Tag>
                     ) : extra.mode ? (
-                      <Tag color="blue" style={{ fontSize: 11 }}>
-                        {extra.mode === 'infer_from_gaps'
-                          ? '从交易日缺失推断'
-                          : extra.mode === 'compute_from_ohlcv'
-                          ? '从OHLCV计算'
-                          : extra.mode}
-                      </Tag>
+                      <Tag color="blue" style={{ fontSize: 11 }}>{extra.mode}</Tag>
                     ) : (
-                      <Tag color="grey" style={{ fontSize: 11 }}>
-                        未配置
-                      </Tag>
+                      <Tag color="grey" style={{ fontSize: 11 }}>未配置</Tag>
                     )}
                   </div>
                 </div>
@@ -139,9 +122,7 @@ const FieldMappingsTab: React.FC = () => {
                     showSearch
                     value={m.column_name || undefined}
                     disabled={!m.table_name}
-                    onFocus={() => {
-                      if (m.table_name) loadColumnsForTable(m.table_name);
-                    }}
+                    onFocus={() => { if (m.table_name) loadColumnsForTable(m.table_name); }}
                     onChange={(v) => updateMapping(idx, { column_name: (v as string) || '' })}
                     options={(tableColumns[m.table_name] || []).map(c => ({ label: c, value: c }))}
                   />
@@ -150,7 +131,6 @@ const FieldMappingsTab: React.FC = () => {
             );
           })}
         </div>
-        {mappings.length === 0 && !loading && <Empty description="暂无配置数据" />}
       </Spin>
     </div>
   );

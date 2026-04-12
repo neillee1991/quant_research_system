@@ -206,6 +206,10 @@ init_backend() {
         print_success "依赖已安装"
     fi
 
+    # 初始化 PostgreSQL 表（幂等，已存在则跳过）
+    print_warning "初始化 PostgreSQL 表结构..."
+    python database/init_postgres.py > /dev/null 2>&1 && print_success "PostgreSQL 表结构已就绪" || print_warning "PostgreSQL 初始化跳过（可能已存在）"
+
     print_success "后端环境就绪"
 }
 

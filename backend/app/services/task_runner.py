@@ -21,7 +21,7 @@ def _now() -> datetime:
     return datetime.now(_TZ)
 
 
-
+class TaskRunner:
     """统一任务状态管理，所有方法失败只 warning，不影响主业务"""
 
     @staticmethod

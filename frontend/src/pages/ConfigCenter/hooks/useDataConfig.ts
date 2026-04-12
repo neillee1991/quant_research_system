@@ -7,8 +7,19 @@ import { notify } from '../../../utils/notify';
 import { productionApi } from '../../../api';
 import type { DataFieldMapping } from '../../../types';
 
+// 预定义字段（与后端引擎支持的字段保持一致）
+const PRESET_FIELDS: DataFieldMapping[] = [
+  { field_key: 'adj_factor',  description: '复权因子',   table_name: '', column_name: '', extra_config: '{}' },
+  { field_key: 'industry_l1', description: '一级行业',   table_name: '', column_name: '', extra_config: '{}' },
+  { field_key: 'industry_l2', description: '二级行业',   table_name: '', column_name: '', extra_config: '{}' },
+  { field_key: 'is_limit',    description: '涨跌停标记', table_name: '', column_name: '', extra_config: '{}' },
+  { field_key: 'is_st',       description: 'ST标记',     table_name: '', column_name: '', extra_config: '{}' },
+  { field_key: 'list_date',   description: '上市日期',   table_name: '', column_name: '', extra_config: '{}' },
+  { field_key: 'market_cap',  description: '市值',       table_name: '', column_name: '', extra_config: '{}' },
+];
+
 export const useDataConfig = () => {
-  const [mappings, setMappings] = useState<DataFieldMapping[]>([]);
+  const [mappings, setMappings] = useState<DataFieldMapping[]>(PRESET_FIELDS);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [tables, setTables] = useState<string[]>([]);
@@ -19,7 +30,10 @@ export const useDataConfig = () => {
     setLoading(true);
     try {
       const res = await productionApi.getDataConfig();
-      setMappings(res.data?.data || []);
+      const dbRows: DataFieldMapping[] = res.data?.data || [];
+      // 以预设字段为基础，用数据库中已保存的值覆盖
+      const dbMap = Object.fromEntries(dbRows.map(r => [r.field_key, r]));
+      setMappings(PRESET_FIELDS.map(f => dbMap[f.field_key] ? { ...f, ...dbMap[f.field_key] } : f));
       setChanged(false);
     } catch (error) {
       console.error('Failed to load data config:', error);
@@ -40,10 +54,8 @@ export const useDataConfig = () => {
 
   const loadColumnsForTable = async (tableName: string) => {
     if (!tableName) return;
-
     const cached = tableColumns[tableName];
     if (cached && cached.length > 0) return;
-
     try {
       const res = await productionApi.getTableColumns(tableName);
       const cols: string[] = res.data?.columns || [];
