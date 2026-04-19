@@ -85,6 +85,38 @@ export interface FlowDefinition {
   description?: string;
 }
 
+export type StrategyMode = 'graph' | 'code';
+
+export interface StrategyPlaceholderIR {
+  source_type: 'script';
+  language: string;
+  entry_point: string;
+  pipeline_version: string;
+}
+
+export interface StrategyScriptValidateResponse {
+  valid: boolean;
+  language: string;
+  script_hash: string;
+  warnings: string[];
+  errors: string[];
+}
+
+export interface StrategyScriptCompileResponse {
+  status: 'compiled';
+  script_hash: string;
+  ir: StrategyPlaceholderIR;
+  warnings: string[];
+}
+
+export interface StrategyScriptBacktestRequest {
+  script: string;
+  name?: string;
+  language?: string;
+  entry_point?: string;
+  params?: Record<string, unknown>;
+}
+
 export interface MLTrainRequest {
   ts_code: string;
   task: 'full' | 'incremental';

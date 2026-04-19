@@ -97,6 +97,21 @@ export const TaskLogTable: React.FC<TaskLogTableProps> = ({
       ),
     },
     {
+      title: '模式',
+      dataIndex: 'params',
+      key: 'mode',
+      width: 70,
+      render: (v: string | null) => {
+        try {
+          const obj = v ? JSON.parse(v) : {};
+          const mode = obj.mode || 'graph';
+          return <Tag color={mode === 'script' ? 'purple' : 'blue'}>{mode === 'script' ? '脚本' : '图'}</Tag>;
+        } catch {
+          return <Tag color="blue">图</Tag>;
+        }
+      },
+    },
+    {
       title: '运行ID',
       dataIndex: 'run_id',
       key: 'run_id',

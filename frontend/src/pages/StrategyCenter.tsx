@@ -1,19 +1,42 @@
 import { notify } from '../utils/notify';
-import React, { useState, useEffect } from 'react';
-import { Tabs, Select, Button, Tag, Spin, Progress } from 'antd';
+import React, { useState, useEffect, useRef } from 'react';
+import { Tabs, Select, Button, Tag, Spin, Progress, Segmented } from 'antd';
 import FlowEditor from '../components/FlowEditor';
+import StrategyCodeEditor from '../components/StrategyCodeEditor';
 import EquityCurveChart from '../components/Charts/EquityCurveChart';
 import { useBacktestStore } from '../store';
-import { mlApi } from '../api';
+import { useStrategyScriptStore } from '../store/strategyScriptStore';
+import { mlApi, strategyApi, taskMonitorApi } from '../api';
 import { useTaskLogs } from '../hooks/useTaskLogs';
 import { TaskLogTable } from '../components/TaskLogTable';
-import type { MLJobStatus, MLWeights, EquityPoint, BacktestMetrics } from '../types';
+import type { MLJobStatus, MLWeights, EquityPoint, BacktestMetrics, StrategyMode } from '../types';
+
+const POLL_INTERVAL = 3000;
 
 const StrategyCenter: React.FC = () => {
-  // 回测状态
-  const { result, loading } = useBacktestStore();
+  // 回测结果状态
+  const { result, loading, setLoading, setResult } = useBacktestStore();
   const metrics: BacktestMetrics | undefined = result?.metrics;
   const equity: EquityPoint[] = result?.equity_curve || [];
+
+  // 脚本编辑器状态（store）
+  const {
+    code: scriptCode,
+    runStatus: scriptRunStatus,
+    validationResult,
+    compileResult,
+    runError,
+    setCode: setScriptCode,
+    setValidationResult,
+    setCompileResult,
+    setRunId,
+    setRunStatus,
+    setRunError,
+    resetRun,
+  } = useStrategyScriptStore();
+
+  const [strategyMode, setStrategyMode] = useState<StrategyMode>('graph');
+  const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ML 状态
   const [tsCode, setTsCode] = useState<string>('000001.SZ');
@@ -28,6 +51,13 @@ const StrategyCenter: React.FC = () => {
   useEffect(() => {
     loadBacktestLogs();
   }, [loadBacktestLogs]);
+
+  // 清理轮询
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) clearTimeout(pollRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     mlApi.getWeights().then((r) => {
@@ -123,6 +153,113 @@ const StrategyCenter: React.FC = () => {
     }
   };
 
+  // ── 脚本模式：校验 ──────────────────────────────────
+  const handleValidateScript = async (): Promise<void> => {
+    setRunStatus('validating');
+    try {
+      const response = await strategyApi.validateScript(scriptCode);
+      const data = response.data;
+      setValidationResult(data);
+      if (data.valid) {
+        notify.success(`校验通过 (${data.script_hash.slice(0, 8)})`);
+      } else {
+        notify.error(data.errors?.[0] || '校验失败');
+      }
+    } catch (error) {
+      console.error('Failed to validate script:', error);
+      notify.error('校验请求失败');
+    } finally {
+      setRunStatus('idle');
+    }
+  };
+
+  // ── 脚本模式：编译 ──────────────────────────────────
+  const handleCompileScript = async (): Promise<void> => {
+    setRunStatus('compiling');
+    try {
+      const response = await strategyApi.compileScript(scriptCode);
+      const data = response.data;
+      setCompileResult(data);
+      if (data.status === 'compiled') {
+        notify.success('编译成功');
+      } else {
+        notify.error(data.errors?.[0] || '编译失败');
+      }
+    } catch (error) {
+      console.error('Failed to compile script:', error);
+      notify.error('编译请求失败');
+    } finally {
+      setRunStatus('idle');
+    }
+  };
+
+  // ── 脚本模式：运行回测 + 异步轮询闭环 ──────────────
+  const pollScriptRunResult = (runId: string) => {
+    const poll = async () => {
+      try {
+        const r = await strategyApi.getBacktestRun(runId);
+        const data = r.data;
+
+        if (data.status === 'running') {
+          pollRef.current = setTimeout(poll, POLL_INTERVAL);
+          return;
+        }
+
+        if (data.status === 'failed') {
+          setRunStatus('failed');
+          setRunError(data.error || '回测执行失败');
+          setLoading(false);
+          notify.error(data.error || '回测执行失败');
+          return;
+        }
+
+        // 成功：写入 backtestStore，自动展示 metrics + 权益曲线
+        setRunStatus('success');
+        setLoading(false);
+        setResult({
+          metrics: data.metrics,
+          equity_curve: data.equity_curve || [],
+          trades: data.trades_sample || [],
+          start_date: '',
+          end_date: '',
+          initial_capital: 1_000_000,
+        });
+        notify.success('脚本回测完成');
+        loadBacktestLogs();
+      } catch (error) {
+        console.error('Failed to poll script result:', error);
+        setRunStatus('failed');
+        setRunError('结果查询失败');
+        setLoading(false);
+      }
+    };
+    pollRef.current = setTimeout(poll, POLL_INTERVAL);
+  };
+
+  const handleRunScriptBacktest = async (): Promise<void> => {
+    resetRun();
+    setRunStatus('submitting');
+    setLoading(true);
+    try {
+      const response = await strategyApi.backtestScript({
+        script: scriptCode,
+        name: 'script_backtest',
+      });
+      const data = response.data;
+      setRunId(data.run_id);
+      setRunStatus('running');
+      notify.info('脚本回测任务已提交');
+      pollScriptRunResult(data.run_id);
+    } catch (error: unknown) {
+      console.error('Failed to run script backtest:', error);
+      const msg = (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail || '脚本回测启动失败';
+      setRunStatus('failed');
+      setRunError(msg);
+      setLoading(false);
+      notify.error(msg);
+    }
+  };
+
   return (
     <div style={{ padding: '8px', maxWidth: '1600px', margin: '0 auto' }}>
       <Tabs defaultActiveKey="1" items={[
@@ -139,25 +276,52 @@ const StrategyCenter: React.FC = () => {
             boxShadow: 'var(--shadow-sm)',
             transition: 'all 280ms cubic-bezier(0.4, 0, 0.2, 1)'
           }}>
-            <h3 style={{
-              color: 'var(--color-primary)',
-              fontSize: 16,
-              fontWeight: 600,
-              margin: '0 0 16px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8
-            }}>
-              <span style={{
-                display: 'inline-block',
-                width: 4,
-                height: 16,
-                background: 'var(--gradient-primary)',
-                borderRadius: 2
-              }}></span>
-              可视化策略编辑器
-            </h3>
-            <FlowEditor />
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
+              <h3 style={{
+                color: 'var(--color-primary)',
+                fontSize: 16,
+                fontWeight: 600,
+                margin: 0,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8
+              }}>
+                <span style={{
+                  display: 'inline-block',
+                  width: 4,
+                  height: 16,
+                  background: 'var(--gradient-primary)',
+                  borderRadius: 2
+                }}></span>
+                策略回测编辑器
+              </h3>
+              <Segmented
+                value={strategyMode}
+                onChange={(value) => setStrategyMode(value as StrategyMode)}
+                options={[
+                  { label: '图模式', value: 'graph' },
+                  { label: '代码模式', value: 'code' },
+                ]}
+              />
+            </div>
+            {strategyMode === 'graph' ? (
+              <>
+                <div style={{ color: 'var(--text-secondary)', fontSize: 13, marginBottom: 16 }}>当前为兼容图模式，后续将逐步迁移到代码模式。</div>
+                <FlowEditor />
+              </>
+            ) : (
+              <StrategyCodeEditor
+                value={scriptCode}
+                runStatus={scriptRunStatus}
+                validationResult={validationResult}
+                compileResult={compileResult}
+                runError={runError}
+                onChange={setScriptCode}
+                onValidate={handleValidateScript}
+                onCompile={handleCompileScript}
+                onRun={handleRunScriptBacktest}
+              />
+            )}
           </div>
 
           {loading && (

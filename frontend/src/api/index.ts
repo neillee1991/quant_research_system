@@ -106,6 +106,14 @@ export const strategyApi = {
     api.post('/strategy/backtest/async', { name, graph }),
   getBacktestResult: (runId: string) =>
     api.get(`/strategy/backtest/${runId}/result`),
+  validateScript: (script: string, language = 'python') =>
+    api.post('/strategy/backtest/script/validate', { script, language }),
+  compileScript: (script: string, language = 'python', entryPoint = 'build_strategy') =>
+    api.post('/strategy/backtest/script/compile', { script, language, entry_point: entryPoint }),
+  backtestScript: (payload: { script: string; name?: string; language?: string; entry_point?: string; params?: Record<string, unknown> }) =>
+    api.post('/strategy/backtest/script', payload),
+  getBacktestRun: (runId: string) =>
+    api.get(`/strategy/backtest/runs/${runId}`),
 };
 
 export const mlApi = {
