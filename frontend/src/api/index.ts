@@ -100,6 +100,103 @@ export const dataApi = {
   getTableInfo: (tableName: string) => api.get(`/data/tables/${tableName}/info`),
 };
 
+// 批量脚本回测请求类型
+export interface ScriptBatchBacktestRequest {
+  script: string;
+  name?: string;
+  language?: string;
+  entry_point?: string;
+  param_grid: Record<string, unknown[]>;
+  ts_codes?: string[];
+}
+
+// 批量回测响应类型
+export interface ScriptBatchBacktestResponse {
+  batch_id: string;
+  total_runs: number;
+  run_ids: string[];
+  task_ids: string[];
+  mode: string;
+  status: string;
+  message: string;
+  script_hash: string;
+}
+
+// 单个回测结果类型
+export interface ScriptBatchResult {
+  run_id: string;
+  task_id: string;
+  status: string;
+  params: Record<string, unknown>;
+  metrics?: Record<string, unknown>;
+  equity_curve?: Record<string, unknown>[];
+  trades_sample?: Record<string, unknown>[];
+  warnings: string[];
+  error_message?: string;
+  created_at?: string;
+}
+
+// 脚本对账请求类型
+export interface ScriptCrossValidateRequest {
+  script: string;
+  graph: object;
+  script_params?: object;
+  language?: string;
+  entry_point?: string;
+}
+
+// 脚本对账响应类型
+export interface ScriptCrossValidateResponse {
+  cross_validate_id: string;
+  status: string;
+  script_metrics?: any;
+  graph_metrics?: any;
+  diff?: any;
+  error?: string;
+  started_at?: string;
+  finished_at?: string;
+}
+
+interface BestRun {
+  run_id: string;
+  task_id: string;
+  params: Record<string, unknown>;
+  metrics?: {
+    sharpe_ratio?: number;
+    annualized_return?: number;
+    max_drawdown?: number;
+    win_rate?: number;
+  };
+  sharpe?: number;
+}
+
+interface Summary {
+  total_runs: number;
+  completed_runs: number;
+  failed_runs: number;
+  running_runs: number;
+  success_rate?: number;
+  avg_sharpe_ratio?: number;
+  max_sharpe_ratio?: number;
+  min_sharpe_ratio?: number;
+  avg_total_return?: number;
+  max_total_return?: number;
+  min_total_return?: number;
+  avg_max_drawdown?: number;
+}
+
+// 批量回测聚合结果类型
+export interface ScriptBatchAggregatedResult {
+  batch_id: string;
+  total_runs: number;
+  completed_runs: number;
+  failed_runs: number;
+  running_runs: number;
+  results: ScriptBatchResult[];
+  best_run?: BestRun;
+  summary: Summary;
+}
+
 export const strategyApi = {
   backtest: (graph: object) => longRunningApi.post('/strategy/backtest', { graph }), // 回测可能耗时
   backtestAsync: (name: string, graph: object) =>
@@ -114,6 +211,18 @@ export const strategyApi = {
     api.post('/strategy/backtest/script', payload),
   getBacktestRun: (runId: string) =>
     api.get(`/strategy/backtest/runs/${runId}`),
+  // 批量脚本回测
+  batchBacktestScript: (payload: ScriptBatchBacktestRequest) =>
+    api.post<ScriptBatchBacktestResponse>('/strategy/backtest/script/batch', payload),
+  // 获取批量回测结果
+  getBatchResult: (batchId: string) =>
+    api.get<ScriptBatchAggregatedResult>(`/strategy/backtest/script/batch/${batchId}`),
+  // 脚本对账（Cross Validate）
+  crossValidateScript: (payload: ScriptCrossValidateRequest) =>
+    api.post<ScriptCrossValidateResponse>('/strategy/backtest/script/validate-cross', payload),
+  // 获取对账结果
+  getCrossValidateResult: (crossId: string) =>
+    api.get<ScriptCrossValidateResponse>(`/strategy/backtest/script/validate-cross/${crossId}`),
 };
 
 export const mlApi = {

@@ -96,6 +96,7 @@ async def main():
             "005_fix_etl_task_configs.sql",
             "006_add_constraints_and_triggers.sql",
             "007_fix_missing_updated_at_columns.sql",
+            "008_add_batch_fields_to_backtest_results.sql",  # 批量回测字段
         ]
 
         if not has_singular and not has_plural:

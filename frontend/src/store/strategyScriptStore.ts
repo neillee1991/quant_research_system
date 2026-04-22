@@ -2,16 +2,8 @@ import { create } from 'zustand';
 import type {
   StrategyScriptValidateResponse,
   StrategyScriptCompileResponse,
+  ScriptRunStatus,
 } from '../types';
-
-export type ScriptRunStatus =
-  | 'idle'
-  | 'validating'
-  | 'compiling'
-  | 'submitting'
-  | 'running'
-  | 'success'
-  | 'failed';
 
 interface StrategyScriptState {
   code: string;

@@ -4,12 +4,16 @@ import { Tabs, Select, Button, Tag, Spin, Progress, Segmented } from 'antd';
 import FlowEditor from '../components/FlowEditor';
 import StrategyCodeEditor from '../components/StrategyCodeEditor';
 import EquityCurveChart from '../components/Charts/EquityCurveChart';
+import ScriptParamsPanel from '../components/ScriptParamsPanel';
+import BatchResultPanel from '../components/BatchResultPanel';
+import GraphScriptCrossValidatePanel from '../components/GraphScriptCrossValidatePanel';
 import { useBacktestStore } from '../store';
 import { useStrategyScriptStore } from '../store/strategyScriptStore';
 import { mlApi, strategyApi, taskMonitorApi } from '../api';
 import { useTaskLogs } from '../hooks/useTaskLogs';
 import { TaskLogTable } from '../components/TaskLogTable';
 import type { MLJobStatus, MLWeights, EquityPoint, BacktestMetrics, StrategyMode } from '../types';
+import type { ScriptBatchAggregatedResult, ScriptCrossValidateResponse } from '../api';
 
 const POLL_INTERVAL = 3000;
 
@@ -35,8 +39,13 @@ const StrategyCenter: React.FC = () => {
     resetRun,
   } = useStrategyScriptStore();
 
-  const [strategyMode, setStrategyMode] = useState<StrategyMode>('graph');
+  const [strategyMode, setStrategyMode] = useState<StrategyMode>('code');
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // 新增状态管理
+  const [batchResult, setBatchResult] = useState<ScriptBatchAggregatedResult | null>(null);
+  const [batchLoading, setBatchLoading] = useState<boolean>(false);
+  const [crossResult, setCrossResult] = useState<ScriptCrossValidateResponse | null>(null);
 
   // ML 状态
   const [tsCode, setTsCode] = useState<string>('000001.SZ');
@@ -236,6 +245,73 @@ const StrategyCenter: React.FC = () => {
     pollRef.current = setTimeout(poll, POLL_INTERVAL);
   };
 
+  // ── 脚本模式：批量回测 ──────────────────────────────
+  const handleBatchRun = async (): Promise<void> => {
+    setBatchLoading(true);
+    try {
+      const response = await strategyApi.batchBacktestScript({
+        script: scriptCode,
+        name: 'batch_backtest',
+        param_grid: {}, // 暂时空，后续可从 ScriptParamsPanel 获取
+        ts_codes: ['000001.SZ'], // 默认股票
+      });
+      const data = response.data;
+      notify.info(`批量回测任务已提交，共 ${data.total_runs} 组`);
+      // 轮询获取批量回测结果
+      pollBatchResult(data.batch_id);
+    } catch (error: unknown) {
+      console.error('Failed to run batch backtest:', error);
+      const msg = (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail || '批量回测启动失败';
+      notify.error(msg);
+      setBatchLoading(false);
+    }
+  };
+
+  const pollBatchResult = (batchId: string) => {
+    const poll = async () => {
+      try {
+        const response = await strategyApi.getBatchResult(batchId);
+        const data = response.data;
+        setBatchResult(data);
+
+        // 检查是否所有回测都完成
+        if (data.completed_runs + data.failed_runs < data.total_runs) {
+          pollRef.current = setTimeout(poll, POLL_INTERVAL);
+        } else {
+          setBatchLoading(false);
+          notify.success('批量回测完成');
+        }
+      } catch (error) {
+        console.error('Failed to poll batch result:', error);
+        setBatchLoading(false);
+      }
+    };
+    pollRef.current = setTimeout(poll, POLL_INTERVAL);
+  };
+
+  // ── 处理选中回测结果 ──────────────────────────────
+  const handleResultSelect = async (runId: string): Promise<void> => {
+    try {
+      const response = await strategyApi.getBacktestRun(runId);
+      const data = response.data;
+
+      if (data.status === 'completed' && data.metrics) {
+        setResult({
+          metrics: data.metrics,
+          equity_curve: data.equity_curve || [],
+          trades: data.trades_sample || [],
+          start_date: '',
+          end_date: '',
+          initial_capital: 1_000_000,
+        });
+        notify.success('回测结果已加载');
+      }
+    } catch (error) {
+      console.error('Failed to get backtest result:', error);
+      notify.error('加载回测结果失败');
+    }
+  };
+
   const handleRunScriptBacktest = async (): Promise<void> => {
     resetRun();
     setRunStatus('submitting');
@@ -310,17 +386,28 @@ const StrategyCenter: React.FC = () => {
                 <FlowEditor />
               </>
             ) : (
-              <StrategyCodeEditor
-                value={scriptCode}
-                runStatus={scriptRunStatus}
-                validationResult={validationResult}
-                compileResult={compileResult}
-                runError={runError}
-                onChange={setScriptCode}
-                onValidate={handleValidateScript}
-                onCompile={handleCompileScript}
-                onRun={handleRunScriptBacktest}
-              />
+              <>
+                <StrategyCodeEditor
+                  value={scriptCode}
+                  runStatus={scriptRunStatus}
+                  validationResult={validationResult}
+                  compileResult={compileResult}
+                  runError={runError}
+                  onChange={setScriptCode}
+                  onValidate={handleValidateScript}
+                  onCompile={handleCompileScript}
+                  onRun={handleRunScriptBacktest}
+                />
+                {/* 脚本参数面板 - 仅在代码模式显示 */}
+                <div style={{ marginTop: 16 }}>
+                  <ScriptParamsPanel
+                    compileResult={compileResult}
+                    onParamsChange={() => {}} // 暂时空实现
+                    onBatchRun={handleBatchRun}
+                    disabled={scriptRunStatus !== 'idle'}
+                  />
+                </div>
+              </>
             )}
           </div>
 
@@ -425,6 +512,26 @@ const StrategyCenter: React.FC = () => {
                 </div>
               )}
             </>
+          )}
+
+          {/* 批量回测结果面板 */}
+          <div style={{ marginTop: 16 }}>
+            <BatchResultPanel
+              result={batchResult}
+              loading={batchLoading}
+              onResultSelect={handleResultSelect}
+            />
+          </div>
+
+          {/* 图与脚本模式对账验证面板 - 当有 graph 数据时显示 */}
+          {strategyMode === 'graph' && (
+            <div style={{ marginTop: 16 }}>
+              <GraphScriptCrossValidatePanel
+                script={scriptCode}
+                graph={null} // 暂时空，需要从 FlowEditor 中获取 graph 数据
+                disabled={scriptRunStatus !== 'idle'}
+              />
+            </div>
           )}
           </>
           )

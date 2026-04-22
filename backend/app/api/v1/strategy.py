@@ -104,6 +104,15 @@ async def run_script_backtest(req: ScriptBacktestRequest, background_tasks: Back
     task_id = f"{req.name}_{uuid.uuid4().hex[:8]}"
     run_id = f"script_{task_id}_{int(time.time() * 1000)}"
 
+    # 保存脚本版本到 script_versions 表（ON CONFLICT DO NOTHING 避免重复插入）
+    from scheduler.db import DatabasePool
+    await DatabasePool.execute("""
+        INSERT INTO script_versions
+          (script_hash, script_text, name, language, created_at)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (script_hash) DO NOTHING
+    """, script_hash, req.script, req.name, req.language, datetime.now())
+
     await TaskRunner.start(
         run_id, "backtest", task_id, f"脚本回测: {req.name}",
         params=json.dumps({

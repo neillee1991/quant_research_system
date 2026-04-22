@@ -87,11 +87,36 @@ export interface FlowDefinition {
 
 export type StrategyMode = 'graph' | 'code';
 
+export type ScriptRunStatus =
+  | 'idle'
+  | 'validating'
+  | 'compiling'
+  | 'submitting'
+  | 'running'
+  | 'success'
+  | 'failed';
+
+interface PipelineStage {
+  type: string;
+  op?: string;
+  output_col?: string;
+  params?: Record<string, unknown>;
+}
+
+interface DataSource {
+  ts_code?: string;
+  start_date?: string;
+  end_date?: string;
+}
+
 export interface StrategyPlaceholderIR {
+  version: string;
   source_type: 'script';
   language: string;
   entry_point: string;
-  pipeline_version: string;
+  pipeline_version?: string;
+  pipeline?: PipelineStage[];
+  data_source?: DataSource;
 }
 
 export interface StrategyScriptValidateResponse {
@@ -102,12 +127,20 @@ export interface StrategyScriptValidateResponse {
   errors: string[];
 }
 
-export interface StrategyScriptCompileResponse {
+export interface StrategyScriptCompileSuccessResponse {
   status: 'compiled';
   script_hash: string;
   ir: StrategyPlaceholderIR;
   warnings: string[];
 }
+
+export interface StrategyScriptCompileFailureResponse {
+  status: 'failed';
+  script_hash: string;
+  errors: string[];
+}
+
+export type StrategyScriptCompileResponse = StrategyScriptCompileSuccessResponse | StrategyScriptCompileFailureResponse;
 
 export interface StrategyScriptBacktestRequest {
   script: string;

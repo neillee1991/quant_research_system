@@ -18,6 +18,8 @@ from app.api.v1 import strategy, ml, flows, tasks
 from app.api.v1 import factor  # 使用拆分后的 factor 模块
 from app.api.v1 import data  # 使用拆分后的 data 模块
 from app.api.v1 import config  # 统一配置中心 API
+from app.api.v1 import script_batch  # 批量脚本回测 API
+from app.api.v1 import script_validate_cross  # 图与脚本对账 API
 from store.dolphindb_client import db_client
 
 
@@ -128,6 +130,8 @@ def create_app() -> FastAPI:
     # 路由注册
     app.include_router(data.router, prefix=settings.api_v1_prefix, tags=["data"])
     app.include_router(strategy.router, prefix=settings.api_v1_prefix, tags=["strategy"])
+    app.include_router(script_batch.router, prefix=settings.api_v1_prefix, tags=["strategy"])  # 批量脚本回测
+    app.include_router(script_validate_cross.router, prefix=settings.api_v1_prefix, tags=["strategy"])  # 图与脚本对账
     app.include_router(ml.router, prefix=settings.api_v1_prefix, tags=["ml"])
     app.include_router(factor.router, prefix=settings.api_v1_prefix, tags=["factor"])
     app.include_router(flows.router, prefix=settings.api_v1_prefix, tags=["flows"])

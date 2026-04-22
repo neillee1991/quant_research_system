@@ -9,18 +9,11 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from engine.parser.flow_parser import OPERATOR_REGISTRY
+from engine.script.sandbox import run_in_sandbox
 
 # 安全的内置函数和异常类型白名单
-_SAFE_BUILTINS = {
-    "abs": abs, "all": all, "any": any, "bool": bool, "dict": dict,
-    "enumerate": enumerate, "filter": filter, "float": float, "int": int,
-    "isinstance": isinstance, "len": len, "list": list, "map": map,
-    "max": max, "min": min, "print": print, "range": range,
-    "round": round, "set": set, "sorted": sorted, "str": str,
-    "sum": sum, "tuple": tuple, "zip": zip,
-    "ValueError": ValueError, "TypeError": TypeError, "KeyError": KeyError,
-    "IndexError": IndexError, "RuntimeError": RuntimeError, "Exception": Exception,
-}
+# 复用 sandbox.py 中的白名单以确保一致性
+from engine.script.sandbox import _SAFE_BUILTINS
 
 # 策略配置必要字段
 _REQUIRED_FIELDS = {"ts_code", "start_date", "end_date", "signals"}
@@ -99,31 +92,14 @@ def compile_script(
 def _execute_sandboxed(
     script: str, entry_point: str, errors: list[str],
 ) -> dict[str, Any]:
-    """在受限命名空间中执行脚本并调用 entry_point 函数。"""
-    safe_globals: dict[str, Any] = {"__builtins__": _SAFE_BUILTINS}
-    safe_locals: dict[str, Any] = {}
+    """在进程级沙箱中执行脚本并调用 entry_point 函数。"""
+    sandbox_result = run_in_sandbox(script, entry_point)
 
-    try:
-        exec(script, safe_globals, safe_locals)
-    except Exception as e:
-        errors.append(f"脚本执行失败: {e}")
+    if not sandbox_result.success:
+        errors.append(f"脚本执行失败: {sandbox_result.error}")
         return {}
 
-    if entry_point not in safe_locals:
-        errors.append(f"入口函数 '{entry_point}' 在执行后不可用")
-        return {}
-
-    try:
-        result = safe_locals[entry_point]()
-    except Exception as e:
-        errors.append(f"调用 {entry_point}() 失败: {e}")
-        return {}
-
-    if not isinstance(result, dict):
-        errors.append(f"{entry_point}() 必须返回 dict，实际返回 {type(result).__name__}")
-        return {}
-
-    return result
+    return sandbox_result.result or {}
 
 
 def _validate_config_structure(
