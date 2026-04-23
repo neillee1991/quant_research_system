@@ -66,7 +66,8 @@ export const dataApi = {
   deleteEtlTask: (taskId: string, dropTable?: boolean) => api.delete(`/tasks/etl/${taskId}`, { params: { drop_table: dropTable } }),
   getEtlTaskStatus: (taskId: string) => api.get(`/tasks/etl/${taskId}/status`),
   getEtlTableSchema: (taskId: string) => api.get(`/tasks/etl/${taskId}/schema`),
-  runEtlTask: (taskId: string) => longRunningApi.post(`/tasks/etl/${taskId}/execute`),
+  runEtlTask: (taskId: string, startDate?: string, endDate?: string) =>
+    longRunningApi.post(`/tasks/etl/${taskId}/execute`, { start_date: startDate, end_date: endDate }),
   testEtlScript: (script: string, date?: string) => api.post('/tasks/etl/test', { script, date }),
   backfillEtlTask: (taskId: string, startDate: string, endDate: string) =>
     longRunningApi.post(`/tasks/etl/${taskId}/backfill`, null, {
