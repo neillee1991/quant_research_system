@@ -1,24 +1,5 @@
 import { create } from 'zustand';
-import { Node, Edge } from 'reactflow';
 import type { RunningTask } from '../api';
-
-interface FlowState {
-  nodes: Node[];
-  edges: Edge[];
-  setNodes: (nodes: Node[]) => void;
-  setEdges: (edges: Edge[]) => void;
-  addNode: (node: Node) => void;
-  reset: () => void;
-}
-
-export const useFlowStore = create<FlowState>((set) => ({
-  nodes: [],
-  edges: [],
-  setNodes: (nodes) => set({ nodes }),
-  setEdges: (edges) => set({ edges }),
-  addNode: (node) => set((s) => ({ nodes: [...s.nodes, node] })),
-  reset: () => set({ nodes: [], edges: [] }),
-}));
 
 interface BacktestState {
   result: any | null;

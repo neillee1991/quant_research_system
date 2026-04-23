@@ -9,17 +9,12 @@ from pydantic import BaseModel, Field
 
 from app.core.logger import logger
 from app.services.task_runner import TaskRunner, tracked_task
-from engine.parser.flow_parser import FlowParser
 from engine.script.validator import validate_script
 from engine.script.compiler import compile_script
 from engine.script.executor import execute_ir, ExecutionError
 from store.dolphindb_client import db_client
 
 router = APIRouter()
-
-
-class BacktestRequest(BaseModel):
-    graph: dict[str, Any]
 
 
 class ScriptValidateRequest(BaseModel):
@@ -39,16 +34,6 @@ class ScriptBacktestRequest(BaseModel):
     language: str = "python"
     entry_point: str = "build_strategy"
     params: dict[str, Any] = Field(default_factory=dict)
-
-
-class SimpleBacktestRequest(BaseModel):
-    ts_code: str
-    start_date: str = "20200101"
-    end_date: str = "20241231"
-    signal_col: str = "signal"
-    commission_rate: float = 0.0003
-    slippage_rate: float = 0.0001
-    initial_capital: float = 1_000_000.0
 
 
 def _load_data(ts_code: str, start: str, end: str):
@@ -196,7 +181,7 @@ async def get_unified_backtest_run(run_id: str):
         raise HTTPException(status_code=404, detail=f"Run not found: {run_id}")
 
     task = dict(task_row)
-    mode = task.get("mode") or "graph"
+    mode = task.get("mode") or "script"
 
     if task["status"] == "running":
         return {
@@ -237,100 +222,3 @@ async def get_unified_backtest_run(run_id: str):
         "script_hash": r.get("script_hash"),
         "created_at": str(r.get("created_at", "")),
     }
-
-
-# ── 图模式回测（保持不变） ──────────────────────────────────────
-
-@tracked_task("backtest", task_id_kwarg="task_id")
-async def _run_backtest_background(task_id: str, graph: dict, run_id: str):
-    """后台执行回测，结果写入 PostgreSQL backtest_results"""
-    from scheduler.db import DatabasePool
-
-    parser = FlowParser(df_loader=_load_data)
-    result = parser.parse_and_run(graph)
-
-    metrics = result.get("metrics", {})
-    equity_curve = result.get("equity_curve", [])
-    trades = result.get("trades", result.get("trades_sample", []))
-
-    await DatabasePool.execute("""
-        INSERT INTO backtest_results
-          (run_id, task_id, task_name, metrics_json, equity_curve_json,
-           trades_json, created_at, mode)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-        ON CONFLICT (run_id) DO UPDATE SET
-          metrics_json      = EXCLUDED.metrics_json,
-          equity_curve_json = EXCLUDED.equity_curve_json,
-          trades_json       = EXCLUDED.trades_json
-    """,
-        run_id, task_id, task_id,
-        json.dumps(metrics, default=str),
-        json.dumps(equity_curve, default=str),
-        json.dumps(trades, default=str),
-        datetime.now(), "graph",
-    )
-
-    return {
-        "rows": len(equity_curve),
-        "extra": {"result": {"type": "table", "table": "backtest_results"}},
-    }
-
-
-@router.post("/strategy/backtest/async")
-async def backtest_async(request: dict, background_tasks: BackgroundTasks):
-    """异步回测 - 立即返回 run_id，后台执行，结果持久化到 backtest_results 表"""
-    name = request.get("name", "backtest")
-    graph = request.get("graph", {})
-
-    task_id = f"{name}_{uuid.uuid4().hex[:8]}"
-    run_id = f"{task_id}_{int(time.time() * 1000)}"
-
-    await TaskRunner.start(run_id, "backtest", task_id, f"回测: {name}",
-                           params=json.dumps({"name": name, "mode": "graph"}))
-
-    background_tasks.add_task(
-        _run_backtest_background,
-        task_id=task_id,
-        graph=graph,
-        run_id=run_id,
-    )
-
-    return {"run_id": run_id, "task_id": task_id, "status": "running"}
-
-
-@router.get("/strategy/backtest/{run_id}/result")
-async def get_backtest_result(run_id: str):
-    """查询回测结果（从 PostgreSQL backtest_results 表）"""
-    from scheduler.db import DatabasePool
-
-    row = await DatabasePool.fetchrow(
-        "SELECT * FROM backtest_results WHERE run_id = $1", run_id,
-    )
-    if not row:
-        raise HTTPException(status_code=404, detail=f"Result not found for run_id: {run_id}")
-
-    r = dict(row)
-    return {
-        "run_id": r["run_id"],
-        "task_id": r["task_id"],
-        "task_name": r["task_name"],
-        "mode": r.get("mode", "graph"),
-        "metrics": json.loads(r.get("metrics_json") or "{}"),
-        "equity_curve": json.loads(r.get("equity_curve_json") or "[]"),
-        "trades_sample": json.loads(r.get("trades_json") or "[]"),
-        "created_at": str(r.get("created_at", "")),
-    }
-
-
-@router.post("/strategy/backtest")
-def run_backtest(req: BacktestRequest):
-    """Run a backtest from a React Flow graph JSON."""
-    try:
-        parser = FlowParser(df_loader=_load_data)
-        result = parser.parse_and_run(req.graph)
-        return result
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error(f"Backtest error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
