@@ -16,12 +16,12 @@ class TechnicalFactors:
 
     @staticmethod
     def rsi(series: pl.Series, window: int = 14) -> pl.Series:
-        """Relative Strength Index."""
+        """Relative Strength Index using Wilder's method (EMA with com=window-1)."""
         delta = series.diff()
         gain = delta.clip(lower_bound=0)
         loss = (-delta).clip(lower_bound=0)
-        avg_gain = gain.ewm_mean(span=window, adjust=False)
-        avg_loss = loss.ewm_mean(span=window, adjust=False)
+        avg_gain = gain.ewm_mean(com=window - 1, adjust=False)
+        avg_loss = loss.ewm_mean(com=window - 1, adjust=False)
         # fill_nan(0) then add epsilon to avoid division by zero
         safe_loss = avg_loss.fill_nan(0.0) + 1e-10
         rs = avg_gain / safe_loss

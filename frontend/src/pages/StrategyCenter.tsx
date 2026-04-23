@@ -1,19 +1,48 @@
 import { notify } from '../utils/notify';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Tabs, Select, Button, Tag, Spin, Progress } from 'antd';
-import FlowEditor from '../components/FlowEditor';
+import StrategyCodeEditor from '../components/StrategyCodeEditor';
 import EquityCurveChart from '../components/Charts/EquityCurveChart';
+import ScriptParamsPanel from '../components/ScriptParamsPanel';
+import BatchResultPanel from '../components/BatchResultPanel';
 import { useBacktestStore } from '../store';
-import { mlApi } from '../api';
+import { useStrategyScriptStore } from '../store/strategyScriptStore';
+import { mlApi, strategyApi, taskMonitorApi } from '../api';
 import { useTaskLogs } from '../hooks/useTaskLogs';
 import { TaskLogTable } from '../components/TaskLogTable';
 import type { MLJobStatus, MLWeights, EquityPoint, BacktestMetrics } from '../types';
+import type { ScriptBatchAggregatedResult } from '../api';
+
+const POLL_INTERVAL = 3000;
 
 const StrategyCenter: React.FC = () => {
-  // 回测状态
-  const { result, loading } = useBacktestStore();
+  // 回测结果状态
+  const { result, loading, setLoading, setResult } = useBacktestStore();
   const metrics: BacktestMetrics | undefined = result?.metrics;
   const equity: EquityPoint[] = result?.equity_curve || [];
+
+  // 脚本编辑器状态（store）
+  const {
+    code: scriptCode,
+    runStatus: scriptRunStatus,
+    validationResult,
+    compileResult,
+    runError,
+    setCode: setScriptCode,
+    setValidationResult,
+    setCompileResult,
+    setRunId,
+    setRunStatus,
+    setRunError,
+    resetRun,
+  } = useStrategyScriptStore();
+
+  const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // 新增状态管理
+  const [batchResult, setBatchResult] = useState<ScriptBatchAggregatedResult | null>(null);
+  const [batchLoading, setBatchLoading] = useState<boolean>(false);
+  const [paramGrid, setParamGrid] = useState<Record<string, unknown[]>>({});
 
   // ML 状态
   const [tsCode, setTsCode] = useState<string>('000001.SZ');
@@ -28,6 +57,13 @@ const StrategyCenter: React.FC = () => {
   useEffect(() => {
     loadBacktestLogs();
   }, [loadBacktestLogs]);
+
+  // 清理轮询
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) clearTimeout(pollRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     mlApi.getWeights().then((r) => {
@@ -123,6 +159,185 @@ const StrategyCenter: React.FC = () => {
     }
   };
 
+  // ── 脚本模式：校验 ──────────────────────────────────
+  const handleValidateScript = async (): Promise<void> => {
+    setRunStatus('validating');
+    try {
+      const response = await strategyApi.validateScript(scriptCode);
+      const data = response.data;
+      setValidationResult(data);
+      if (data.valid) {
+        notify.success(`校验通过 (${data.script_hash.slice(0, 8)})`);
+      } else {
+        notify.error(data.errors?.[0] || '校验失败');
+      }
+    } catch (error) {
+      console.error('Failed to validate script:', error);
+      notify.error('校验请求失败');
+    } finally {
+      setRunStatus('idle');
+    }
+  };
+
+  // ── 脚本模式：编译 ──────────────────────────────────
+  const handleCompileScript = async (): Promise<void> => {
+    setRunStatus('compiling');
+    try {
+      const response = await strategyApi.compileScript(scriptCode);
+      const data = response.data;
+      setCompileResult(data);
+      if (data.status === 'compiled') {
+        notify.success('编译成功');
+      } else {
+        notify.error(data.errors?.[0] || '编译失败');
+      }
+    } catch (error) {
+      console.error('Failed to compile script:', error);
+      notify.error('编译请求失败');
+    } finally {
+      setRunStatus('idle');
+    }
+  };
+
+  // ── 脚本模式：运行回测 + 异步轮询闭环 ──────────────
+  const pollScriptRunResult = (runId: string) => {
+    const poll = async () => {
+      try {
+        const r = await strategyApi.getBacktestRun(runId);
+        const data = r.data;
+
+        if (data.status === 'running') {
+          pollRef.current = setTimeout(poll, POLL_INTERVAL);
+          return;
+        }
+
+        if (data.status === 'failed') {
+          setRunStatus('failed');
+          setRunError(data.error || '回测执行失败');
+          setLoading(false);
+          notify.error(data.error || '回测执行失败');
+          return;
+        }
+
+        // 成功：写入 backtestStore，自动展示 metrics + 权益曲线
+        setRunStatus('success');
+        setLoading(false);
+        setResult({
+          metrics: data.metrics,
+          equity_curve: data.equity_curve || [],
+          trades: data.trades_sample || [],
+          start_date: '',
+          end_date: '',
+          initial_capital: 1_000_000,
+        });
+        notify.success('脚本回测完成');
+        loadBacktestLogs();
+      } catch (error) {
+        console.error('Failed to poll script result:', error);
+        setRunStatus('failed');
+        setRunError('结果查询失败');
+        setLoading(false);
+      }
+    };
+    pollRef.current = setTimeout(poll, POLL_INTERVAL);
+  };
+
+  // ── 脚本模式：批量回测 ──────────────────────────────
+  const handleBatchRun = async (): Promise<void> => {
+    setBatchLoading(true);
+    try {
+      // 从编译结果中获取 ts_code（如果有），或者使用默认值
+      const tsCodes = compileResult && 'ir' in compileResult && compileResult.ir?.data_source?.ts_code
+        ? [compileResult.ir.data_source.ts_code]
+        : ['000001.SZ'];
+
+      const response = await strategyApi.batchBacktestScript({
+        script: scriptCode,
+        name: 'batch_backtest',
+        param_grid: paramGrid,
+        ts_codes: tsCodes,
+      });
+      const data = response.data;
+      notify.info(`批量回测任务已提交，共 ${data.total_runs} 组`);
+      // 轮询获取批量回测结果
+      pollBatchResult(data.batch_id);
+    } catch (error: unknown) {
+      console.error('Failed to run batch backtest:', error);
+      const msg = (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail || '批量回测启动失败';
+      notify.error(msg);
+      setBatchLoading(false);
+    }
+  };
+
+  const pollBatchResult = (batchId: string) => {
+    const poll = async () => {
+      try {
+        const response = await strategyApi.getBatchResult(batchId);
+        const data = response.data;
+        setBatchResult(data);
+
+        // 检查是否所有回测都完成
+        if (data.completed_runs + data.failed_runs < data.total_runs) {
+          pollRef.current = setTimeout(poll, POLL_INTERVAL);
+        } else {
+          setBatchLoading(false);
+          notify.success('批量回测完成');
+        }
+      } catch (error) {
+        console.error('Failed to poll batch result:', error);
+        setBatchLoading(false);
+      }
+    };
+    pollRef.current = setTimeout(poll, POLL_INTERVAL);
+  };
+
+  // ── 处理选中回测结果 ──────────────────────────────
+  const handleResultSelect = async (runId: string): Promise<void> => {
+    try {
+      const response = await strategyApi.getBacktestRun(runId);
+      const data = response.data;
+
+      if (data.status === 'completed' && data.metrics) {
+        setResult({
+          metrics: data.metrics,
+          equity_curve: data.equity_curve || [],
+          trades: data.trades_sample || [],
+          start_date: '',
+          end_date: '',
+          initial_capital: 1_000_000,
+        });
+        notify.success('回测结果已加载');
+      }
+    } catch (error) {
+      console.error('Failed to get backtest result:', error);
+      notify.error('加载回测结果失败');
+    }
+  };
+
+  const handleRunScriptBacktest = async (): Promise<void> => {
+    resetRun();
+    setRunStatus('submitting');
+    setLoading(true);
+    try {
+      const response = await strategyApi.backtestScript({
+        script: scriptCode,
+        name: 'script_backtest',
+      });
+      const data = response.data;
+      setRunId(data.run_id);
+      setRunStatus('running');
+      notify.info('脚本回测任务已提交');
+      pollScriptRunResult(data.run_id);
+    } catch (error: unknown) {
+      console.error('Failed to run script backtest:', error);
+      const msg = (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail || '脚本回测启动失败';
+      setRunStatus('failed');
+      setRunError(msg);
+      setLoading(false);
+      notify.error(msg);
+    }
+  };
+
   return (
     <div style={{ padding: '8px', maxWidth: '1600px', margin: '0 auto' }}>
       <Tabs defaultActiveKey="1" items={[
@@ -139,25 +354,46 @@ const StrategyCenter: React.FC = () => {
             boxShadow: 'var(--shadow-sm)',
             transition: 'all 280ms cubic-bezier(0.4, 0, 0.2, 1)'
           }}>
-            <h3 style={{
-              color: 'var(--color-primary)',
-              fontSize: 16,
-              fontWeight: 600,
-              margin: '0 0 16px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8
-            }}>
-              <span style={{
-                display: 'inline-block',
-                width: 4,
-                height: 16,
-                background: 'var(--gradient-primary)',
-                borderRadius: 2
-              }}></span>
-              可视化策略编辑器
-            </h3>
-            <FlowEditor />
+            <div style={{ marginBottom: 16 }}>
+              <h3 style={{
+                color: 'var(--color-primary)',
+                fontSize: 16,
+                fontWeight: 600,
+                margin: 0,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8
+              }}>
+                <span style={{
+                  display: 'inline-block',
+                  width: 4,
+                  height: 16,
+                  background: 'var(--gradient-primary)',
+                  borderRadius: 2
+                }}></span>
+                策略回测编辑器
+              </h3>
+            </div>
+            <StrategyCodeEditor
+              value={scriptCode}
+              runStatus={scriptRunStatus}
+              validationResult={validationResult}
+              compileResult={compileResult}
+              runError={runError}
+              onChange={setScriptCode}
+              onValidate={handleValidateScript}
+              onCompile={handleCompileScript}
+              onRun={handleRunScriptBacktest}
+            />
+            {/* 脚本参数面板 */}
+            <div style={{ marginTop: 16 }}>
+              <ScriptParamsPanel
+                compileResult={compileResult}
+                onParamsChange={setParamGrid}
+                onBatchRun={handleBatchRun}
+                disabled={scriptRunStatus !== 'idle'}
+              />
+            </div>
           </div>
 
           {loading && (
@@ -262,6 +498,15 @@ const StrategyCenter: React.FC = () => {
               )}
             </>
           )}
+
+          {/* 批量回测结果面板 */}
+          <div style={{ marginTop: 16 }}>
+            <BatchResultPanel
+              result={batchResult}
+              loading={batchLoading}
+              onResultSelect={handleResultSelect}
+            />
+          </div>
           </>
           )
         },

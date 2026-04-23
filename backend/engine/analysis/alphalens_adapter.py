@@ -504,6 +504,7 @@ class AlphalensAdapter:
 
     def _serialize_quantile_returns(self, mean_ret: pd.DataFrame, std_ret: pd.DataFrame) -> List[Dict]:
         """序列化分位数收益"""
+        import math
         results = []
         for period in mean_ret.columns:
             for quantile in mean_ret.index:
@@ -514,7 +515,7 @@ class AlphalensAdapter:
                     'quantile': int(quantile),
                     'mean_return': mean_val,
                     'std_return': std_val,
-                    'sharpe': mean_val / (std_val + 1e-10)
+                    'sharpe': mean_val / (std_val + 1e-10) * math.sqrt(252)
                 })
         return results
 
