@@ -10,7 +10,6 @@ import polars as pl
 
 from engine.backtester.vector_engine import BacktestConfig, VectorEngine
 from engine.factors.technical import CrossSectionalFactors, TechnicalFactors
-from engine.parser.flow_parser import OPERATOR_REGISTRY
 
 # condition 表达式中的逻辑运算符映射
 _LOGIC_OPS = {"and", "or", "not"}

@@ -8,8 +8,19 @@ import hashlib
 from dataclasses import dataclass, field
 from typing import Any
 
-from engine.parser.flow_parser import OPERATOR_REGISTRY
 from engine.script.sandbox import run_in_sandbox
+
+# 算子白名单 - 与 FlowParser 保持一致
+OPERATOR_REGISTRY = {
+    "sma": {"fn": "sma", "params": ["window"], "input": "close"},
+    "ema": {"fn": "ema", "params": ["window"], "input": "close"},
+    "rsi": {"fn": "rsi", "params": ["window"], "input": "close"},
+    "macd": {"fn": "macd", "params": ["fast", "slow", "signal"], "input": "close"},
+    "kdj": {"fn": "kdj", "params": ["n", "m1", "m2"], "input": ["high", "low", "close"]},
+    "bollinger": {"fn": "bollinger_bands", "params": ["window", "num_std"], "input": "close"},
+    "rank": {"fn": "rank", "params": ["col"], "cross_sectional": True},
+    "zscore": {"fn": "zscore", "params": ["col"], "cross_sectional": True},
+}
 
 # 安全的内置函数和异常类型白名单
 # 复用 sandbox.py 中的白名单以确保一致性

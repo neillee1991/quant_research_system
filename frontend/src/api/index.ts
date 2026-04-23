@@ -136,26 +136,6 @@ export interface ScriptBatchResult {
   created_at?: string;
 }
 
-// 脚本对账请求类型
-export interface ScriptCrossValidateRequest {
-  script: string;
-  graph: object;
-  script_params?: object;
-  language?: string;
-  entry_point?: string;
-}
-
-// 脚本对账响应类型
-export interface ScriptCrossValidateResponse {
-  cross_validate_id: string;
-  status: string;
-  script_metrics?: any;
-  graph_metrics?: any;
-  diff?: any;
-  error?: string;
-  started_at?: string;
-  finished_at?: string;
-}
 
 interface BestRun {
   run_id: string;
@@ -198,11 +178,6 @@ export interface ScriptBatchAggregatedResult {
 }
 
 export const strategyApi = {
-  backtest: (graph: object) => longRunningApi.post('/strategy/backtest', { graph }), // 回测可能耗时
-  backtestAsync: (name: string, graph: object) =>
-    api.post('/strategy/backtest/async', { name, graph }),
-  getBacktestResult: (runId: string) =>
-    api.get(`/strategy/backtest/${runId}/result`),
   validateScript: (script: string, language = 'python') =>
     api.post('/strategy/backtest/script/validate', { script, language }),
   compileScript: (script: string, language = 'python', entryPoint = 'build_strategy') =>
@@ -217,12 +192,6 @@ export const strategyApi = {
   // 获取批量回测结果
   getBatchResult: (batchId: string) =>
     api.get<ScriptBatchAggregatedResult>(`/strategy/backtest/script/batch/${batchId}`),
-  // 脚本对账（Cross Validate）
-  crossValidateScript: (payload: ScriptCrossValidateRequest) =>
-    api.post<ScriptCrossValidateResponse>('/strategy/backtest/script/validate-cross', payload),
-  // 获取对账结果
-  getCrossValidateResult: (crossId: string) =>
-    api.get<ScriptCrossValidateResponse>(`/strategy/backtest/script/validate-cross/${crossId}`),
 };
 
 export const mlApi = {

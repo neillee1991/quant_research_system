@@ -27,175 +27,67 @@ const STRATEGY_TEMPLATES = [
   {
     value: 'sma',
     label: 'SMA 均线策略',
-    code: `# SMA 均线策略
-# 当短期均线上穿长期均线时买入，下穿时卖出
-
-def initialize(context):
-    # 策略参数
-    context.params = {
-        'short_period': 5,    # 短期均线周期
-        'long_period': 20,    # 长期均线周期
-        'capital': 100000     # 初始资金
-    }
-
-def handle_data(context, data):
-    # 获取收盘价数据
-    close = data['close']
-
-    # 计算均线
-    short_ma = close.rolling(context.params['short_period']).mean()
-    long_ma = close.rolling(context.params['long_period']).mean()
-
-    # 生成交易信号
-    # 买入信号：短期均线上穿长期均线
-    buy_signal = (short_ma > long_ma) & (short_ma.shift(1) <= long_ma.shift(1))
-    # 卖出信号：短期均线下穿长期均线
-    sell_signal = (short_ma < long_ma) & (short_ma.shift(1) >= long_ma.shift(1))
-
+    code: `def build_strategy():
     return {
-        'buy_signal': buy_signal,
-        'sell_signal': sell_signal
-    }
-
-def risk_management(context, positions):
-    # 止损逻辑：亏损10%止损
-    stop_loss_pct = 0.10
-
-    return {
-        'stop_loss_pct': stop_loss_pct
+        "ts_code": "000001.SZ",
+        "start_date": "20230101",
+        "end_date": "20241231",
+        "capital": 1000000,
+        "signals": [
+            {"type": "indicator", "op": "sma", "params": {"window": 5}, "output_col": "sma5"},
+            {"type": "indicator", "op": "sma", "params": {"window": 20}, "output_col": "sma20"},
+            {"type": "condition", "expr": "sma5 > sma20", "output_col": "signal"},
+        ],
     }
 `,
   },
   {
     value: 'rsi',
     label: 'RSI 超买超卖',
-    code: `# RSI 超买超卖策略
-# RSI < 30 买入，RSI > 70 卖出
-
-def initialize(context):
-    # 策略参数
-    context.params = {
-        'rsi_period': 14,     # RSI周期
-        'oversold': 30,       # 超卖阈值
-        'overbought': 70,     # 超买阈值
-        'capital': 100000     # 初始资金
-    }
-
-def handle_data(context, data):
-    # 获取收盘价数据
-    close = data['close']
-
-    # 计算RSI
-    delta = close.diff()
-    gain = delta.where(delta > 0, 0)
-    loss = -delta.where(delta < 0, 0)
-
-    avg_gain = gain.rolling(context.params['rsi_period']).mean()
-    avg_loss = loss.rolling(context.params['rsi_period']).mean()
-
-    rs = avg_gain / avg_loss
-    rsi = 100 - (100 / (1 + rs))
-
-    # 生成交易信号
-    buy_signal = rsi < context.params['oversold']
-    sell_signal = rsi > context.params['overbought']
-
+    code: `def build_strategy():
     return {
-        'buy_signal': buy_signal,
-        'sell_signal': sell_signal
-    }
-
-def risk_management(context, positions):
-    # 止损逻辑：亏损8%止损
-    stop_loss_pct = 0.08
-
-    return {
-        'stop_loss_pct': stop_loss_pct
+        "ts_code": "000001.SZ",
+        "start_date": "20230101",
+        "end_date": "20241231",
+        "capital": 1000000,
+        "signals": [
+            {"type": "indicator", "op": "rsi", "params": {"window": 14}, "output_col": "rsi14"},
+            {"type": "condition", "expr": "rsi14 < 30", "output_col": "buy_signal"},
+            {"type": "condition", "expr": "rsi14 > 70", "output_col": "sell_signal"},
+        ],
     }
 `,
   },
   {
     value: 'macd',
     label: 'MACD 金叉死叉',
-    code: `# MACD 金叉死叉策略
-# MACD线穿过信号线时产生交易信号
-
-def initialize(context):
-    # 策略参数
-    context.params = {
-        'fast_period': 12,    # 快速EMA周期
-        'slow_period': 26,    # 慢速EMA周期
-        'signal_period': 9,   # 信号线EMA周期
-        'capital': 100000     # 初始资金
-    }
-
-def handle_data(context, data):
-    # 获取收盘价数据
-    close = data['close']
-
-    # 计算MACD
-    ema_fast = close.ewm(span=context.params['fast_period']).mean()
-    ema_slow = close.ewm(span=context.params['slow_period']).mean()
-    macd_line = ema_fast - ema_slow
-    signal_line = macd_line.ewm(span=context.params['signal_period']).mean()
-
-    # 生成交易信号
-    buy_signal = (macd_line > signal_line) & (macd_line.shift(1) <= signal_line.shift(1))
-    sell_signal = (macd_line < signal_line) & (macd_line.shift(1) >= signal_line.shift(1))
-
+    code: `def build_strategy():
     return {
-        'buy_signal': buy_signal,
-        'sell_signal': sell_signal
-    }
-
-def risk_management(context, positions):
-    # 止损逻辑：亏损12%止损
-    stop_loss_pct = 0.12
-
-    return {
-        'stop_loss_pct': stop_loss_pct
+        "ts_code": "000001.SZ",
+        "start_date": "20230101",
+        "end_date": "20241231",
+        "capital": 1000000,
+        "signals": [
+            {"type": "indicator", "op": "macd", "params": {"fast": 12, "slow": 26, "signal": 9}, "output_col": "macd"},
+            {"type": "condition", "expr": "macd_macd > macd_signal", "output_col": "signal"},
+        ],
     }
 `,
   },
   {
     value: 'bollinger',
     label: '布林带突破',
-    code: `# 布林带突破策略
-# 价格突破上轨买入，突破下轨卖出
-
-def initialize(context):
-    # 策略参数
-    context.params = {
-        'bb_period': 20,      # 布林带周期
-        'bb_std': 2,          # 标准差倍数
-        'capital': 100000     # 初始资金
-    }
-
-def handle_data(context, data):
-    # 获取收盘价数据
-    close = data['close']
-
-    # 计算布林带
-    middle_band = close.rolling(context.params['bb_period']).mean()
-    std_dev = close.rolling(context.params['bb_period']).std()
-    upper_band = middle_band + (context.params['bb_std'] * std_dev)
-    lower_band = middle_band - (context.params['bb_std'] * std_dev)
-
-    # 生成交易信号
-    buy_signal = close > upper_band
-    sell_signal = close < lower_band
-
+    code: `def build_strategy():
     return {
-        'buy_signal': buy_signal,
-        'sell_signal': sell_signal
-    }
-
-def risk_management(context, positions):
-    # 止损逻辑：亏损15%止损
-    stop_loss_pct = 0.15
-
-    return {
-        'stop_loss_pct': stop_loss_pct
+        "ts_code": "000001.SZ",
+        "start_date": "20230101",
+        "end_date": "20241231",
+        "capital": 1000000,
+        "signals": [
+            {"type": "indicator", "op": "bollinger", "params": {"window": 20, "num_std": 2.0}, "output_col": "bollinger"},
+            {"type": "condition", "expr": "close > bollinger_upper", "output_col": "sell_signal"},
+            {"type": "condition", "expr": "close < bollinger_lower", "output_col": "buy_signal"},
+        ],
     }
 `,
   },
