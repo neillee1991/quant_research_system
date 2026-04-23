@@ -46,6 +46,7 @@ const StrategyCenter: React.FC = () => {
   const [batchResult, setBatchResult] = useState<ScriptBatchAggregatedResult | null>(null);
   const [batchLoading, setBatchLoading] = useState<boolean>(false);
   const [crossResult, setCrossResult] = useState<ScriptCrossValidateResponse | null>(null);
+  const [paramGrid, setParamGrid] = useState<Record<string, unknown[]>>({});
 
   // ML 状态
   const [tsCode, setTsCode] = useState<string>('000001.SZ');
@@ -249,11 +250,16 @@ const StrategyCenter: React.FC = () => {
   const handleBatchRun = async (): Promise<void> => {
     setBatchLoading(true);
     try {
+      // 从编译结果中获取 ts_code（如果有），或者使用默认值
+      const tsCodes = compileResult && 'ir' in compileResult && compileResult.ir?.data_source?.ts_code
+        ? [compileResult.ir.data_source.ts_code]
+        : ['000001.SZ'];
+
       const response = await strategyApi.batchBacktestScript({
         script: scriptCode,
         name: 'batch_backtest',
-        param_grid: {}, // 暂时空，后续可从 ScriptParamsPanel 获取
-        ts_codes: ['000001.SZ'], // 默认股票
+        param_grid: paramGrid,
+        ts_codes: tsCodes,
       });
       const data = response.data;
       notify.info(`批量回测任务已提交，共 ${data.total_runs} 组`);
@@ -402,7 +408,7 @@ const StrategyCenter: React.FC = () => {
                 <div style={{ marginTop: 16 }}>
                   <ScriptParamsPanel
                     compileResult={compileResult}
-                    onParamsChange={() => {}} // 暂时空实现
+                    onParamsChange={setParamGrid}
                     onBatchRun={handleBatchRun}
                     disabled={scriptRunStatus !== 'idle'}
                   />
