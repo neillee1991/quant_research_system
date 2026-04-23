@@ -1,19 +1,17 @@
 import { notify } from '../utils/notify';
 import React, { useState, useEffect, useRef } from 'react';
-import { Tabs, Select, Button, Tag, Spin, Progress, Segmented } from 'antd';
-import FlowEditor from '../components/FlowEditor';
+import { Tabs, Select, Button, Tag, Spin, Progress } from 'antd';
 import StrategyCodeEditor from '../components/StrategyCodeEditor';
 import EquityCurveChart from '../components/Charts/EquityCurveChart';
 import ScriptParamsPanel from '../components/ScriptParamsPanel';
 import BatchResultPanel from '../components/BatchResultPanel';
-import GraphScriptCrossValidatePanel from '../components/GraphScriptCrossValidatePanel';
 import { useBacktestStore } from '../store';
 import { useStrategyScriptStore } from '../store/strategyScriptStore';
 import { mlApi, strategyApi, taskMonitorApi } from '../api';
 import { useTaskLogs } from '../hooks/useTaskLogs';
 import { TaskLogTable } from '../components/TaskLogTable';
-import type { MLJobStatus, MLWeights, EquityPoint, BacktestMetrics, StrategyMode } from '../types';
-import type { ScriptBatchAggregatedResult, ScriptCrossValidateResponse } from '../api';
+import type { MLJobStatus, MLWeights, EquityPoint, BacktestMetrics } from '../types';
+import type { ScriptBatchAggregatedResult } from '../api';
 
 const POLL_INTERVAL = 3000;
 
@@ -39,13 +37,11 @@ const StrategyCenter: React.FC = () => {
     resetRun,
   } = useStrategyScriptStore();
 
-  const [strategyMode, setStrategyMode] = useState<StrategyMode>('code');
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // 新增状态管理
   const [batchResult, setBatchResult] = useState<ScriptBatchAggregatedResult | null>(null);
   const [batchLoading, setBatchLoading] = useState<boolean>(false);
-  const [crossResult, setCrossResult] = useState<ScriptCrossValidateResponse | null>(null);
   const [paramGrid, setParamGrid] = useState<Record<string, unknown[]>>({});
 
   // ML 状态
@@ -358,7 +354,7 @@ const StrategyCenter: React.FC = () => {
             boxShadow: 'var(--shadow-sm)',
             transition: 'all 280ms cubic-bezier(0.4, 0, 0.2, 1)'
           }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
+            <div style={{ marginBottom: 16 }}>
               <h3 style={{
                 color: 'var(--color-primary)',
                 fontSize: 16,
@@ -377,44 +373,27 @@ const StrategyCenter: React.FC = () => {
                 }}></span>
                 策略回测编辑器
               </h3>
-              <Segmented
-                value={strategyMode}
-                onChange={(value) => setStrategyMode(value as StrategyMode)}
-                options={[
-                  { label: '图模式', value: 'graph' },
-                  { label: '代码模式', value: 'code' },
-                ]}
+            </div>
+            <StrategyCodeEditor
+              value={scriptCode}
+              runStatus={scriptRunStatus}
+              validationResult={validationResult}
+              compileResult={compileResult}
+              runError={runError}
+              onChange={setScriptCode}
+              onValidate={handleValidateScript}
+              onCompile={handleCompileScript}
+              onRun={handleRunScriptBacktest}
+            />
+            {/* 脚本参数面板 */}
+            <div style={{ marginTop: 16 }}>
+              <ScriptParamsPanel
+                compileResult={compileResult}
+                onParamsChange={setParamGrid}
+                onBatchRun={handleBatchRun}
+                disabled={scriptRunStatus !== 'idle'}
               />
             </div>
-            {strategyMode === 'graph' ? (
-              <>
-                <div style={{ color: 'var(--text-secondary)', fontSize: 13, marginBottom: 16 }}>当前为兼容图模式，后续将逐步迁移到代码模式。</div>
-                <FlowEditor />
-              </>
-            ) : (
-              <>
-                <StrategyCodeEditor
-                  value={scriptCode}
-                  runStatus={scriptRunStatus}
-                  validationResult={validationResult}
-                  compileResult={compileResult}
-                  runError={runError}
-                  onChange={setScriptCode}
-                  onValidate={handleValidateScript}
-                  onCompile={handleCompileScript}
-                  onRun={handleRunScriptBacktest}
-                />
-                {/* 脚本参数面板 - 仅在代码模式显示 */}
-                <div style={{ marginTop: 16 }}>
-                  <ScriptParamsPanel
-                    compileResult={compileResult}
-                    onParamsChange={setParamGrid}
-                    onBatchRun={handleBatchRun}
-                    disabled={scriptRunStatus !== 'idle'}
-                  />
-                </div>
-              </>
-            )}
           </div>
 
           {loading && (
@@ -528,17 +507,6 @@ const StrategyCenter: React.FC = () => {
               onResultSelect={handleResultSelect}
             />
           </div>
-
-          {/* 图与脚本模式对账验证面板 - 当有 graph 数据时显示 */}
-          {strategyMode === 'graph' && (
-            <div style={{ marginTop: 16 }}>
-              <GraphScriptCrossValidatePanel
-                script={scriptCode}
-                graph={null} // 暂时空，需要从 FlowEditor 中获取 graph 数据
-                disabled={scriptRunStatus !== 'idle'}
-              />
-            </div>
-          )}
           </>
           )
         },
