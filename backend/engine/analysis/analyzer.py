@@ -94,8 +94,9 @@ class FactorAnalyzer:
     def _load_factor_data(self, factor_id: str, start_date: Optional[str],
                           end_date: Optional[str]) -> Optional[pl.DataFrame]:
         """加载因子数据（支持分批加载大数据集）"""
-        conditions = ["factor_id = %s"]
-        params = [factor_id]
+        from infrastructure.database.type_converter import TypeConverter
+        fid_sym = TypeConverter.escape_symbol(factor_id)
+        conditions = [f"factor_id = {fid_sym}"]
         if start_date:
             conditions.append(f"trade_date >= temporalParse('{start_date}','yyyyMMdd')")
         if end_date:
@@ -105,7 +106,7 @@ class FactorAnalyzer:
         sql = f"SELECT ts_code, trade_date, factor_value FROM factor_values WHERE {where} ORDER BY trade_date, ts_code"
 
         try:
-            df = self.db.query(sql, tuple(params))
+            df = self.db.query(sql, ())
             return df if not df.is_empty() else None
         except Exception as e:
             logger.error(f"Failed to load factor data: {e}")

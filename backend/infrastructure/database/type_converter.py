@@ -54,3 +54,10 @@ class TypeConverter:
         s = str(value)
         s = s.replace("\\", "\\\\").replace('"', '\\"')
         return f'"{s}"'
+
+    @staticmethod
+    def escape_symbol(value: Any) -> str:
+        """将 Python 字符串转换为 DolphinDB SYMBOL 字面量（反引号语法）"""
+        if value is None:
+            return "NULL"
+        return f"`{value}"

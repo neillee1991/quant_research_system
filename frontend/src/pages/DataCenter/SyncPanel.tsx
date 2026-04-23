@@ -16,14 +16,13 @@ import {
 } from '@ant-design/icons';
 import { useTaskLogs } from '../../hooks/useTaskLogs';
 import { TaskLogTable } from '../../components/TaskLogTable';
-import type { SyncTask, TaskStatus, ScheduleInfo } from '../../types';
+import type { SyncTask, TaskStatus } from '../../types';
 
 interface SyncPanelProps {
   syncTasks: SyncTask[];
   taskStatuses: Record<string, TaskStatus>;
   syncingTasks: Set<string>;
   selectedTaskIds: string[];
-  scheduleInfo: Record<string, ScheduleInfo>;
   onSelectedTaskIdsChange: (ids: string[]) => void;
   onRefreshStatus: () => void;
   onNewTask: () => void;
@@ -39,7 +38,6 @@ export const SyncPanel: React.FC<SyncPanelProps> = ({
   taskStatuses,
   syncingTasks,
   selectedTaskIds,
-  scheduleInfo,
   onSelectedTaskIdsChange,
   onRefreshStatus,
   onNewTask,
@@ -242,8 +240,7 @@ export const SyncPanel: React.FC<SyncPanelProps> = ({
         <Table
           dataSource={syncTasks.map((task) => {
             const status = taskStatuses[task.task_id];
-            const taskScheduleInfo = scheduleInfo[task.task_id];
-            return { ...task, status, taskScheduleInfo };
+            return { ...task, status };
           })}
           rowKey="task_id"
 

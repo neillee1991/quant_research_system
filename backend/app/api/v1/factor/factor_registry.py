@@ -212,7 +212,8 @@ async def delete_factor(factor_id: str, delete_data: bool = False):
             "DELETE FROM factor_configs WHERE factor_id = $1", factor_id
         )
         if delete_data:
-            db_client.execute("DELETE FROM factor_values WHERE factor_id = %s", (factor_id,))
+            from infrastructure.database.type_converter import TypeConverter
+            db_client.execute(f"DELETE FROM factor_values WHERE factor_id = {TypeConverter.escape_symbol(factor_id)}")
 
         unregister_factor(factor_id)
         api_cache.invalidate("production:factors")
@@ -276,8 +277,9 @@ async def get_factor_data(
 ):
     """查询因子值数据（DolphinDB factor_values，时序数据）"""
     try:
-        conditions = ["factor_id = %s"]
-        params: list = [factor_id]
+        from infrastructure.database.type_converter import TypeConverter
+        conditions = [f"factor_id = {TypeConverter.escape_symbol(factor_id)}"]
+        params: list = []
         if start_date:
             conditions.append("trade_date >= %s")
             params.append(start_date)
@@ -285,8 +287,7 @@ async def get_factor_data(
             conditions.append("trade_date <= %s")
             params.append(end_date)
         if ts_code:
-            conditions.append("ts_code = %s")
-            params.append(ts_code)
+            conditions.append(f"ts_code = {TypeConverter.escape_symbol(ts_code)}")
         where = " AND ".join(conditions)
         params.append(limit)
 
@@ -317,7 +318,9 @@ async def get_factor_data(
 async def get_factor_stats(factor_id: str):
     """获取因子统计摘要（DolphinDB factor_values，时序数据）"""
     try:
-        df = db_client.query("""
+        from infrastructure.database.type_converter import TypeConverter
+        fid_sym = TypeConverter.escape_symbol(factor_id)
+        df = db_client.query(f"""
             SELECT
                 count(*) AS total_rows,
                 min(trade_date) AS min_date,
@@ -326,18 +329,18 @@ async def get_factor_stats(factor_id: str):
                 std(factor_value) AS std_val,
                 min(factor_value) AS min_val,
                 max(factor_value) AS max_val
-            FROM factor_values WHERE factor_id = %s
-        """, (factor_id,))
+            FROM factor_values WHERE factor_id = {fid_sym}
+        """)
 
         if df.is_empty():
             return {"status": "success", "data": None}
 
         row = df.to_dicts()[0]
 
-        stock_count_df = db_client.query("""
+        stock_count_df = db_client.query(f"""
             SELECT count(*) AS stock_count
-            FROM (SELECT DISTINCT ts_code FROM factor_values WHERE factor_id = %s)
-        """, (factor_id,))
+            FROM (SELECT DISTINCT ts_code FROM factor_values WHERE factor_id = {fid_sym})
+        """)
         row["stock_count"] = stock_count_df["stock_count"][0] if not stock_count_df.is_empty() else 0
 
         for k, v in row.items():

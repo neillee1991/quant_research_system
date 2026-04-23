@@ -150,8 +150,8 @@ async def _save_analysis_result(task_id: str, factor_id: str, results: Dict[str,
         WHERE task_id = $1
     """,
         task_id,
-        DateUtils.normalize_date_to_str(actual_start),
-        DateUtils.normalize_date_to_str(actual_end),
+        DateUtils.normalize_date_to_object(actual_start).strftime("%Y%m%d") if actual_start else None,
+        DateUtils.normalize_date_to_object(actual_end).strftime("%Y%m%d") if actual_end else None,
         json.dumps(config),
         json.dumps(results.get("ic_summary", {})),
         json.dumps(results.get("ic_by_period", [])),
@@ -162,27 +162,42 @@ async def _save_analysis_result(task_id: str, factor_id: str, results: Dict[str,
 @tracked_task("analysis", task_id_kwarg="factor_id")
 async def _run_analysis_background(task_id: str, req: AnalysisRequest, run_id: str = None, factor_id: str = None):
     """后台执行分析，更新 task_status"""
+    import asyncio
+    import functools
+
     await _update_task_status(task_id, "running")
-    results = analyzer.analyze(
-        factor_id=req.factor_id,
-        start_date=req.start_date,
-        end_date=req.end_date,
-        periods=req.periods,
-        quantiles=req.quantiles,
-        index_pool=req.index_pool,
-        groupby_field=req.groupby_field,
-        next_day_entry=req.next_day_entry,
-        entry_price=req.entry_price,
-        neutralize=req.neutralize,
-        neutralize_controls=req.neutralize_controls,
-        industry_level=req.industry_level,
-        winsorize=req.winsorize,
-        winsorize_lower=req.winsorize_lower,
-        winsorize_upper=req.winsorize_upper,
-    )
-    if results is None:
-        raise RuntimeError("分析返回空结果")
-    await _save_analysis_result(task_id, req.factor_id, results)
+    try:
+        loop = asyncio.get_event_loop()
+        results = await loop.run_in_executor(
+            None,
+            functools.partial(
+                analyzer.analyze,
+                factor_id=req.factor_id,
+                start_date=req.start_date,
+                end_date=req.end_date,
+                periods=req.periods,
+                quantiles=req.quantiles,
+                index_pool=req.index_pool,
+                groupby_field=req.groupby_field,
+                next_day_entry=req.next_day_entry,
+                entry_price=req.entry_price,
+                neutralize=req.neutralize,
+                neutralize_controls=req.neutralize_controls,
+                industry_level=req.industry_level,
+                winsorize=req.winsorize,
+                winsorize_lower=req.winsorize_lower,
+                winsorize_upper=req.winsorize_upper,
+            )
+        )
+        if results is None:
+            await _update_task_status(task_id, "failed", "分析返回空结果，可能因子数据不足")
+            raise RuntimeError("分析返回空结果")
+        await _save_analysis_result(task_id, req.factor_id, results)
+    except RuntimeError:
+        raise
+    except Exception as e:
+        await _update_task_status(task_id, "failed", str(e))
+        raise
     return {"extra": {"result_id": task_id, "table": "factor_analysis_results"}}
 
 # ==================== API Endpoints ====================
@@ -190,6 +205,7 @@ async def _run_analysis_background(task_id: str, req: AnalysisRequest, run_id: s
 @router.post("/factor/analysis/alphalens", response_model=dict)
 async def submit_analysis(req: AnalysisRequest, background_tasks: BackgroundTasks):
     """提交因子分析任务（异步）。立即返回 task_id，后台执行分析。"""
+    import asyncio
     task_id = str(uuid.uuid4())
     run_id = f"analysis_{task_id[:12]}"
     await TaskRunner.start(
@@ -197,10 +213,14 @@ async def submit_analysis(req: AnalysisRequest, background_tasks: BackgroundTask
         params=json.dumps({"start_date": req.start_date, "end_date": req.end_date, "periods": req.periods})
     )
     await _create_pending_task(task_id, req)
-    background_tasks.add_task(
-        _run_analysis_background,
-        task_id=task_id, req=req, run_id=run_id, factor_id=req.factor_id
-    )
+
+    async def _run():
+        try:
+            await _run_analysis_background(task_id=task_id, req=req, run_id=run_id, factor_id=req.factor_id)
+        except Exception as e:
+            logger.error(f"Background analysis task failed: {e}", exc_info=True)
+
+    asyncio.create_task(_run())
     return {
         "status": "success",
         "data": {"task_id": task_id, "factor_id": req.factor_id, "status": "pending"}

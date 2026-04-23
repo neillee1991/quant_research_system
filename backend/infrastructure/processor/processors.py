@@ -496,18 +496,27 @@ class CalendarAlignProcessor(IProcessor):
 
         # 先确保 trade_date 是字符串格式 YYYYMMDD
         if df["trade_date"].dtype != pl.Utf8:
-            df = df.with_columns(
-                pl.col("trade_date").cast(pl.Utf8).str.replace_all("-", "").alias("trade_date")
-            )
+            if df["trade_date"].dtype in (pl.Date, pl.Datetime):
+                df = df.with_columns(
+                    pl.col("trade_date").dt.strftime("%Y%m%d").alias("trade_date")
+                )
+            else:
+                df = df.with_columns(
+                    pl.col("trade_date").cast(pl.Utf8).str.replace_all("-", "").str.slice(0, 8).alias("trade_date")
+                )
 
         # 按股票分组，计算每个交易日前 window 行内的实际数据行数
         df = df.sort(["ts_code", "trade_date"])
         df = df.with_columns(
-            pl.col("trade_date")
-              .rolling_count(window_size=window)
+            pl.lit(1).alias("_one")
+        )
+        df = df.with_columns(
+            pl.col("_one").cast(pl.Int32)
+              .rolling_sum(window_size=window, min_samples=1)
               .over("ts_code")
               .alias("_actual_rows")
         )
+        df = df.drop("_one")
 
         # 对每个计算日，查询交易日历中该窗口应有的天数
         # 简化实现：用 _actual_rows < window 作为判断条件
@@ -667,8 +676,19 @@ class ResultWriterProcessor(IProcessor):
         # 写入数据库（upsert）
         try:
             if compute_mode == "full":
-                # 全量模式：清空整个因子的所有数据
-                self.db.upsert(table_name, result_df, primary_keys, is_full_sync=True)
+                # 全量模式：按 factor_id 清空该因子的所有数据，再写入
+                # 注意：不能用 is_full_sync=True，那会清空整个表（所有因子）
+                if table_name == "factor_values" and factor_id:
+                    # 先删除该因子的所有历史数据
+                    from infrastructure.database.type_converter import TypeConverter
+                    fid_sym = TypeConverter.escape_symbol(factor_id)
+                    self.db.execute(
+                        f"t = loadTable('dfs://quant', 'factor_values'); "
+                        f"delete from t where factor_id = {fid_sym}"
+                    )
+                    self.db.append(table_name, result_df)
+                else:
+                    self.db.upsert(table_name, result_df, primary_keys, is_full_sync=True)
                 rows = len(result_df)
             else:
                 # 增量模式：按 trade_date 逐个清空并写入（精确到 factor_id）
@@ -676,11 +696,16 @@ class ResultWriterProcessor(IProcessor):
                     trade_dates = result_df["trade_date"].unique().to_list()
                     total_rows = 0
                     for trade_date in trade_dates:
+                        # 统一转为 YYYYMMDD 字符串，避免 datetime/timestamp 类型传入
+                        if hasattr(trade_date, 'strftime'):
+                            trade_date_str = trade_date.strftime('%Y%m%d')
+                        else:
+                            trade_date_str = str(trade_date).replace('-', '')[:8]
                         date_df = result_df.filter(pl.col("trade_date") == trade_date)
                         self.db.upsert(
                             table_name, date_df, primary_keys,
                             is_full_sync=False,
-                            trade_date=trade_date,
+                            trade_date=trade_date_str,
                             factor_id=factor_id
                         )
                         total_rows += len(date_df)

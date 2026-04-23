@@ -46,66 +46,134 @@ export const dataApi = {
     api.get('/data/daily', { params: { ts_code: tsCode, start_date: startDate, end_date: endDate, limit } }),
 
   // 同步任务管理
-  listSyncTasks: () => api.get('/tasks/sync', { params: { enabled_only: true } }).then(res => ({
-    data: {
-      tasks: res.data.tasks,
-      total: res.data.total
-    }
-  })),
+  listSyncTasks: () => api.get('/tasks/sync'),
   syncTask: (taskId: string, targetDate?: string, startDate?: string, endDate?: string) =>
     longRunningApi.post(`/tasks/sync/${taskId}/execute`, {
       start_date: startDate || targetDate,
-      end_date: endDate
+      end_date: endDate,
     }),
-  getTaskConfig: (taskId: string) => api.get(`/tasks/sync/${taskId}`).then(res => ({
-    data: {
-      config: res.data.task
-    }
-  })),
+  getTaskConfig: (taskId: string) => api.get(`/tasks/sync/${taskId}`),
   getSyncTaskStatus: (taskId: string) => api.get(`/tasks/sync/${taskId}/status`),
   getTaskRunStatus: (taskType: string, runId: string) => api.get(`/tasks/${taskType}/status/${runId}`),
-  createSyncTask: (config: any) => api.post('/tasks/sync', { config_data: config }).then(res => ({
-    data: res.data.task
-  })),
-  updateSyncTask: (taskId: string, config: any) => api.put(`/tasks/sync/${taskId}`, { config_data: config }).then(res => ({
-    data: res.data.task
-  })),
+  createSyncTask: (config: any) => api.post('/tasks/sync', { config_data: config }),
+  updateSyncTask: (taskId: string, config: any) => api.put(`/tasks/sync/${taskId}`, { config_data: config }),
   deleteTask: (taskId: string, dropTable?: boolean) => api.delete(`/tasks/sync/${taskId}`, { params: { drop_table: dropTable } }),
 
   // ETL 任务管理
-  listEtlTasks: () => api.get('/tasks/etl', { params: { enabled_only: true } }).then(res => ({
-    data: {
-      tasks: res.data.tasks,
-      total: res.data.total
-    }
-  })),
-  createEtlTask: (config: any) => api.post('/tasks/etl', { config_data: config }).then(res => ({
-    data: res.data.task
-  })),
-  updateEtlTask: (taskId: string, config: any) => api.put(`/tasks/etl/${taskId}`, { config_data: config }),
+  listEtlTasks: () => api.get('/tasks/etl'),
+  createEtlTask: (config: any) => api.post('/data/etl/tasks', config),
+  updateEtlTask: (taskId: string, config: any) => api.put(`/data/etl/task/${taskId}`, config),
   deleteEtlTask: (taskId: string, dropTable?: boolean) => api.delete(`/tasks/etl/${taskId}`, { params: { drop_table: dropTable } }),
   getEtlTaskStatus: (taskId: string) => api.get(`/tasks/etl/${taskId}/status`),
   getEtlTableSchema: (taskId: string) => api.get(`/tasks/etl/${taskId}/schema`),
-  runEtlTask: (taskId: string, startDate?: string, endDate?: string) =>
-    longRunningApi.post(`/tasks/etl/${taskId}/execute`, {
-      start_date: startDate || null,
-      end_date: endDate || null,
-    }),
+  runEtlTask: (taskId: string) => longRunningApi.post(`/tasks/etl/${taskId}/execute`),
   testEtlScript: (script: string, date?: string) => api.post('/tasks/etl/test', { script, date }),
+  backfillEtlTask: (taskId: string, startDate: string, endDate: string) =>
+    longRunningApi.post(`/tasks/etl/${taskId}/backfill`, null, {
+      params: { start_date: startDate, end_date: endDate }
+    }),
   createEtlTable: (taskId: string, tableName: string, fields: any[]) =>
     api.post(`/tasks/etl/${taskId}/create-table`, { table_name: tableName, fields }),
 
   // 数据库管理
   listTables: () => api.get('/data/tables'),
   getTableInfo: (tableName: string) => api.get(`/data/tables/${tableName}/info`),
+  truncateTable: (tableName: string) => api.delete(`/data/tables/${tableName}`),
+  executeQuery: (sql: string, limit = 1000) =>
+    api.post('/data/query', null, { params: { sql, limit } }),
 };
 
+// 批量脚本回测请求类型
+export interface ScriptBatchBacktestRequest {
+  script: string;
+  name?: string;
+  language?: string;
+  entry_point?: string;
+  param_grid: Record<string, unknown[]>;
+  ts_codes?: string[];
+}
+
+// 批量回测响应类型
+export interface ScriptBatchBacktestResponse {
+  batch_id: string;
+  total_runs: number;
+  run_ids: string[];
+  task_ids: string[];
+  mode: string;
+  status: string;
+  message: string;
+  script_hash: string;
+}
+
+// 单个回测结果类型
+export interface ScriptBatchResult {
+  run_id: string;
+  task_id: string;
+  status: string;
+  params: Record<string, unknown>;
+  metrics?: Record<string, unknown>;
+  equity_curve?: Record<string, unknown>[];
+  trades_sample?: Record<string, unknown>[];
+  warnings: string[];
+  error_message?: string;
+  created_at?: string;
+}
+
+interface BestRun {
+  run_id: string;
+  task_id: string;
+  params: Record<string, unknown>;
+  metrics?: {
+    sharpe_ratio?: number;
+    annualized_return?: number;
+    max_drawdown?: number;
+    win_rate?: number;
+  };
+  sharpe?: number;
+}
+
+interface Summary {
+  total_runs: number;
+  completed_runs: number;
+  failed_runs: number;
+  running_runs: number;
+  success_rate?: number;
+  avg_sharpe_ratio?: number;
+  max_sharpe_ratio?: number;
+  min_sharpe_ratio?: number;
+  avg_total_return?: number;
+  max_total_return?: number;
+  min_total_return?: number;
+  avg_max_drawdown?: number;
+}
+
+// 批量回测聚合结果类型
+export interface ScriptBatchAggregatedResult {
+  batch_id: string;
+  total_runs: number;
+  completed_runs: number;
+  failed_runs: number;
+  running_runs: number;
+  results: ScriptBatchResult[];
+  best_run?: BestRun;
+  summary: Summary;
+}
+
 export const strategyApi = {
-  backtest: (graph: object) => longRunningApi.post('/strategy/backtest', { graph }), // 回测可能耗时
-  backtestAsync: (name: string, graph: object) =>
-    api.post('/strategy/backtest/async', { name, graph }),
-  getBacktestResult: (runId: string) =>
-    api.get(`/strategy/backtest/${runId}/result`),
+  validateScript: (script: string, language = 'python') =>
+    api.post('/strategy/backtest/script/validate', { script, language }),
+  compileScript: (script: string, language = 'python', entryPoint = 'build_strategy') =>
+    api.post('/strategy/backtest/script/compile', { script, language, entry_point: entryPoint }),
+  backtestScript: (payload: { script: string; name?: string; language?: string; entry_point?: string; params?: Record<string, unknown> }) =>
+    api.post('/strategy/backtest/script', payload),
+  getBacktestRun: (runId: string) =>
+    api.get(`/strategy/backtest/runs/${runId}`),
+  // 批量脚本回测
+  batchBacktestScript: (payload: ScriptBatchBacktestRequest) =>
+    api.post<ScriptBatchBacktestResponse>('/strategy/backtest/script/batch', payload),
+  // 获取批量回测结果
+  getBatchResult: (batchId: string) =>
+    api.get<ScriptBatchAggregatedResult>(`/strategy/backtest/script/batch/${batchId}`),
 };
 
 export const mlApi = {
@@ -140,8 +208,6 @@ export const productionApi = {
   getFactorCode: (factorId: string) => api.get(`/factor/factors/${factorId}/code`),
   updateFactorCode: (factorId: string, filename: string, code: string) =>
     api.put(`/factor/factors/${factorId}/code`, { filename, code }),
-
-  // DataFrame schema 预览 — 已删除（无 UI 入口）
 
   // 因子代码测试
   testFactorCode: (data: { code: string; start_date: string; end_date: string; depends_on?: string[]; params?: Record<string, any>; preprocess?: PreprocessOptions; lookback_days?: number }) =>
@@ -188,6 +254,7 @@ export const productionApi = {
   getTradingDays: (start: string, end: string) =>
     api.get('/factor/analysis/trading-days', { params: { start, end } }),
 };
+
 // Data API - 指数订阅管理
 export const indexApi = {
   // 获取可订阅的指数列表
@@ -314,6 +381,8 @@ export const flowApi = {
   create: (config: FlowConfig) => api.post<FlowConfig>('/flows', config),
   update: (name: string, config: Partial<FlowConfig>) => api.put<FlowConfig>(`/flows/${name}`, config),
   delete: (name: string, hard = false) => api.delete(`/flows/${name}`, { params: { hard } }),
+  trigger: (name: string, targetDate?: string) =>
+    api.post<{ status: string; flow_run_id: string }>(`/flows/${name}/trigger`, null, { params: { target_date: targetDate } }),
   backfill: (name: string, startDate: string, endDate: string) =>
     api.post(`/flows/${name}/backfill`, { start_date: startDate, end_date: endDate }),
   listRuns: (name: string, limit = 50) =>

@@ -4,7 +4,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { notify } from '../../../utils/notify';
 import { dataApi } from '../../../api';
-import type { SyncTask, TaskStatus, ScheduleInfo } from '../../../types';
+import type { SyncTask, TaskStatus } from '../../../types';
 
 // 跟踪正在执行的任务
 interface RunningTaskInfo {
@@ -17,7 +17,6 @@ export const useSyncTasks = () => {
   const [taskStatuses, setTaskStatuses] = useState<Record<string, TaskStatus>>({});
   const [syncingTasks, setSyncingTasks] = useState<Set<string>>(new Set());
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
-  const [scheduleInfo, setScheduleInfo] = useState<Record<string, ScheduleInfo>>({});
 
   // 跟踪每个任务的 runId 和轮询定时器
   const runningTasksRef = useRef<Map<string, RunningTaskInfo>>(new Map());
@@ -244,29 +243,11 @@ export const useSyncTasks = () => {
     }
   }, [loadSyncTasks]);
 
-  const toggleSchedule = useCallback(async (
-    taskId: string,
-    enabled: boolean,
-    schedule?: string,
-    cronExpression?: string
-  ) => {
-    try {
-      // 调度管理已迁移到 SchedulerCenter
-      // 此处保留接口以保持兼容性
-      notify.info('调度管理已迁移到调度中心，请在调度中心配置');
-      return false;
-    } catch (error: any) {
-      notify.error(`调度设置失败: ${error.response?.data?.detail || error.message}`);
-      return false;
-    }
-  }, []);
-
   return {
     syncTasks,
     taskStatuses,
     syncingTasks,
     selectedTaskIds,
-    scheduleInfo,
     setSelectedTaskIds,
     loadSyncTasks,
     loadTaskStatus,
@@ -276,6 +257,5 @@ export const useSyncTasks = () => {
     deleteTask,
     createTask,
     updateTask,
-    toggleSchedule,
   };
 };

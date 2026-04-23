@@ -16,6 +16,9 @@ import { useTaskLogs } from '../../hooks/useTaskLogs';
 import FactorFlowDrawer from './FactorFlowDrawer';
 import TaskLogTable from '../../components/TaskLogTable';
 
+/** 确保值是数组，避免 DB 返回 {} 时 .map 报错 */
+const asArr = <T = any,>(v: T[] | null | undefined | unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
+
 /** 统一日期格式化：YYYYMMDD 或 datetime 字符串 → YYYY-MM-DD */
 const formatDate = (d: string | null | undefined) => {
   if (!d) return '-';
@@ -92,20 +95,20 @@ const PeriodPanel: React.FC<{ period: number; analysisResult: any; isFirstPeriod
   const isTradingDay = (d: string) => tradingDaySet.size === 0 || tradingDaySet.has(toYYYYMMDD(d));
 
   const icRow = useMemo(
-    () => (analysisResult?.ic_by_period || []).find((r: any) => r.period === periodKey),
+    () => asArr(analysisResult?.ic_by_period).find((r: any) => r.period === periodKey),
     [analysisResult, periodKey]
   );
   const rankIcRow = useMemo(
-    () => (analysisResult?.rank_ic_by_period || []).find((r: any) => r.period === periodKey),
+    () => asArr(analysisResult?.rank_ic_by_period).find((r: any) => r.period === periodKey),
     [analysisResult, periodKey]
   );
   const icTsData = useMemo(() => {
-    return (analysisResult?.ic_ts || [])
+    return asArr(analysisResult?.ic_ts)
       .filter((d: any) => d[icTsCol] != null && isTradingDay(d.date))
       .map((d: any) => ({ date: formatDate(d.date), value: d[icTsCol] }));
   }, [analysisResult, icTsCol, tradingDaySet]);
   const quantileReturns = useMemo(
-    () => (analysisResult?.quantile_returns || []).filter((r: any) => r.period === periodKey),
+    () => asArr(analysisResult?.quantile_returns).filter((r: any) => r.period === periodKey),
     [analysisResult, periodKey]
   );
   const cumulativeData = useMemo(() => {
@@ -161,7 +164,7 @@ const PeriodPanel: React.FC<{ period: number; analysisResult: any; isFirstPeriod
               <StatCard label="p 值" value={`${icRow.p_value?.toFixed(4)}${sigLabel(icRow.p_value)}`} color={icRow.p_value < 0.05 ? 'var(--color-gain)' : 'var(--text-secondary)'} />
               <StatCard label="样本数" value={String(icRow.n_obs ?? '-')} color="var(--text-primary)" />
               {(() => {
-                const abRow = (analysisResult?.alpha_beta || []).find((r: any) => r.period === periodKey);
+                const abRow = asArr(analysisResult?.alpha_beta).find((r: any) => r.period === periodKey);
                 if (!abRow) return null;
                 return (
                   <>
@@ -214,7 +217,7 @@ const PeriodPanel: React.FC<{ period: number; analysisResult: any; isFirstPeriod
         )}
         {/* 月度 IC */}
         {(() => {
-          const monthlyIc = analysisResult?.ic_by_month || [];
+          const monthlyIc = asArr(analysisResult?.ic_by_month);
           const filtered = monthlyIc.filter((d: any) => d[icTsCol.replace('ic_', '')] != null);
           if (!filtered.length) return null;
           const months = filtered.map((d: any) => d.month);
@@ -407,7 +410,7 @@ const PeriodPanel: React.FC<{ period: number; analysisResult: any; isFirstPeriod
 
       {/* 因子加权多空组合净值 */}
       {(() => {
-        const fcr = analysisResult?.factor_cumulative_returns || [];
+        const fcr = asArr(analysisResult?.factor_cumulative_returns);
         const tradingFcr = fcr.filter((d: any) => d[periodKey] != null && isTradingDay(d.date));
         if (!tradingFcr.length) return null;
         return (
@@ -969,7 +972,7 @@ const AnalysisPanel: React.FC = () => {
 
           {/* ── 按持有周期折叠展示 ── */}
           {(() => {
-            const resultPeriods: number[] = (analysisResult?.ic_by_period || [])
+            const resultPeriods: number[] = asArr(analysisResult?.ic_by_period)
               .map((r: any) => parseInt(r.period))
               .filter(Boolean)
               .sort((a: number, b: number) => a - b);
@@ -983,7 +986,7 @@ const AnalysisPanel: React.FC = () => {
                     <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
                       持有 {p} 天
                       {(() => {
-                        const row = (analysisResult?.ic_by_period || []).find((r: any) => r.period === `${p}D`);
+                        const row = asArr(analysisResult?.ic_by_period).find((r: any) => r.period === `${p}D`);
                         if (!row) return null;
                         const icColor = row.ic_mean > 0 ? 'var(--color-gain)' : 'var(--color-loss)';
                         const sigColor = row.p_value < 0.05 ? 'var(--color-gain)' : 'var(--text-muted)';

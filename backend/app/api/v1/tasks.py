@@ -245,9 +245,17 @@ async def cleanup_stale_tasks(timeout_minutes: int = Query(default=0, ge=0, desc
 
 def _format_task_row(row: dict) -> dict:
     """Format datetime fields to ISO strings for JSON serialization."""
+    from zoneinfo import ZoneInfo
+    _TZ = ZoneInfo("Asia/Shanghai")
     for field in ["started_at", "finished_at", "created_at"]:
         if field in row and row[field] is not None:
-            row[field] = str(row[field])
+            val = row[field]
+            if hasattr(val, 'tzinfo'):
+                if val.tzinfo is None:
+                    val = val.replace(tzinfo=_TZ)
+                row[field] = val.isoformat()
+            else:
+                row[field] = str(val)
     return row
 
 

@@ -162,8 +162,9 @@ class DataOperations:
 
                     # 如果提供了 factor_id，则精确删除 trade_date + factor_id 的数据
                     if factor_id:
-                        escaped_factor_id = TypeConverter.escape_value(factor_id)
-                        delete_stmt = f"delete from {table_name}_handle where trade_date = {escaped_date} and factor_id = {escaped_factor_id};"
+                        escaped_date = TypeConverter.escape_value(trade_date)
+                        # factor_id 是 SYMBOL 类型，用反引号而非双引号
+                        delete_stmt = f"delete from {table_name}_handle where trade_date = {escaped_date} and factor_id = `{factor_id};"
                         logger.info(f"[增量同步] 清空表 {table_name} 中 trade_date={trade_date}, factor_id={factor_id} 的数据")
                     else:
                         # 兼容旧逻辑：只按 trade_date 删除（用于非因子表）
@@ -380,8 +381,9 @@ class DataOperations:
         # 转换日期列：YYYYMMDD 字符串 → date
         for col in date_cols:
             if col in df.columns and df[col].dtype == pl.Utf8:
+                # 截取前 8 位，兼容 "20260105 00:00:00.000000" 格式
                 df = df.with_columns(
-                    pl.col(col).str.to_date("%Y%m%d", strict=False).alias(col)
+                    pl.col(col).str.slice(0, 8).str.to_date("%Y%m%d", strict=False).alias(col)
                 )
 
         # 转换为 Pandas
