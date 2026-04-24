@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 
-from store.dolphindb_client import db_client
+from infrastructure.database.dolphindb_client import db_client
 from engine.factor.registry import list_factors, discover_factors, unregister_factor
 from app.core.logger import logger
 from app.core.utils import safe_json_parse

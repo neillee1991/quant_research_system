@@ -14,12 +14,11 @@ from app.core.auth import (
     fake_users_db,
 )
 from app.core.rate_limit import setup_rate_limiter
-from app.api.v1 import strategy, ml, flows, tasks, schema_tools
+from app.api.v1 import flows, tasks
 from app.api.v1 import factor  # 使用拆分后的 factor 模块
 from app.api.v1 import data  # 使用拆分后的 data 模块
-from app.api.v1 import config_api  # 配置管理 API
-from app.api.v1 import script_batch  # 批量脚本回测 API
-from store.dolphindb_client import db_client
+from app.api.v1.config import router as config_api  # 配置管理 API
+from infrastructure.database.dolphindb_client import db_client
 
 
 @asynccontextmanager
@@ -31,6 +30,8 @@ async def lifespan(app: FastAPI):
     from scheduler.db import init_db, close_db
     await init_db()
     logger.info("PostgreSQL 连接池已初始化")
+
+    logger.warning("种子数据初始化已禁用，请通过配置导入方式设置初始数据")
 
     # 启动调度器
     from scheduler.core import get_scheduler
@@ -128,13 +129,9 @@ def create_app() -> FastAPI:
 
     # 路由注册
     app.include_router(data.router, prefix=settings.api_v1_prefix, tags=["data"])
-    app.include_router(strategy.router, prefix=settings.api_v1_prefix, tags=["strategy"])
-    app.include_router(script_batch.router, prefix=settings.api_v1_prefix, tags=["strategy"])  # 批量脚本回测
-    app.include_router(ml.router, prefix=settings.api_v1_prefix, tags=["ml"])
     app.include_router(factor.router, prefix=settings.api_v1_prefix, tags=["factor"])
     app.include_router(flows.router, prefix=settings.api_v1_prefix, tags=["flows"])
-    app.include_router(schema_tools.router, prefix=settings.api_v1_prefix, tags=["schema-tools"])
-    app.include_router(config_api.router, prefix=settings.api_v1_prefix, tags=["config"])
+    app.include_router(config_api, prefix=settings.api_v1_prefix, tags=["config"])
 
     # 统一任务管理路由
     app.include_router(tasks.router, prefix=settings.api_v1_prefix, tags=["tasks"])

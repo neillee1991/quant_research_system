@@ -43,7 +43,7 @@ class SharedTableValidator:
         config_table: Optional[str] = None
     ) -> bool:
         """检查表是否被其他任务使用"""
-        from store.dolphindb_client import db_client
+        from infrastructure.database.dolphindb_client import db_client
         if not db_client.table_exists(table_name):
             return False
         sharing_tasks = self.get_sharing_tasks(table_name, exclude_task_id, config_table)
@@ -79,7 +79,7 @@ class SharedTableValidator:
             "sharing_tasks": []
         }
 
-        from store.dolphindb_client import db_client
+        from infrastructure.database.dolphindb_client import db_client
         if not db_client.table_exists(table_name):
             return result
 
@@ -201,7 +201,7 @@ class SharedTableValidator:
             "sharing_tasks": []
         }
 
-        from store.dolphindb_client import db_client
+        from infrastructure.database.dolphindb_client import db_client
         if not db_client.table_exists(table_name):
             result["can_delete"] = True
             result["reason"] = "表不存在"

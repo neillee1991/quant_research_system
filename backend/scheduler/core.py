@@ -200,7 +200,7 @@ class Scheduler:
 
         # 获取交易日列表
         from app.core.utils import TradingCalendar
-        from store.dolphindb_client import db_client
+        from infrastructure.database.dolphindb_client import db_client
         cal = TradingCalendar.get_instance(db_client)
         if cal.is_loaded:
             dates = cal.get_trading_days(start_date, end_date)

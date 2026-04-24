@@ -114,7 +114,6 @@ class Settings(BaseSettings):
     collector: DataCollectorConfig = Field(default_factory=DataCollectorConfig)
     database: DolphinDBConfig = Field(default_factory=DolphinDBConfig)
     postgresql: PostgreSQLConfig = Field(default_factory=PostgreSQLConfig)
-    prefect_api_url: str = Field(default="http://localhost:4200/api", env="PREFECT_API_URL")
     backtest: BacktestConfig = Field(default_factory=BacktestConfig)
     ml: MLConfig = Field(default_factory=MLConfig)
     sync: SyncConfig = Field(default_factory=SyncConfig)

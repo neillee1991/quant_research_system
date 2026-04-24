@@ -10,7 +10,7 @@ from pathlib import Path
 backend_dir = Path(__file__).parent
 sys.path.insert(0, str(backend_dir))
 
-from store.dolphindb_client import db_client
+from infrastructure.database.dolphindb_client import db_client
 from app.core.config import settings
 
 def check_database():

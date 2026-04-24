@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from fastapi.testclient import TestClient
 from app.main import app
 from app.core.logger import logger
-from store.dolphindb_client import db_client
+from infrastructure.database.dolphindb_client import db_client
 import polars as pl
 import pandas as pd
 import numpy as np

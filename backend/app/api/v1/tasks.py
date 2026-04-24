@@ -11,7 +11,7 @@ import json
 from app.services.task_service import sync_service, etl_service, factor_service, TaskService
 from app.services.task_runner import TaskRunner, tracked_task
 from app.core.logger import logger
-from store.dolphindb_client import db_client
+from infrastructure.database.dolphindb_client import db_client
 from scheduler.db import DatabasePool
 
 router = APIRouter()
@@ -584,7 +584,7 @@ async def _execute_etl_task_background(task_id: str, start_date: Optional[str], 
         import psycopg2
         import psycopg2.extras
         from app.core.config import settings
-        from store.dolphindb_client import db_client
+        from infrastructure.database.dolphindb_client import db_client
 
         conn = psycopg2.connect(
             host=settings.postgresql.postgres_host,
@@ -672,7 +672,7 @@ async def _execute_factor_task_background(task_id: str, start_date: Optional[str
     """后台执行因子任务"""
     import asyncio
     from app.services.factor_service import FactorComputeService
-    from store.dolphindb_client import db_client
+    from infrastructure.database.dolphindb_client import db_client
     service = FactorComputeService(db_client)
     compute_result = await asyncio.get_event_loop().run_in_executor(
         None, lambda: service.compute_factor(

@@ -50,7 +50,7 @@ def _dt(v: Any) -> Optional[datetime]:
 
 
 async def migrate_sync_task_configs(pg: asyncpg.Connection) -> int:
-    from store.dolphindb_client import db_client
+    from infrastructure.database.dolphindb_client import db_client
     df = db_client.query("SELECT * FROM sync_task_config")
     if df.is_empty():
         log.info("sync_task_config: no data")
@@ -80,7 +80,7 @@ async def migrate_sync_task_configs(pg: asyncpg.Connection) -> int:
 
 
 async def migrate_etl_task_configs(pg: asyncpg.Connection) -> int:
-    from store.dolphindb_client import db_client
+    from infrastructure.database.dolphindb_client import db_client
     df = db_client.query("SELECT * FROM etl_task_config")
     if df.is_empty():
         log.info("etl_task_config: no data")
@@ -107,7 +107,7 @@ async def migrate_etl_task_configs(pg: asyncpg.Connection) -> int:
 
 
 async def migrate_factor_configs(pg: asyncpg.Connection) -> int:
-    from store.dolphindb_client import db_client
+    from infrastructure.database.dolphindb_client import db_client
     df = db_client.query("SELECT * FROM factor_metadata")
     if df.is_empty():
         log.info("factor_metadata: no data")
@@ -138,7 +138,7 @@ async def migrate_factor_configs(pg: asyncpg.Connection) -> int:
 
 
 async def migrate_factor_field_mappings(pg: asyncpg.Connection) -> int:
-    from store.dolphindb_client import db_client
+    from infrastructure.database.dolphindb_client import db_client
     df = db_client.query("SELECT * FROM factor_data_config")
     if df.is_empty():
         log.info("factor_data_config: no data")
@@ -162,7 +162,7 @@ async def migrate_factor_field_mappings(pg: asyncpg.Connection) -> int:
 
 
 async def migrate_stocks(pg: asyncpg.Connection) -> int:
-    from store.dolphindb_client import db_client
+    from infrastructure.database.dolphindb_client import db_client
     df = db_client.query("SELECT * FROM stock_basic")
     if df.is_empty():
         log.info("stock_basic: no data")
@@ -194,7 +194,7 @@ async def migrate_stocks(pg: asyncpg.Connection) -> int:
 
 
 async def migrate_trading_calendar(pg: asyncpg.Connection) -> int:
-    from store.dolphindb_client import db_client
+    from infrastructure.database.dolphindb_client import db_client
     df = db_client.query("SELECT * FROM trade_cal")
     if df.is_empty():
         log.info("trade_cal: no data")
@@ -221,7 +221,7 @@ async def migrate_trading_calendar(pg: asyncpg.Connection) -> int:
 
 
 async def migrate_index_configs(pg: asyncpg.Connection) -> int:
-    from store.dolphindb_client import db_client
+    from infrastructure.database.dolphindb_client import db_client
     df = db_client.query("SELECT * FROM index_metadata")
     if df.is_empty():
         log.info("index_metadata: no data")
@@ -250,7 +250,7 @@ async def migrate_index_configs(pg: asyncpg.Connection) -> int:
 
 
 async def migrate_user_preferences(pg: asyncpg.Connection) -> int:
-    from store.dolphindb_client import db_client
+    from infrastructure.database.dolphindb_client import db_client
     df = db_client.query("SELECT * FROM user_sync_preference")
     if df.is_empty():
         log.info("user_sync_preference: no data")
@@ -275,7 +275,7 @@ async def migrate_user_preferences(pg: asyncpg.Connection) -> int:
 
 async def migrate_task_runs(pg: asyncpg.Connection) -> int:
     """Migrate DolphinDB task_runs into PG task_runs (run_id column)."""
-    from store.dolphindb_client import db_client
+    from infrastructure.database.dolphindb_client import db_client
     df = db_client.query("SELECT * FROM task_runs")
     if df.is_empty():
         log.info("task_runs (DolphinDB): no data")
@@ -303,7 +303,7 @@ async def migrate_task_runs(pg: asyncpg.Connection) -> int:
 
 
 async def migrate_backtest_results(pg: asyncpg.Connection) -> int:
-    from store.dolphindb_client import db_client
+    from infrastructure.database.dolphindb_client import db_client
     df = db_client.query("SELECT * FROM backtest_results")
     if df.is_empty():
         log.info("backtest_results: no data")
@@ -331,7 +331,7 @@ async def migrate_backtest_results(pg: asyncpg.Connection) -> int:
 
 async def migrate_factor_analysis_results(pg: asyncpg.Connection) -> int:
     """Merge factor_analysis + factor_analysis_extended → factor_analysis_results."""
-    from store.dolphindb_client import db_client
+    from infrastructure.database.dolphindb_client import db_client
     count = 0
 
     # Base table: factor_analysis

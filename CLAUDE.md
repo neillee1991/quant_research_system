@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Quant Research System is a full-stack quantitative trading platform with drag-and-drop strategy modeling, vectorized backtesting, and AutoML capabilities. The system uses DolphinDB for time-series data storage, Polars for data processing, Prefect 3.x for orchestration, VectorBT for backtesting, and React Flow for visual strategy design.
+Quant Research System is a full-stack quantitative trading platform with factor computation, strategy backtesting, and production deployment capabilities. The system uses DolphinDB for time-series data storage, Polars for data processing, a self-developed scheduler for orchestration, and React Flow for visual strategy design.
 
 ## Development Commands
 
@@ -54,14 +54,19 @@ python database/init_dolphindb.py
 
 ## Architecture & Key Concepts
 
-### Database Layer: DolphinDB
+### Database Layer: Dual Database Architecture
 
-**Critical**: This project uses DolphinDB as the sole data store.
+**Critical**: This project uses both DolphinDB and PostgreSQL:
 
-- Two databases: `dfs://quant` (unified database with optimized partitioning)
-- TSDB tables: `daily_data`, `daily_basic`, `adj_factor`, `index_daily`, `moneyflow`, `factor_values`
-- Dimension tables: `sync_log`, `sync_log_history`, `stock_basic`, `factor_metadata`, `factor_analysis`, `dag_run_log`, `dag_task_log`, `production_task_run`, `trade_cal`, `sync_task_config`, `factor_data_config`
-- Bare table names are auto-resolved to `loadTable()` calls in `_adapt_sql_syntax()`
+- **DolphinDB** (`dfs://quant`): Time-series data storage with optimized partitioning
+  - TSDB tables: `daily_data`, `daily_basic`, `adj_factor`, `index_daily`, `moneyflow`, `factor_values`
+  - Dimension tables: `sync_log`, `sync_log_history`, `stock_basic`, `factor_metadata`, `factor_analysis`, `trade_cal`
+  - Bare table names are auto-resolved to `loadTable()` calls in `_adapt_sql_syntax()`
+
+- **PostgreSQL**: Metadata and configuration storage
+  - Tables: `factor_configs`, `sync_task_configs`, `etl_task_configs`, `task_runs`, `flow_runs`
+
+**Note**: Configuration tables have been migrated from DolphinDB to PostgreSQL
 
 **factor_values 表分区策略（已优化）**:
 - 三维组合分区：HASH(factor_id, 20) + RANGE(trade_date, 季度) + HASH(ts_code, 10)
@@ -72,7 +77,7 @@ python database/init_dolphindb.py
   - 按因子查询（全量）：裁剪到 ~1200 个分区
 - 性能监控：查询和写入操作自动记录耗时和速度
 
-The database client is a singleton: `from store.dolphindb_client import db_client`
+The database client is a singleton: `from infrastructure.database.dolphindb_client import db_client`
 
 ### Configuration System (Pydantic-based)
 
@@ -127,10 +132,11 @@ backtest_service = container.get_backtest_service()
 
 All routes are under `/api/v1/`:
 - `/data/*` - Data queries and sync operations
-- `/factor/*` - Technical indicator calculations
+- `/factor/*` - Factor calculation and management
 - `/strategy/*` - Backtest execution
-- `/ml/*` - AutoML model training
-- `/production/*` - Production factor management
+- `/tasks/*` - Unified task management
+- `/flows/*` - Flow orchestration (self-developed scheduler)
+- `/config/*` - Configuration management
 
 **Important**: The `/data/daily` endpoint queries `daily_basic` table (not `daily_data`), which contains close price + indicators (PE, PB, turnover_rate) but NOT full OHLC data.
 
@@ -146,21 +152,24 @@ Custom exception hierarchy in `app/core/exceptions.py`:
 
 ### Factor Engine (Polars-based)
 
-Technical indicators in `engine/factors/`:
+Technical indicators and factor analysis in `engine/analysis/`:
 - Time-series factors: MA, EMA, RSI, MACD, KDJ, Bollinger Bands, ATR
 - Cross-sectional factors: Rank, Z-Score, Industry neutralization
+- Factor analysis: IC (Information Coefficient), quantile analysis, Sharpe ratio
 
 ### Production Factor Framework (8-step pipeline)
 
-`ProductionEngine.run_task()` in `engine/production/engine.py`:
+`FactorComputeService` in `app/services/factor_service.py` orchestrates factor computation:
 1. `_resolve_dates()` - full/incremental mode, compute data_start with lookback_days offset
 2. `_load_data()` - load from DolphinDB based on `depends_on`
 3. `_apply_adjust()` - forward/backward price adjustment
 4. `_apply_stock_status()` - filter ST, new stocks (<60 days), mark limit-up/down
 5. `definition.func(df, params)` - execute factor computation (Polars vectorized)
-6. `_handle_suspension_from_status()` - null out factor_value after suspension
+6. `_handle_suspension()` - null out factor_value after suspension
 7. `_build_quality_flag()` - quality flags (null rate, extreme values)
 8. `_save_results()` - upsert to `factor_values` table
+
+Factors are registered in `engine/factor/registry.py` with `@factor` decorator and dynamically loaded from PostgreSQL `factor_configs` table.
 
 ### Backtest Engine
 
@@ -188,7 +197,7 @@ React Flow JSON graphs are parsed into executable computation chains:
 ### Querying Data
 
 ```python
-from store.dolphindb_client import db_client
+from infrastructure.database.dolphindb_client import db_client
 
 # Query with parameters (use %s placeholders)
 df = db_client.query(
@@ -202,11 +211,10 @@ db_client.upsert("table_name", polars_df, ["primary", "keys"])
 
 ### Adding a New Production Factor
 
-1. Create file in `engine/production/factors/`
-2. Use `@factor` decorator from `engine/production/registry.py`
-3. Define `depends_on`, `params`, `lookback_days`
-4. Implement Polars vectorized computation
-5. Factor auto-discovered via `discover_factors()`
+1. Create factor configuration in PostgreSQL `factor_configs` table
+2. Write factor computation code using Polars vectorized operations
+3. Factors are dynamically loaded and discovered via `engine/factor/registry.py`
+4. No code changes required for new factor definitions
 
 ### Adding a New API Endpoint
 
@@ -241,7 +249,7 @@ db_client.upsert("table_name", polars_df, ["primary", "keys"])
 - **Frontend proxy**: React dev server proxies `/api` to `http://localhost:8000`
 - **Tushare token**: Required for data sync, set in `backend/.env`
 - **Rate limiting**: Tushare API calls are rate-limited (default 120/min)
-- **Scheduler**: Prefect 3.x orchestrates sync/compute/backtest flows (UI at http://localhost:4200)
+- **Scheduler**: Self-developed scheduler orchestrates sync/compute/backtest flows (supports DAG execution and cron scheduling)
 - **SQL params**: Always use `%s` placeholders, never f-string SQL concatenation
 - **Immutability**: Use Polars expressions (lazy, immutable) — never mutate DataFrames in-place
 
@@ -277,19 +285,17 @@ db_client.upsert("table_name", polars_df, ["primary", "keys"])
 
 | Purpose | Path |
 |---------|------|
-| Production engine | `backend/engine/production/engine.py` |
-| Factor registry | `backend/engine/production/registry.py` |
-| Data config | `backend/engine/production/data_config.py` |
-| Technical factors | `backend/engine/factors/technical.py` |
+| Factor compute service | `backend/app/services/factor_service.py` |
+| Factor registry | `backend/engine/factor/registry.py` |
+| Data config | `backend/engine/factor/data_config.py` |
 | Factor analysis | `backend/engine/analysis/analyzer.py` |
-| Data processor | `backend/data_manager/processor.py` |
+| Data processor | `backend/infrastructure/processor/pipeline.py` |
 | Sync engine | `backend/data_manager/refactored_sync_engine.py` |
-| DolphinDB client | `backend/store/dolphindb_client.py` |
+| DolphinDB client | `backend/infrastructure/database/dolphindb_client.py` |
 | Factor API | `backend/app/api/v1/factor/` |
 | Data API | `backend/app/api/v1/data/` |
 | Tasks API (unified) | `backend/app/api/v1/tasks.py` |
-| Factor compute service | `backend/app/services/factor_service.py` |
-| Prefect flows | `backend/flows/data_sync_flow.py` |
+| Scheduler | `backend/scheduler/`
 | Config | `.env` (project root) |
 | Logs | `backend/logs/app.log` |
 | PID files | `.pids/` |

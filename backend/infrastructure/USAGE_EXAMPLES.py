@@ -288,7 +288,7 @@ class CustomRepository(BaseRepository):
 
 def test_repository_pattern():
     """测试 Repository 模式"""
-    from store.dolphindb_client import DolphinDBClient
+    from infrastructure.database.dolphindb_client import DolphinDBClient
 
     # 初始化客户端
     db_client = DolphinDBClient()

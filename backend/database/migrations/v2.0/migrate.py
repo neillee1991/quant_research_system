@@ -12,7 +12,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from store.dolphindb_client import db_client
+from infrastructure.database.dolphindb_client import db_client
 from loguru import logger
 import time
 

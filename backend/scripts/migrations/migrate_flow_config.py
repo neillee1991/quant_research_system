@@ -15,7 +15,7 @@ from psycopg2.extras import RealDictCursor
 
 from app.core.logger import logger
 from app.core.config import settings
-from store.dolphindb_client import db_client
+from infrastructure.database.dolphindb_client import db_client
 
 
 def get_pg_connection():

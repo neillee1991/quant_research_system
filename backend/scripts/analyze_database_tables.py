@@ -9,7 +9,7 @@ backend_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(backend_dir))
 
 from typing import Dict, List, Set
-from store.dolphindb_client import db_client
+from infrastructure.database.dolphindb_client import db_client
 from app.core.logger import logger
 
 

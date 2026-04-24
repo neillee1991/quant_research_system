@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 import polars as pl
 
-from store.dolphindb_client import db_client
+from infrastructure.database.dolphindb_client import db_client
 from app.services.factor_service import FactorComputeService, DEFAULT_PREPROCESS as _DEFAULT_PREPROCESS
 from engine.factor.registry import FactorDefinition, StorageConfig
 from app.core.logger import logger

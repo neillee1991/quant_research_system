@@ -19,7 +19,7 @@ import os
 # 添加项目根目录到 Python 路径
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
-from store.dolphindb_client import db_client
+from infrastructure.database.dolphindb_client import db_client
 from app.core.logger import logger
 
 

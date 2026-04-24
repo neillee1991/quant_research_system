@@ -147,7 +147,7 @@ def main():
 
     # Step 2: 连接 DolphinDB
     logger.info("\n[2/3] 连接 DolphinDB...")
-    from store.dolphindb_client import db_client
+    from infrastructure.database.dolphindb_client import db_client
     logger.info("DolphinDB 连接成功 ✓")
 
     # Step 3: 删除表

@@ -107,8 +107,8 @@ class TestComputeFactorFlow:
             with patch('app.services.factor_service.get_factor', return_value=mock_factor_definition):
                 with patch.object(service, '_resolve_dates', return_value=("20240101", "20240101", "20231201")):
                     with patch.object(service, '_resolve_preprocess_options', return_value={}):
-                        with patch.object(service.pipeline_factory, 'create_pipeline') as mock_pipeline:
-                            mock_pipeline.return_value.process.return_value = pl.DataFrame({
+                        with patch.object(service.pipeline_factory, 'create_factor_pipeline') as mock_pipeline:
+                            mock_pipeline.return_value.execute.return_value = pl.DataFrame({
                                 "ts_code": ["000001.SZ"],
                                 "trade_date": ["20240101"],
                                 "factor_value": [1.5]
@@ -126,8 +126,8 @@ class TestComputeFactorFlow:
             with patch('app.services.factor_service.get_factor', return_value=mock_factor_definition):
                 with patch.object(service, '_resolve_dates', return_value=("20240101", "20240101", "20231201")):
                     with patch.object(service, '_resolve_preprocess_options', return_value={}):
-                        with patch.object(service.pipeline_factory, 'create_pipeline') as mock_pipeline:
-                            mock_pipeline.return_value.process.return_value = pl.DataFrame({
+                        with patch.object(service.pipeline_factory, 'create_factor_pipeline') as mock_pipeline:
+                            mock_pipeline.return_value.execute.return_value = pl.DataFrame({
                                 "ts_code": ["000001.SZ"],
                                 "trade_date": ["20240101"],
                                 "factor_value": [1.5]
@@ -143,8 +143,8 @@ class TestComputeFactorFlow:
             with patch('app.services.factor_service.get_factor', return_value=mock_factor_definition):
                 with patch.object(service, '_resolve_dates', return_value=("20240101", "20240131", "20231201")):
                     with patch.object(service, '_resolve_preprocess_options', return_value={}):
-                        with patch.object(service.pipeline_factory, 'create_pipeline') as mock_pipeline:
-                            mock_pipeline.return_value.process.return_value = pl.DataFrame({
+                        with patch.object(service.pipeline_factory, 'create_factor_pipeline') as mock_pipeline:
+                            mock_pipeline.return_value.execute.return_value = pl.DataFrame({
                                 "ts_code": ["000001.SZ"],
                                 "trade_date": ["20240101"],
                                 "factor_value": [1.5]
@@ -179,6 +179,7 @@ class TestDateResolution:
         definition = Mock()
         definition.lookback_days = 20
         definition.compute_mode = "incremental"
+        definition.params = {"lookback_days": 20}
         return definition
 
     def test_resolve_dates_incremental_mode(self, service, mock_definition):
@@ -247,6 +248,7 @@ class TestPreprocessOptions:
     def mock_definition(self):
         definition = Mock()
         definition.preprocess = None
+        definition.params = {}
         return definition
 
     def test_resolve_preprocess_explicit_options(self, service, mock_definition):
@@ -411,14 +413,14 @@ class TestErrorHandling:
         mock_definition = Mock()
         mock_definition.compute_mode = "incremental"
         mock_definition.depends_on = ["daily"]
-        mock_definition.lookback_days = 20
+        mock_definition.params = {"lookback_days": 20}
 
         with patch('app.services.factor_service.discover_factors'):
             with patch('app.services.factor_service.get_factor', return_value=mock_definition):
                 with patch.object(service, '_resolve_dates', return_value=("20240101", "20240101", "20231201")):
                     with patch.object(service, '_resolve_preprocess_options', return_value={}):
-                        with patch.object(service.pipeline_factory, 'create_pipeline') as mock_pipeline:
-                            mock_pipeline.return_value.process.side_effect = Exception("Pipeline error")
+                        with patch.object(service.pipeline_factory, 'create_factor_pipeline') as mock_pipeline:
+                            mock_pipeline.return_value.execute.side_effect = Exception("Pipeline error")
 
                             result = service.compute_factor("test_factor", save_results=False)
 

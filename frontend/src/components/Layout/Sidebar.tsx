@@ -35,7 +35,6 @@ const Sidebar: React.FC = () => {
       children: [
         { key: '/market',   label: '行情', icon: <FundOutlined /> },
         { key: '/factor',   label: '因子', icon: <ExperimentOutlined /> },
-        { key: '/strategy', label: '策略', icon: <LineChartOutlined /> },
       ],
     },
     {
@@ -50,7 +49,7 @@ const Sidebar: React.FC = () => {
   const selectedKey = (): string => {
     const path = location.pathname;
     if (path === '/') return dataTab === '1' ? 'data-sync' : dataTab === '2' ? 'data-etl' : 'data-scheduler';
-    const routes = ['/market', '/factor', '/strategy', '/scheduler', '/config'];
+    const routes = ['/market', '/factor', '/scheduler', '/config'];
     const match = routes.find((r) => path.startsWith(r));
     return match || 'data-sync';
   };

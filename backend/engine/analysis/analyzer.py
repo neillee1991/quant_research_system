@@ -547,19 +547,3 @@ class FactorAnalyzer:
             return None
 
 
-def run_prefect_flow(factor_id: str, params: dict) -> None:
-    """
-    Prefect flow hook stub.
-    用户可在此配置 Prefect flow 来调度因子分析任务。
-
-    示例：
-        from prefect import flow
-        @flow
-        def factor_analysis_flow(factor_id: str, params: dict):
-            analyzer = FactorAnalyzer()
-            return analyzer.analyze(factor_id, **params)
-    """
-    raise NotImplementedError(
-        "Prefect flow not configured. "
-        "Implement this function to integrate with Prefect scheduling."
-    )

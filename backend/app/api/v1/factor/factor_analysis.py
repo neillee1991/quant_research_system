@@ -9,7 +9,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Query
 from pydantic import BaseModel
 
-from store.dolphindb_client import db_client
+from infrastructure.database.dolphindb_client import db_client
 from engine.analysis.analyzer import FactorAnalyzer
 from app.core.logger import logger
 from app.core.utils import (

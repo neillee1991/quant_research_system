@@ -15,7 +15,7 @@ sys.path.insert(0, str(backend_dir))
 
 import polars as pl
 from app.core.logger import logger
-from store.dolphindb_client import db_client
+from infrastructure.database.dolphindb_client import db_client
 
 
 def find_latest_backup(backup_dir: Path, table_name: str) -> Path:

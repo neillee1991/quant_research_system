@@ -14,7 +14,7 @@ backend_dir = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(backend_dir))
 
 from app.core.logger import logger
-from store.dolphindb_client import db_client
+from infrastructure.database.dolphindb_client import db_client
 
 
 def backup_table(table_name: str, backup_dir: Path) -> dict:

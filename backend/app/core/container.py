@@ -10,7 +10,7 @@ from app.core.logger import logger
 from app.services.data_service import DataService
 from app.services.factor_service import FactorService
 from app.services.backtest_service import BacktestService
-from store.dolphindb_client import db_client
+from infrastructure.database.dolphindb_client import db_client
 from data_manager.refactored_sync_engine import RefactoredSyncEngine
 
 

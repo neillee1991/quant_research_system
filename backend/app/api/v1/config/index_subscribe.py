@@ -6,7 +6,7 @@ from fastapi import APIRouter, Query, HTTPException
 from pydantic import BaseModel, Field
 
 from app.core.logger import logger
-from store.dolphindb_client import db_client
+from infrastructure.database.dolphindb_client import db_client
 from app.services.task_service import sync_service
 from app.models.base_task import SyncTaskConfig
 from scheduler.db import DatabasePool

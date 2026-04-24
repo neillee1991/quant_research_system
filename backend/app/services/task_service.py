@@ -134,7 +134,7 @@ class TaskService(Generic[T]):
                         f"Cannot drop table '{table_name}' - shared by: {sharing_tasks}"
                     )
                 try:
-                    from store.dolphindb_client import db_client
+                    from infrastructure.database.dolphindb_client import db_client
                     if db_client.table_exists(table_name):
                         db_client.drop_table(table_name)
                         logger.info(f"Dropped table {table_name} for task {task_id}")
@@ -194,7 +194,7 @@ class TaskService(Generic[T]):
         if self.task_type != "etl":
             raise ValueError("test_script is only available for ETL tasks")
 
-        from store.dolphindb_client import db_client
+        from infrastructure.database.dolphindb_client import db_client
 
         if not script or not script.strip():
             raise ValueError("Script cannot be empty")
@@ -255,7 +255,7 @@ class TaskService(Generic[T]):
 
     async def create_table(self, task_id: str, payload: Dict[str, Any] = None) -> Dict[str, Any]:
         """在 DolphinDB 中创建表"""
-        from store.dolphindb_client import db_client
+        from infrastructure.database.dolphindb_client import db_client
 
         task = await self.get_task(task_id)
         if not task:
@@ -294,7 +294,7 @@ class TaskService(Generic[T]):
 
     async def inspect_data(self, task_id: str) -> Dict[str, Any]:
         """数据探查：查询 DolphinDB 时序表（保持同步，不迁移）"""
-        from store.dolphindb_client import db_client
+        from infrastructure.database.dolphindb_client import db_client
 
         task = await self.get_task(task_id)
         if not task:

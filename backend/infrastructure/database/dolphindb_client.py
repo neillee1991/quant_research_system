@@ -222,42 +222,32 @@ class DolphinDBClient:
 
 
     # ------------------------------------------------------------------
-    # 种子数据方法（保留在原始文件中，这里提供占位符）
+    # 种子数据方法（已废弃，种子数据通过配置导入方式设置）
     # ------------------------------------------------------------------
 
     def seed_sync_task_config(self) -> None:
-        """
-        种子数据：同步任务配置
-        注意：此方法包含大量种子数据，保留在原始 store/dolphindb_client.py 中
-        """
-        # 导入原始实现
-        from store.dolphindb_client import DolphinDBClient as OriginalClient
-        # 临时创建原始客户端实例来调用 seed 方法
-        # 注意：这是一个临时方案，理想情况下应该将种子数据移到配置文件
-        logger.warning(
-            "seed_sync_task_config 方法调用了原始实现。"
-            "建议将种子数据迁移到独立的配置文件或数据库迁移脚本。"
-        )
+        """已废弃：种子数据通过配置导入方式设置"""
+        logger.warning("seed_sync_task_config is deprecated; seed data via config import")
 
     def seed_etl_task_config(self) -> None:
-        """种子数据：ETL 任务配置"""
-        logger.warning("seed_etl_task_config 需要从原始实现调用")
+        """已废弃：种子数据通过配置导入方式设置"""
+        logger.warning("seed_etl_task_config is deprecated; seed data via config import")
 
     def seed_factor_data_config(self) -> None:
-        """种子数据：因子数据配置"""
-        logger.warning("seed_factor_data_config 需要从原始实现调用")
+        """已废弃：种子数据通过配置导入方式设置"""
+        logger.warning("seed_factor_data_config is deprecated; seed data via config import")
 
     def seed_factor_metadata(self) -> None:
-        """种子数据：因子元数据"""
-        logger.warning("seed_factor_metadata 需要从原始实现调用")
+        """已废弃：种子数据通过配置导入方式设置"""
+        logger.warning("seed_factor_metadata is deprecated; seed data via config import")
 
     def seed_flow_config(self) -> None:
-        """种子数据：flow 配置"""
-        logger.warning("seed_flow_config 需要从原始实现调用")
+        """已废弃：种子数据通过配置导入方式设置"""
+        logger.warning("seed_flow_config is deprecated; seed data via config import")
 
     def seed_user_sync_preference(self) -> None:
-        """种子数据：用户同步偏好配置"""
-        logger.warning("seed_user_sync_preference 需要从原始实现调用")
+        """已废弃：种子数据通过配置导入方式设置"""
+        logger.warning("seed_user_sync_preference is deprecated; seed data via config import")
 
     def __getattr__(self, name):
         """

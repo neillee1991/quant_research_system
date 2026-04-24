@@ -9,7 +9,7 @@ import os
 # 添加项目路径
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from store.dolphindb_client import db_client
+from infrastructure.database.dolphindb_client import db_client
 from engine.analysis.analyzer import FactorAnalyzer
 from app.core.logger import logger
 import polars as pl
