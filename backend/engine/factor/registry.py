@@ -79,7 +79,7 @@ def discover_factors(factors_dir: str = None, db_client=None, force_refresh: boo
 
     Args:
         factors_dir: 已废弃，保留参数以兼容旧代码
-        db_client: DolphinDB 客户端（必需）
+        db_client: 已废弃，保留参数以兼容旧代码
         force_refresh: 强制刷新，忽略缓存
     """
     import logging
@@ -99,13 +99,9 @@ def discover_factors(factors_dir: str = None, db_client=None, force_refresh: boo
     _discovery_cache["last_discovery_time"] = datetime.now()
 
     # 从数据库加载所有因子
-    if db_client is None:
-        logger.warning("No db_client provided, cannot load factors")
-        return
-
     try:
         before_count = len(_factor_registry)
-        load_factors_from_db(db_client)
+        load_factors_from_db(None)  # db_client 不再使用
         after_count = len(_factor_registry)
         logger.info(f"Loaded {after_count - before_count} factors from database (total: {after_count})")
     except Exception as e:

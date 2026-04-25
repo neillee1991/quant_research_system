@@ -38,7 +38,7 @@ class TaskSubmitter:
             }
 
             # 获取因子定义，添加预处理参数
-            discover_factors(db_client=None)  # 使用默认配置
+            discover_factors()  # db_client 不再需要
             definition = get_factor(task_id)
             if definition and definition.params:
                 params_dict["preprocess"] = definition.params.get("preprocess", {})
