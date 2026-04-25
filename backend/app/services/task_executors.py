@@ -66,11 +66,30 @@ async def execute_etl_task(task_id: str, start_date: Optional[str], end_date: Op
     import asyncio
     def _run():
         result = db_client.query(script)
-        if result is None or result.is_empty():
+        # 检查查询结果是否为空
+        if result is None:
+            return 0
+        # 检查是否是 Polars DataFrame 并调用 is_empty() 方法
+        if hasattr(result, 'is_empty') and result.is_empty():
+            return 0
+        # 检查是否是字典或列表类型的空数据
+        if isinstance(result, dict) and not result:
+            return 0
+        if isinstance(result, list) and not result:
+            return 0
+        # 检查是否是 Pandas DataFrame 且为空
+        if hasattr(result, 'empty') and result.empty:
             return 0
         if table_name:
             _pks = primary_keys if isinstance(primary_keys, list) else []
             is_full = task.get("sync_type", "incremental") == "full"
+            # 确保 upsert 方法的 df 参数是 Polars DataFrame
+            if not isinstance(result, pl.DataFrame):
+                try:
+                    result = pl.DataFrame(result)
+                except Exception as e:
+                    logger.error(f"无法将查询结果转换为 Polars DataFrame: {e}")
+                    return 0
             db_client.upsert(
                 table_name=table_name,
                 df=result,
@@ -78,7 +97,20 @@ async def execute_etl_task(task_id: str, start_date: Optional[str], end_date: Op
                 is_full_sync=is_full,
                 trade_date=date_str.replace(".", "") if not is_full else None,
             )
-        return len(result)
+        # 计算返回的行数
+        if hasattr(result, 'height'):  # Polars DataFrame
+            return result.height
+        elif hasattr(result, 'shape') and len(result.shape) > 0:  # Pandas DataFrame
+            return result.shape[0]
+        elif isinstance(result, list):  # 列表类型
+            return len(result)
+        elif isinstance(result, dict):  # 字典类型（键值对形式）
+            # 假设字典的值是数组或列表
+            if result:
+                first_value = list(result.values())[0]
+                if isinstance(first_value, list) or isinstance(first_value, pl.Series):
+                    return len(first_value)
+        return 0
 
     rows = await asyncio.get_event_loop().run_in_executor(None, _run)
     logger.info(f"ETL task {task_id} completed: run_id={run_id}, rows={rows}")

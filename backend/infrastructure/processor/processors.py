@@ -405,7 +405,26 @@ class FactorComputeProcessor(IProcessor):
         # 调用因子计算函数
         result = definition.func(df, definition.params)
 
-        if result is None or result.is_empty():
+        if result is None:
+            logger.warning(f"Factor {context.factor_id} returned None")
+            return pl.DataFrame()
+
+        # 确保返回结果是 Polars DataFrame
+        if not isinstance(result, pl.DataFrame):
+            try:
+                if isinstance(result, dict):
+                    result = pl.DataFrame(result)
+                elif isinstance(result, list):
+                    result = pl.DataFrame(result)
+                elif hasattr(result, 'to_pandas'):
+                    result = pl.from_pandas(result.to_pandas())
+                else:
+                    raise ValueError(f"Unsupported type returned by factor function: {type(result)}")
+            except Exception as e:
+                logger.error(f"Failed to convert factor result to Polars DataFrame: {e}")
+                return pl.DataFrame()
+
+        if result.is_empty():
             logger.warning(f"Factor {context.factor_id} returned empty result")
             return pl.DataFrame()
 

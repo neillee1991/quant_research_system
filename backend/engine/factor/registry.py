@@ -179,10 +179,7 @@ def load_factors_from_db(db_client):
             from app.core.sandbox import validate_factor_code
             is_safe, errors = validate_factor_code(code)
             if not is_safe:
-                logger.warning(f"Factor {factor_id} validation failed: {', '.join(errors)}, skipping")
-                continue
-            if not is_safe:
-                logger.warning(f"Factor {factor_id} security check failed: {error}, skipping")
+                logger.warning(f"Factor {factor_id} security check failed: {', '.join(errors)}, skipping")
                 continue
 
             import numpy as np

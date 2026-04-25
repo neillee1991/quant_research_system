@@ -60,9 +60,10 @@ class DataOperations:
             with self._conn.lock:
                 self._conn._ensure_connected()
                 result = self._conn.session.run(sql)
-            if return_type == "polars":
-                return self._to_polars(result)
-            return result
+            if return_type == "pandas":
+                pl_df = self._to_polars(result)
+                return pl_df.to_pandas() if not pl_df.is_empty() else pd.DataFrame()
+            return self._to_polars(result)
         except Exception as e:
             logger.error(f"查询失败: {e}\nSQL: {sql}")
             raise
@@ -79,12 +80,24 @@ class DataOperations:
         """
         if result is None:
             return pl.DataFrame()
+        if isinstance(result, pl.DataFrame):
+            return result
         if isinstance(result, pd.DataFrame):
             if result.empty:
                 return pl.DataFrame()
             return pl.from_pandas(result)
         if isinstance(result, dict):
-            return pl.DataFrame(result)
+            try:
+                return pl.DataFrame(result)
+            except Exception as e:
+                logger.warning(f"转换字典到 Polars DataFrame 失败: {e}, 返回空 DataFrame")
+                return pl.DataFrame()
+        if isinstance(result, list):
+            try:
+                return pl.DataFrame(result)
+            except Exception as e:
+                logger.warning(f"转换列表到 Polars DataFrame 失败: {e}, 返回空 DataFrame")
+                return pl.DataFrame()
         logger.warning(f"未知结果类型: {type(result)}, 返回空 DataFrame")
         return pl.DataFrame()
 

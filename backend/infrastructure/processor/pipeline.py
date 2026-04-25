@@ -112,6 +112,9 @@ class DataPipeline:
         if df is None:
             raise ValueError("ProcessContext.dataframe is None")
 
+        # 确保 df 是 Polars DataFrame
+        df = self._ensure_polars_df(df)
+
         for idx, processor in enumerate(self._stages, 1):
             try:
                 # 检查是否需要执行
@@ -123,6 +126,9 @@ class DataPipeline:
 
                 # 执行处理
                 df = processor.process(df, context)
+
+                # 确保 df 是 Polars DataFrame
+                df = self._ensure_polars_df(df)
 
                 # 更新上下文中的数据引用
                 context.dataframe = df
@@ -139,6 +145,41 @@ class DataPipeline:
 
         logger.info(f"Pipeline {self.name} completed, final output: {len(df) if df is not None else 0} rows")
         return df
+
+    def _ensure_polars_df(self, df: Any) -> pl.DataFrame:
+        """确保返回的是 Polars DataFrame
+
+        Args:
+            df: 可能的 DataFrame 类型
+
+        Returns:
+            Polars DataFrame
+        """
+        if df is None:
+            return pl.DataFrame()
+        if isinstance(df, pl.DataFrame):
+            return df
+        if isinstance(df, dict):
+            try:
+                return pl.DataFrame(df)
+            except Exception as e:
+                logger.warning(f"Failed to convert dict to Polars DataFrame: {e}")
+                return pl.DataFrame()
+        if isinstance(df, list):
+            try:
+                return pl.DataFrame(df)
+            except Exception as e:
+                logger.warning(f"Failed to convert list to Polars DataFrame: {e}")
+                return pl.DataFrame()
+        if hasattr(df, 'to_pandas'):
+            try:
+                return pl.from_pandas(df.to_pandas())
+            except Exception as e:
+                logger.warning(f"Failed to convert from pandas-like object to Polars DataFrame: {e}")
+                return pl.DataFrame()
+
+        logger.warning(f"Unknown type {type(df)}, returning empty Polars DataFrame")
+        return pl.DataFrame()
 
     def get_stages(self) -> List[IProcessor]:
         """获取所有处理阶段（用于调试）"""

@@ -111,19 +111,29 @@ def _format_task_row(row: dict) -> dict:
     import json
     from zoneinfo import ZoneInfo
     _TZ = ZoneInfo("Asia/Shanghai")
+    result = dict(row)
     for field in ["started_at", "finished_at", "created_at"]:
-        if field in row and row[field] is not None:
-            val = row[field]
+        if field in result and result[field] is not None:
+            val = result[field]
             if hasattr(val, 'tzinfo'):
                 if val.tzinfo is None:
                     val = val.replace(tzinfo=_TZ)
-                row[field] = val.isoformat()
+                result[field] = val.isoformat()
             else:
-                row[field] = str(val)
+                result[field] = str(val)
     for field in ["params", "extra"]:
-        if field in row and isinstance(row[field], str) and row[field]:
+        if field in result and isinstance(result[field], str) and result[field]:
             try:
-                row[field] = json.loads(row[field])
+                result[field] = json.loads(result[field])
             except (json.JSONDecodeError, ValueError):
                 pass
-    return row
+    # 将数据库字段名映射到前端期望的字段名
+    if "error_message" in result and "error" not in result:
+        result["error"] = result["error_message"]
+    elif "error_message" in result and "error" in result:
+        if not result["error"]:
+            result["error"] = result["error_message"]
+    # 确保 rows 字段是整数类型
+    if "rows" in result and result["rows"] is not None:
+        result["rows"] = int(result["rows"])
+    return result
