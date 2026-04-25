@@ -143,10 +143,12 @@ The sync system reads task definitions from the DolphinDB `sync_task_config` dim
 ```python
 from app.core.container import container
 
-data_service = container.get_data_service()
 factor_service = container.get_factor_service()
 backtest_service = container.get_backtest_service()
+sync_engine = container.get_sync_engine()
 ```
+
+**注意**: `DataService` 已删除（死代码），数据查询直接使用 `db_client`。
 
 ### API Route Structure
 
@@ -169,6 +171,15 @@ Custom exception hierarchy in `app/core/exceptions.py`:
   - `DataException` → `DataNotFoundError`, `DataValidationError`
   - `SyncException` → `SyncTaskNotFoundError`, `RateLimitExceededError`
   - `BacktestException`, `FactorException`, `MLException`
+
+### 认证与安全
+
+本系统为个人单机使用，**无 API 认证和限流**（`auth.py`、`rate_limit.py` 已删除）。
+
+安全防护集中在：
+- 因子代码执行：`app/core/sandbox.py` AST 静态分析 + 受限 exec（`engine/factor/registry.py` 已接入）
+- SQL 注入防护：`app/core/sql_security.py` 表名白名单 + 参数化查询
+- 输入验证：`app/validators/input_validators.py`
 
 ### Factor Engine (Polars-based)
 
@@ -243,22 +254,15 @@ db_client.upsert("table_name", polars_df, ["primary", "keys"])
 3. Inject services via `Depends()` if using service layer
 4. Raise custom exceptions from `app.core.exceptions`
 
-## Known Issues (from BUG_REPORT.md)
-
-### Critical — Fix Before New Features
-
-- **C-02**: SQL injection in `data_merged.py` — 18+ f-string SQL concatenations, use `%s` params
-- **C-05**: Arbitrary Python code execution in `/production/factors/test` — needs auth + sandbox
-- **C-07**: `annualized_return` uses total return instead of `"Annualized Return [%]"` from VectorBT
-- **C-08/C-09**: FlowEditor node form changes not synced back to ReactFlow/Zustand store
+## Known Issues
 
 ### High Priority
 
 - **H-01**: `_escape_value` auto-converts YYYYMMDD strings to date format — breaks STRING column queries
 - **H-02**: RSI uses SMA instead of EWM (Wilder's method) — wrong values
 - **H-03**: Factor analysis quantile grouping off-by-one — use `ceil().clip(1, quantiles)`
-- **H-10**: `DataService.get_daily_data` silently ignores `end_date`
 - **H-21**: Factor analysis Sharpe ratio not annualized (missing `sqrt(252)`)
+- **H-10**: `DataService.get_daily_data` silently ignores `end_date` — **已删除 DataService，此问题已消除**
 
 ## Important Notes
 
@@ -267,11 +271,16 @@ db_client.upsert("table_name", polars_df, ["primary", "keys"])
 - **Data processing**: Polars is preferred over Pandas for performance
 - **Frontend**: Chinese language UI using Ant Design, React Flow, and ECharts
 - **Frontend proxy**: React dev server proxies `/api` to `http://localhost:8000`
-- **Tushare token**: Required for data sync, set in `backend/.env`
-- **Rate limiting**: Tushare API calls are rate-limited (default 120/min)
+- **Tushare token**: Required for data sync, set in `.env`
+- **Rate limiting**: Tushare API calls are rate-limited (default 120/min); AkShare calls rate-limited at 0.5s interval with 3-retry exponential backoff
 - **Scheduler**: Self-developed scheduler orchestrates sync/compute/backtest flows (supports DAG execution and cron scheduling)
 - **SQL params**: Always use `%s` placeholders, never f-string SQL concatenation
 - **Immutability**: Use Polars expressions (lazy, immutable) — never mutate DataFrames in-place
+- **进程守护**: `start.sh` 使用 while-true restart loop，后端/前端崩溃后5秒自动重启
+- **密码配置**: 所有密码通过 `.env` 环境变量配置，参考 `.env.example`，禁止硬编码
+- **Flow CRUD**: `FlowService` 使用 asyncpg（DatabasePool），与 `TaskService` 保持一致
+- **因子代码安全**: 从数据库加载的因子代码执行前经过 `code_sandbox.check_security()` 沙箱检查
+- **run_id 格式**: 统一使用 `str(uuid.uuid4())`，禁止时间戳或混合格式
 
 ## Troubleshooting
 
@@ -348,19 +357,15 @@ db_client.upsert("table_name", polars_df, ["primary", "keys"])
 - **类型注解覆盖率**: ≥ 80%
 - **测试覆盖率**: ≥ 80% (核心模块 ≥ 90%)
 
-### 安全要求 (CRITICAL)
+### 安全要求
 
-**🔴 立即处理的安全问题:**
-1. **代码执行端点** (`/api/v1/production/factor/test`) - 必须添加认证和授权
-2. **SQL查询端点** (`/api/v1/data/query`) - 必须添加认证和速率限制
-3. **默认密码** - 生产环境禁止使用默认密码 "123456"
+**本系统为个人单机使用，无需 API 认证和限流。**
 
-**强制要求:**
-- 所有 API 端点必须实现认证 (JWT/OAuth2)
-- 敏感操作必须实现基于角色的授权 (RBAC)
-- 所有用户输入必须验证 (使用 Pydantic)
-- 表名/列名使用白名单验证
-- 禁止硬编码敏感信息
+安全防护重点：
+- 因子代码沙箱：`app/core/sandbox.py`（已接入 `engine/factor/registry.py`）
+- SQL 注入防护：表名白名单 + 参数化查询
+- 输入验证：Pydantic 模型 + `app/validators/`
+- 密码管理：所有密码通过 `.env` 环境变量配置，禁止硬编码默认值
 
 ### 文件组织规范
 

@@ -1,3 +1,4 @@
+import time
 import akshare as ak
 import polars as pl
 from app.core.logger import logger
@@ -6,10 +7,27 @@ from app.core.logger import logger
 class AkShareCollector:
     """AkShare data collector (no token required)."""
 
+    _call_interval = 0.5
+
+    def _call_with_retry(self, func, max_retries: int = 3, **kwargs):
+        for attempt in range(max_retries):
+            try:
+                time.sleep(self._call_interval)
+                result = func(**kwargs)
+                if result is not None and not (hasattr(result, "empty") and result.empty):
+                    return result
+                logger.warning(f"AkShare empty result on attempt {attempt + 1}")
+            except Exception as e:
+                logger.warning(f"AkShare attempt {attempt + 1} failed: {e}")
+                time.sleep(2 ** attempt)
+        return None
+
     def get_stock_list(self) -> pl.DataFrame | None:
         """Fetch A-share stock list from AkShare."""
         try:
-            df = ak.stock_info_a_code_name()
+            df = self._call_with_retry(ak.stock_info_a_code_name)
+            if df is None:
+                return None
             return pl.from_pandas(df)
         except Exception as e:
             logger.error(f"AkShare get_stock_list failed: {e}")
@@ -22,7 +40,8 @@ class AkShareCollector:
         start_date / end_date: 'YYYYMMDD'
         """
         try:
-            df = ak.stock_zh_a_hist(
+            df = self._call_with_retry(
+                ak.stock_zh_a_hist,
                 symbol=symbol,
                 period="daily",
                 start_date=start_date,

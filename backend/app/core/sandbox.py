@@ -190,12 +190,13 @@ def execute_safe_code(
     1. 限制可用的 builtins
     2. 禁止危险操作（文件访问、网络、导入等）
     3. 提供安全的模块访问（仅 polars）
+    4. timeout_seconds 超时强制终止
 
     Args:
         code: 要执行的代码
         local_vars: 局部变量字典
         timeout_seconds: 超时时间（秒）
-        max_memory_mb: 最大内存限制（MB）
+        max_memory_mb: 最大内存限制（MB，当前未强制）
 
     Returns:
         执行结果字典，包含：
@@ -208,34 +209,43 @@ def execute_safe_code(
     Raises:
         SandboxSecurityError: 安全违规
     """
+    import concurrent.futures
+
     # 安全检查
     security_violations = check_security(code)
     if security_violations:
         raise SandboxSecurityError(f"安全违规检测: {', '.join(security_violations)}")
 
+    def _run() -> Dict[str, Any]:
+        return _execute_in_sandbox(code, local_vars)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(_run)
+        try:
+            return future.result(timeout=timeout_seconds)
+        except concurrent.futures.TimeoutError:
+            raise SandboxTimeoutError(f"代码执行超时（>{timeout_seconds}s）")
+
+
+def _execute_in_sandbox(code: str, local_vars: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """在沙箱命名空间中实际执行代码（由 execute_safe_code 在线程中调用）。"""
     stdout_capture = io.StringIO()
     stderr_capture = io.StringIO()
 
-    # 准备命名空间
     globals_dict = dict(SAFE_GLOBALS)
 
-    # 允许的模块
     try:
-        # 安全地导入 polars
         import polars as pl
         globals_dict["pl"] = pl
         globals_dict["polars"] = pl
     except ImportError:
         logger.warning("Polars not available in sandbox")
 
-    # 添加安全的 print 函数
     def safe_print(*args, **kwargs):
         end = kwargs.get("end", "\n")
         stdout_capture.write(" ".join(str(x) for x in args) + end)
 
     globals_dict["print"] = safe_print
-
-    # 添加局部变量
     locals_dict = local_vars.copy() if local_vars else {}
 
     result = {
@@ -247,14 +257,10 @@ def execute_safe_code(
     }
 
     try:
-        # 编译代码
         compiled = compile(code, "<sandbox>", "exec")
-
-        # 执行代码
         exec(compiled, globals_dict, locals_dict)
-
         result["success"] = True
-        result["result"] = locals_dict.get("result")  # 支持通过 result 变量返回
+        result["result"] = locals_dict.get("result")
 
     except SyntaxError as e:
         error_msg = f"语法错误 (第{e.lineno}行, 第{e.offset}列): {e.msg}"
@@ -273,7 +279,6 @@ def execute_safe_code(
 
     result["stdout"] = stdout_capture.getvalue()
     result["stderr"] = stderr_capture.getvalue()
-
     return result
 
 

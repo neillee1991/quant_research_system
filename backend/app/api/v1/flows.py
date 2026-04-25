@@ -28,21 +28,21 @@ class BackfillRequest(BaseModel):
 # ==================== API Endpoints ====================
 
 @router.get("/flows", response_model=List[FlowConfigListItem])
-def list_flows(
+async def list_flows(
     enabled_only: bool = Query(default=False, description="Only return enabled flows"),
 ):
     """List all flow configurations"""
     try:
-        return flow_service.list_flows(enabled_only=enabled_only)
+        return await flow_service.list_flows(enabled_only=enabled_only)
     except Exception as e:
         logger.error(f"Failed to list flows: {e}")
         raise HTTPException(status_code=500, detail="Failed to list flows")
 
 @router.get("/flows/{name}", response_model=FlowConfigInDB)
-def get_flow(name: str):
+async def get_flow(name: str):
     """Get a single flow configuration"""
     try:
-        flow = flow_service.get_flow(name)
+        flow = await flow_service.get_flow(name)
         if not flow:
             raise HTTPException(status_code=404, detail=f"Flow '{name}' not found")
         return flow
@@ -53,10 +53,10 @@ def get_flow(name: str):
         raise HTTPException(status_code=500, detail="Failed to get flow")
 
 @router.post("/flows", response_model=FlowConfigInDB)
-def create_flow(config: FlowConfigCreate):
+async def create_flow(config: FlowConfigCreate):
     """Create a new flow configuration"""
     try:
-        return flow_service.create_flow(config)
+        return await flow_service.create_flow(config)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -64,10 +64,10 @@ def create_flow(config: FlowConfigCreate):
         raise HTTPException(status_code=500, detail="Failed to create flow")
 
 @router.put("/flows/{name}", response_model=FlowConfigInDB)
-def update_flow(name: str, config: FlowConfigUpdate):
+async def update_flow(name: str, config: FlowConfigUpdate):
     """Update a flow configuration"""
     try:
-        return flow_service.update_flow(name, config)
+        return await flow_service.update_flow(name, config)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
@@ -75,10 +75,10 @@ def update_flow(name: str, config: FlowConfigUpdate):
         raise HTTPException(status_code=500, detail="Failed to update flow")
 
 @router.delete("/flows/{name}")
-def delete_flow(name: str, hard: bool = Query(default=False, description="Hard delete (permanently remove)")):
+async def delete_flow(name: str, hard: bool = Query(default=False, description="Hard delete (permanently remove)")):
     """Delete a flow (disable by default, or hard delete)"""
     try:
-        flow_service.delete_flow(name, soft_delete=not hard)
+        await flow_service.delete_flow(name, soft_delete=not hard)
         if hard:
             return {"status": "success", "message": f"Flow '{name}' permanently deleted"}
         else:

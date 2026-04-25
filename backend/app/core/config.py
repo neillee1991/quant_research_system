@@ -34,7 +34,7 @@ class DolphinDBConfig(_BaseConfig):
     dolphindb_host: str = Field(default="localhost", env="DOLPHINDB_HOST")
     dolphindb_port: int = Field(default=8848, env="DOLPHINDB_PORT")
     dolphindb_user: str = Field(default="admin", env="DOLPHINDB_USER")
-    dolphindb_password: str = Field(default="123456", env="DOLPHINDB_PASSWORD")
+    dolphindb_password: str = Field(default="", env="DOLPHINDB_PASSWORD")
     db_path: str = Field(default="dfs://quant", env="DOLPHINDB_DB_PATH")
 
 
@@ -44,7 +44,7 @@ class PostgreSQLConfig(_BaseConfig):
     postgres_port: int = Field(default=5432, env="POSTGRES_PORT")
     postgres_db: str = Field(default="quantsystem", env="POSTGRES_DB")
     postgres_user: str = Field(default="quant", env="POSTGRES_USER")
-    postgres_password: str = Field(default="quant123", env="POSTGRES_PASSWORD")
+    postgres_password: str = Field(default="", env="POSTGRES_PASSWORD")
 
 
 class BacktestConfig(_BaseConfig):
@@ -69,21 +69,6 @@ class SyncConfig(_BaseConfig):
     """数据同步配置"""
     default_start_date: str = Field(default="20100101", pattern=r"^\d{8}$")
 
-
-class AuthSettings(_BaseConfig):
-    """JWT 认证配置"""
-    secret_key: str = Field(default="change-this-in-production-use-openssl-rand-hex-32", env="AUTH_SECRET_KEY")
-    algorithm: str = Field(default="HS256", env="AUTH_ALGORITHM")
-    access_token_expire_minutes: int = Field(default=1440, env="AUTH_ACCESS_TOKEN_EXPIRE_MINUTES")  # 24 hours
-
-
-class RateLimitSettings(_BaseConfig):
-    """API 速率限制配置"""
-    enabled: bool = Field(default=True, env="RATE_LIMIT_ENABLED")
-    default_limit: str = Field(default="100/minute", env="RATE_LIMIT_DEFAULT")
-    auth_limit: str = Field(default="10/minute", env="RATE_LIMIT_AUTH")
-    heavy_compute_limit: str = Field(default="20/minute", env="RATE_LIMIT_HEAVY")
-    task_execution_limit: str = Field(default="10/minute", env="RATE_LIMIT_TASK")
 
 
 class Settings(BaseSettings):
@@ -117,8 +102,6 @@ class Settings(BaseSettings):
     backtest: BacktestConfig = Field(default_factory=BacktestConfig)
     ml: MLConfig = Field(default_factory=MLConfig)
     sync: SyncConfig = Field(default_factory=SyncConfig)
-    auth: AuthSettings = Field(default_factory=AuthSettings)
-    rate_limit: RateLimitSettings = Field(default_factory=RateLimitSettings)
 
     @field_validator("data_dir", "raw_data_dir", "factors_dir", "models_dir", "log_dir", "analysis_dir")
     @classmethod

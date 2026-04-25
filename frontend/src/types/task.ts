@@ -1,10 +1,9 @@
 /**
  * Task Management Abstraction Types
  *
- * Provides unified type definitions for all task types (sync, etl, factor).
- * SyncTaskConfig, ETLTaskConfig, FactorConfig are sourced from generated.ts (backend Pydantic models).
+ * SyncTaskConfig/ETLTaskConfig/FactorConfig 与后端 base_task.py 保持一致。
+ * 后端 TaskListResponse.tasks 是 Dict[str, Any]，无法从 generated.ts 推断，故手写。
  */
-import type { components } from './generated';
 
 // Task type discriminator
 export type TaskType = 'sync' | 'etl' | 'factor';
@@ -17,10 +16,49 @@ export interface BaseTaskConfig {
   enabled?: boolean;
 }
 
-// Backend model types — single source of truth from generated.ts
-export type SyncTaskConfig = components['schemas']['SyncTaskConfig'];
-export type ETLTaskConfig = components['schemas']['ETLTaskConfig'];
-export type FactorConfig = components['schemas']['FactorConfig'];
+// 与后端 SyncTaskConfig (base_task.py) 保持一致
+// JSONB 迁移后 *_json 字段直接是 dict/list（不再是字符串）
+export interface SyncTaskConfig extends BaseTaskConfig {
+  task_id: string;
+  api_name: string;
+  api_limit?: number;
+  sync_type?: string;
+  params_json?: Record<string, unknown>;
+  date_field?: string;
+  primary_keys_json?: string[];
+  table_name: string;
+  schema_json?: Record<string, unknown>;
+  column_mapping_json?: Record<string, string> | null;
+  source?: string;
+  // 前端运行时别名（parseJsonFields 填充，供可视化编辑器使用）
+  params?: Record<string, unknown>;
+  schema?: Record<string, unknown>;
+  primary_keys?: string[];
+  column_mapping?: Record<string, string> | null;
+}
+
+// 与后端 ETLTaskConfig (base_task.py) 保持一致
+export interface ETLTaskConfig extends BaseTaskConfig {
+  task_id: string;
+  script: string;
+  sync_type?: string;
+  date_field?: string | null;
+  primary_keys_json?: string[];
+  schema_json?: Record<string, unknown>;
+  table_name: string;
+  // 前端运行时别名
+  primary_keys?: string[];
+  schema?: Record<string, unknown>;
+}
+
+// 与后端 FactorConfig (base_task.py) 保持一致
+export interface FactorConfig extends BaseTaskConfig {
+  factor_id: string;
+  code: string;
+  depends_on?: string;
+  params?: Record<string, unknown>;
+  lookback_days?: number;
+}
 
 // Generic task type union
 export type TaskConfig = SyncTaskConfig | ETLTaskConfig | FactorConfig;
@@ -48,14 +86,12 @@ export interface TaskDeleteResponse {
   message: string;
 }
 
-// Helper type to extract ID field name based on task type
 export type TaskIdField<T extends TaskType> =
   T extends 'sync' ? 'task_id' :
   T extends 'etl' ? 'task_id' :
   T extends 'factor' ? 'factor_id' :
   never;
 
-// Helper type to map task type to config interface
 export type TaskConfigMap = {
   sync: SyncTaskConfig;
   etl: ETLTaskConfig;

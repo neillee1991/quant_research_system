@@ -1,21 +1,11 @@
 """
-Flow Configuration Service (PostgreSQL 版本)
+Flow Configuration Service (asyncpg 版本)
 """
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 from zoneinfo import ZoneInfo
-import json
-import psycopg2
-from psycopg2.extras import RealDictCursor
 
 from app.core.logger import logger
-
-_TZ = ZoneInfo("Asia/Shanghai")
-
-
-def _now() -> datetime:
-    return datetime.now(_TZ)
-from app.core.config import settings
 from app.models.flow_config import (
     FlowConfigCreate,
     FlowConfigUpdate,
@@ -23,30 +13,23 @@ from app.models.flow_config import (
     FlowConfigListItem,
     TaskInDAG,
 )
+from scheduler.db import DatabasePool
+
+_TZ = ZoneInfo("Asia/Shanghai")
 
 
-def get_db_connection():
-    """获取 PostgreSQL 连接（同步）"""
-    return psycopg2.connect(
-        host=settings.postgresql.postgres_host,
-        port=settings.postgresql.postgres_port,
-        database=settings.postgresql.postgres_db,
-        user=settings.postgresql.postgres_user,
-        password=settings.postgresql.postgres_password,
-    )
+def _now() -> datetime:
+    return datetime.now(_TZ)
 
 
 class FlowService:
-    """Flow Configuration CRUD Service (PostgreSQL)"""
+    """Flow Configuration CRUD Service (asyncpg)"""
 
     @staticmethod
     def _parse_db_row(row: Dict[str, Any]) -> FlowConfigInDB:
-        """Parse database row to FlowConfigInDB"""
-        # Parse JSON fields
-        tags = row.get("tags", []) or []
-        tasks_data = row.get("tasks", []) or []
+        tags = row.get("tags") or []
+        tasks_data = row.get("tasks") or []
         tasks = [TaskInDAG(**t) for t in tasks_data]
-
         return FlowConfigInDB(
             name=row["name"],
             description=row.get("description", ""),
@@ -61,27 +44,23 @@ class FlowService:
         )
 
     @staticmethod
-    def list_flows(enabled_only: bool = False) -> List[FlowConfigListItem]:
-        """List all flows"""
+    async def list_flows(enabled_only: bool = False) -> List[FlowConfigListItem]:
         try:
-            with get_db_connection() as conn:
-                with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                    if enabled_only:
-                        cur.execute(
-                            "SELECT name, description, cron, tags, enabled, date_offset_days, tasks, updated_at "
-                            "FROM flow_configs WHERE enabled = true ORDER BY updated_at DESC"
-                        )
-                    else:
-                        cur.execute(
-                            "SELECT name, description, cron, tags, enabled, date_offset_days, tasks, updated_at "
-                            "FROM flow_configs ORDER BY updated_at DESC"
-                        )
-                    rows = cur.fetchall()
-
+            if enabled_only:
+                rows = await DatabasePool.fetch(
+                    "SELECT name, description, cron, tags, enabled, date_offset_days, tasks, updated_at "
+                    "FROM flow_configs WHERE enabled = true ORDER BY updated_at DESC"
+                )
+            else:
+                rows = await DatabasePool.fetch(
+                    "SELECT name, description, cron, tags, enabled, date_offset_days, tasks, updated_at "
+                    "FROM flow_configs ORDER BY updated_at DESC"
+                )
             flows = []
             for row in rows:
-                tasks_data = row.get("tasks", []) or []
-                tags = row.get("tags", []) or []
+                row = dict(row)
+                tasks_data = row.get("tasks") or []
+                tags = row.get("tags") or []
                 flows.append(FlowConfigListItem(
                     name=row["name"],
                     description=row.get("description", ""),
@@ -98,58 +77,46 @@ class FlowService:
             raise
 
     @staticmethod
-    def get_flow(name: str) -> Optional[FlowConfigInDB]:
-        """Get a single flow by name"""
+    async def get_flow(name: str) -> Optional[FlowConfigInDB]:
         try:
-            with get_db_connection() as conn:
-                with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                    cur.execute("SELECT * FROM flow_configs WHERE name = %s", (name,))
-                    row = cur.fetchone()
-
+            row = await DatabasePool.fetchrow(
+                "SELECT * FROM flow_configs WHERE name = $1", name
+            )
             if not row:
                 return None
-
             return FlowService._parse_db_row(dict(row))
         except Exception as e:
             logger.error(f"Failed to get flow {name}: {e}", exc_info=True)
             raise
 
     @staticmethod
-    def create_flow(config: FlowConfigCreate) -> FlowConfigInDB:
-        """Create a new flow"""
+    async def create_flow(config: FlowConfigCreate) -> FlowConfigInDB:
         try:
-            # Check if flow already exists
-            existing = FlowService.get_flow(config.name)
+            existing = await FlowService.get_flow(config.name)
             if existing:
                 raise ValueError(f"Flow with name '{config.name}' already exists")
 
             now = _now()
-            with get_db_connection() as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        """
-                        INSERT INTO flow_configs
-                        (name, description, cron, tags, tasks, enabled, date_offset_days,
-                         version, created_at, updated_at)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        """,
-                        (
-                            config.name,
-                            config.description,
-                            config.cron,
-                            json.dumps(config.tags) if config.tags else "[]",
-                            json.dumps([t.model_dump() for t in config.tasks]) if config.tasks else "[]",
-                            config.enabled,
-                            config.date_offset_days,
-                            1,
-                            now,
-                            now,
-                        ),
-                    )
-                conn.commit()
-
+            await DatabasePool.execute(
+                """
+                INSERT INTO flow_configs
+                (name, description, cron, tags, tasks, enabled, date_offset_days,
+                 version, created_at, updated_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                """,
+                config.name,
+                config.description,
+                config.cron,
+                config.tags or [],
+                [t.model_dump() for t in config.tasks] if config.tasks else [],
+                config.enabled,
+                config.date_offset_days,
+                1,
+                now,
+                now,
+            )
             logger.info(f"Created flow: {config.name}")
-            return FlowService.get_flow(config.name)
+            return await FlowService.get_flow(config.name)
         except ValueError:
             raise
         except Exception as e:
@@ -157,47 +124,42 @@ class FlowService:
             raise
 
     @staticmethod
-    def update_flow(name: str, config: FlowConfigUpdate) -> FlowConfigInDB:
-        """Update an existing flow"""
+    async def update_flow(name: str, config: FlowConfigUpdate) -> FlowConfigInDB:
         try:
-            # Get existing flow
-            existing = FlowService.get_flow(name)
+            existing = await FlowService.get_flow(name)
             if not existing:
                 raise ValueError(f"Flow '{name}' not found")
 
-            # Build update data
-            update_data = {}
+            update_data: Dict[str, Any] = {}
             if config.description is not None:
                 update_data["description"] = config.description
             if config.cron is not None:
                 update_data["cron"] = config.cron
             if config.tags is not None:
-                update_data["tags"] = json.dumps(config.tags)
+                update_data["tags"] = config.tags
             if config.enabled is not None:
                 update_data["enabled"] = config.enabled
             if config.date_offset_days is not None:
                 update_data["date_offset_days"] = config.date_offset_days
             if config.tasks is not None:
-                update_data["tasks"] = json.dumps([t.model_dump() for t in config.tasks])
+                update_data["tasks"] = [t.model_dump() for t in config.tasks]
 
             if not update_data:
                 return existing
 
-            # Update in database
             update_data["updated_at"] = _now()
             update_data["version"] = existing.version + 1
 
-            # Build update SQL
-            set_clause = ", ".join([f"{k} = %s" for k in update_data.keys()])
-            params = list(update_data.values()) + [name]
+            keys = list(update_data.keys())
+            set_clause = ", ".join(f"{k} = ${i+1}" for i, k in enumerate(keys))
+            values = [update_data[k] for k in keys] + [name]
 
-            with get_db_connection() as conn:
-                with conn.cursor() as cur:
-                    cur.execute(f"UPDATE flow_configs SET {set_clause} WHERE name = %s", params)
-                conn.commit()
-
+            await DatabasePool.execute(
+                f"UPDATE flow_configs SET {set_clause} WHERE name = ${len(keys)+1}",
+                *values,
+            )
             logger.info(f"Updated flow: {name}")
-            return FlowService.get_flow(name)
+            return await FlowService.get_flow(name)
         except ValueError:
             raise
         except Exception as e:
@@ -205,29 +167,24 @@ class FlowService:
             raise
 
     @staticmethod
-    def delete_flow(name: str, soft_delete: bool = True) -> bool:
-        """Delete a flow (soft delete by disabling, or hard delete)"""
+    async def delete_flow(name: str, soft_delete: bool = True) -> bool:
         try:
-            existing = FlowService.get_flow(name)
+            existing = await FlowService.get_flow(name)
             if not existing:
                 raise ValueError(f"Flow '{name}' not found")
 
             now = _now()
-            with get_db_connection() as conn:
-                with conn.cursor() as cur:
-                    if soft_delete:
-                        # Soft delete: just disable
-                        cur.execute(
-                            "UPDATE flow_configs SET enabled = false, updated_at = %s WHERE name = %s",
-                            (now, name)
-                        )
-                        logger.info(f"Disabled (soft deleted) flow: {name}")
-                    else:
-                        # Hard delete
-                        cur.execute("DELETE FROM flow_configs WHERE name = %s", (name,))
-                        logger.info(f"Hard deleted flow: {name}")
-                conn.commit()
-
+            if soft_delete:
+                await DatabasePool.execute(
+                    "UPDATE flow_configs SET enabled = false, updated_at = $1 WHERE name = $2",
+                    now, name,
+                )
+                logger.info(f"Disabled (soft deleted) flow: {name}")
+            else:
+                await DatabasePool.execute(
+                    "DELETE FROM flow_configs WHERE name = $1", name
+                )
+                logger.info(f"Hard deleted flow: {name}")
             return True
         except ValueError:
             raise

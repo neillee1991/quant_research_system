@@ -59,7 +59,7 @@ class SyncConfigManager:
 
     def _row_to_task(self, row: Dict[str, Any]):
         from app.models.base_task import SyncTaskConfig
-        return SyncTaskConfig(**row)
+        return SyncTaskConfig.from_row(row)
 
     def get_task(self, task_id: str) -> Dict[str, Any]:
         rows = self._query("SELECT * FROM sync_task_configs WHERE task_id = %s", (task_id,))
@@ -169,7 +169,7 @@ class SyncLogManager:
                     row = cur.fetchone()
                     if row:
                         from app.models.base_task import SyncTaskConfig
-                        return SyncTaskConfig(**dict(row)).to_dict_with_parsed_json()
+                        return SyncTaskConfig.from_row(dict(row)).to_dict_with_parsed_json()
                     return None
             finally:
                 conn.close()

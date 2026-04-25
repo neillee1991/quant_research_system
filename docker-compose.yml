@@ -35,7 +35,7 @@ services:
     environment:
       POSTGRES_DB: quantsystem
       POSTGRES_USER: quant
-      POSTGRES_PASSWORD: quant123
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       TZ: Asia/Shanghai
     restart: unless-stopped
     healthcheck:

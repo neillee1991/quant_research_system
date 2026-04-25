@@ -29,6 +29,9 @@ class TaskService(Generic[T]):
         self.id_field = id_field
         self.model_class = model_class
 
+    def _from_row(self, row: Dict[str, Any]) -> T:
+        return self.model_class.from_row(row)
+
     async def list_tasks(self, enabled_only: bool = False) -> List[T]:
         from scheduler.db import DatabasePool
         sql = f"SELECT * FROM {self.table_name}"
@@ -38,7 +41,7 @@ class TaskService(Generic[T]):
         tasks = []
         for row in rows:
             try:
-                tasks.append(self.model_class(**dict(row)))
+                tasks.append(self._from_row(dict(row)))
             except Exception as e:
                 logger.warning(f"Failed to parse task {row.get(self.id_field)}: {e}")
         return tasks
@@ -51,7 +54,7 @@ class TaskService(Generic[T]):
         )
         if not row:
             return None
-        return self.model_class(**dict(row))
+        return self._from_row(dict(row))
 
     async def create_task(
         self,
@@ -156,7 +159,7 @@ class TaskService(Generic[T]):
 
         task_data = task.model_dump()
         schema_json = task_data.get('schema_json')
-        if not schema_json or not isinstance(schema_json, str):
+        if not schema_json:
             return {
                 "status": "success",
                 "data": {
@@ -168,8 +171,8 @@ class TaskService(Generic[T]):
             }
 
         try:
-            schema = json.loads(schema_json)
-            columns = schema.get("columns", []) if isinstance(schema, dict) else []
+            schema = schema_json if isinstance(schema_json, dict) else {}
+            columns = schema.get("columns", [])
             return {
                 "status": "success",
                 "data": {
@@ -261,11 +264,11 @@ class TaskService(Generic[T]):
             raise ValueError(f"Task {task_id} does not have a table_name")
 
         schema_json = task_data.get('schema_json')
-        if not schema_json or not isinstance(schema_json, str):
+        if not schema_json:
             raise ValueError(f"Task {task_id} does not have a schema defined")
 
         try:
-            schema = json.loads(schema_json)
+            schema = schema_json if isinstance(schema_json, dict) else {}
             primary_keys = self._parse_primary_keys(task_data)
 
             if db_client.table_exists(table_name):
@@ -403,7 +406,7 @@ class TaskService(Generic[T]):
         if not schema_json:
             return
         primary_keys = self._parse_primary_keys(config_data)
-        schema = json.loads(schema_json) if isinstance(schema_json, str) else schema_json
+        schema = config_data.get("schema_json") or {}
         is_valid, errors = SchemaValidator.validate_schema(schema, primary_keys)
         if not is_valid:
             raise ValueError(f"Schema validation failed: {'; '.join(errors)}")
@@ -428,17 +431,15 @@ class TaskService(Generic[T]):
         new_schema_json = config_data.get("schema_json")
         if not new_schema_json:
             return
-        new_schema = json.loads(new_schema_json) if isinstance(new_schema_json, str) else new_schema_json
-        old_schema_json = existing.model_dump().get("schema_json")
-        if old_schema_json and isinstance(old_schema_json, str):
-            old_schema = json.loads(old_schema_json)
-            if old_schema:  # 旧 schema 为空时跳过 evolution 检查
-                primary_keys = self._parse_primary_keys(current_dict)
-                is_valid, errors = SchemaValidator.validate_schema_evolution(
-                    old_schema=old_schema, new_schema=new_schema, primary_keys=primary_keys
-                )
-                if not is_valid:
-                    raise ValueError(f"Schema evolution failed: {'; '.join(errors)}")
+        new_schema = config_data.get("schema_json") or {}
+        old_schema = existing.model_dump().get("schema_json") or {}
+        if old_schema:
+            primary_keys = self._parse_primary_keys(current_dict)
+            is_valid, errors = SchemaValidator.validate_schema_evolution(
+                old_schema=old_schema, new_schema=new_schema, primary_keys=primary_keys
+            )
+            if not is_valid:
+                raise ValueError(f"Schema evolution failed: {'; '.join(errors)}")
         table_name = current_dict.get("table_name")
         if table_name:
             result = shared_table_validator.validate_shared_schema(
@@ -456,9 +457,11 @@ class TaskService(Generic[T]):
         raw = data.get("primary_keys_json") or data.get("primary_keys", [])
         if isinstance(raw, str):
             try:
+                import json
                 return json.loads(raw)
-            except json.JSONDecodeError:
+            except Exception:
                 return []
+        return raw if isinstance(raw, list) else []
         return raw or []
 
 

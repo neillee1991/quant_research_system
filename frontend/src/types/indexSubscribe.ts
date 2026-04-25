@@ -4,19 +4,10 @@
 
 import type { SyncTask as OriginalSyncTask } from './data';
 
-// 扩展 SyncTask 类型，添加指数订阅需要的字段
+// SyncTask 已包含所有字段，ExtendedSyncTask 仅补充 column_mapping 相关字段
 export interface ExtendedSyncTask extends OriginalSyncTask {
-  params_json?: string;
-  schema_json?: string;
-  primary_keys_json?: string;
-  column_mapping_json?: string;
-  params?: Record<string, unknown>;
-  schema?: Record<string, unknown>;
-  primary_keys?: string[];
-  column_mapping?: Record<string, string>;
-  api_name?: string;
-  date_field?: string;
-  api_limit?: number;
+  column_mapping_json?: Record<string, string> | null;
+  column_mapping?: Record<string, string> | null;
 }
 
 // 指数信息类型

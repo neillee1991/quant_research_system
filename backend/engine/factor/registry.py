@@ -217,7 +217,20 @@ def load_factors_from_db(db_client):
             depends_on = json.loads(row.get("depends_on") or "[]")
             params = json.loads(row.get("params") or "{}")
 
-            namespace = {}
+            from app.core.sandbox import code_sandbox
+            is_safe, error = code_sandbox.check_security(code)
+            if not is_safe:
+                logger.warning(f"Factor {factor_id} security check failed: {error}, skipping")
+                continue
+
+            import numpy as np
+            import pandas as pd
+            import polars as pl
+            namespace = {
+                "np": np, "numpy": np,
+                "pd": pd, "pandas": pd,
+                "pl": pl, "polars": pl,
+            }
             exec(code, namespace)
 
             compute_func = None

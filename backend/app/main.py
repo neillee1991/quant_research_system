@@ -8,8 +8,8 @@ from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 from app.core.config import settings
 from app.core.logger import logger
 from app.core.exceptions import QuantException, quant_exception_handler, general_exception_handler
-from app.core.rate_limit import setup_rate_limiter
-from app.api.v1 import flows, tasks
+from app.api.v1 import flows
+from app.api.v1.tasks import router as tasks_router
 from app.api.v1 import factor  # 使用拆分后的 factor 模块
 from app.api.v1 import data  # 使用拆分后的 data 模块
 from app.api.v1.config import router as config_api  # 配置管理 API
@@ -95,9 +95,6 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # 速率限制中间件
-    setup_rate_limiter(app)
-
     # 异常处理器
     app.add_exception_handler(QuantException, quant_exception_handler)
     app.add_exception_handler(Exception, general_exception_handler)
@@ -151,7 +148,7 @@ def create_app() -> FastAPI:
     app.include_router(config_api, prefix=settings.api_v1_prefix, tags=["config"])
 
     # 统一任务管理路由
-    app.include_router(tasks.router, prefix=settings.api_v1_prefix, tags=["tasks"])
+    app.include_router(tasks_router, prefix=settings.api_v1_prefix, tags=["tasks"])
 
     return app
 

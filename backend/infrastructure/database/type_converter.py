@@ -26,6 +26,17 @@ class TypeConverter:
         return value
 
     @staticmethod
+    def escape_string_value(value: Any) -> str:
+        """将 Python 值转换为 DolphinDB STRING 字面量，不做日期推断。
+        用于已知列类型为 STRING 的场景，避免 8 位数字被误转为日期。
+        """
+        if value is None:
+            return "NULL"
+        s = str(value)
+        s = s.replace("\\", "\\\\").replace('"', '\\"')
+        return f'"{s}"'
+
+    @staticmethod
     def escape_value(value: Any) -> str:
         """
         将 Python 值转换为 DolphinDB SQL 字面量

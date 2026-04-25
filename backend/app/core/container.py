@@ -7,7 +7,6 @@ from typing import Optional
 
 from app.core.config import settings
 from app.core.logger import logger
-from app.services.data_service import DataService
 from app.services.factor_service import FactorService
 from app.services.backtest_service import BacktestService
 from infrastructure.database.dolphindb_client import db_client
@@ -30,16 +29,6 @@ class Container:
             logger.info("Initializing dependency container")
 
     @lru_cache(maxsize=1)
-    def get_data_repository(self):
-        """获取数据仓库"""
-        return db_client
-
-    @lru_cache(maxsize=1)
-    def get_data_service(self) -> DataService:
-        """获取数据服务"""
-        return DataService(repository=self.get_data_repository())
-
-    @lru_cache(maxsize=1)
     def get_factor_service(self) -> FactorService:
         """获取因子服务"""
         return FactorService()
@@ -60,11 +49,6 @@ container = Container()
 
 
 # FastAPI 依赖注入函数
-def get_data_service() -> DataService:
-    """FastAPI 依赖：数据服务"""
-    return container.get_data_service()
-
-
 def get_factor_service() -> FactorService:
     """FastAPI 依赖：因子服务"""
     return container.get_factor_service()

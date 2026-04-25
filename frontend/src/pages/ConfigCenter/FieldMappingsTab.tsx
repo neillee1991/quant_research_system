@@ -124,7 +124,7 @@ const FieldMappingsTab: React.FC = () => {
                     disabled={!m.table_name}
                     onFocus={() => { if (m.table_name) loadColumnsForTable(m.table_name); }}
                     onChange={(v) => updateMapping(idx, { column_name: (v as string) || '' })}
-                    options={(tableColumns[m.table_name] || []).map(c => ({ label: c, value: c }))}
+                    options={(m.table_name ? (tableColumns[m.table_name] || []) : []).map(c => ({ label: c, value: c }))}
                   />
                 </div>
               </div>

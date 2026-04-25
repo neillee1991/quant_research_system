@@ -263,16 +263,15 @@ check_data_sync() {
     cd "${PROJECT_ROOT}"
     source .venv/bin/activate
     python -c "
-from store.dolphindb_client import db_client
+import psycopg2
+import os
 try:
-    # 检查最近的数据同步记录
-    result = db_client.query('''
-        select top 1 * from sync_log
-        order by update_time desc
-    ''')
-    if len(result) > 0:
-        exit(0)
-    exit(1)
+    conn = psycopg2.connect(os.environ.get('DATABASE_URL', 'postgresql://postgres:postgres@localhost:5432/quant'))
+    cur = conn.cursor()
+    cur.execute(\"SELECT 1 FROM task_runs WHERE task_type = 'sync' AND status = 'success' ORDER BY finished_at DESC LIMIT 1\")
+    row = cur.fetchone()
+    conn.close()
+    exit(0 if row else 1)
 except Exception as e:
     print(f'Error: {e}')
     exit(1)

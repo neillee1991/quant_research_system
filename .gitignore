@@ -1,63 +1,34 @@
-# Worktrees
-.worktrees/
-
 # Python
 __pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
+*.pyc
+*.pyo
 .venv/
-venv/
-ENV/
-env/
-
-# Logs
-*.log
-logs/
-
-# Database
-*.duckdb
-*.duckdb.wal
-*.db
-
-# Environment
-.env
-.env.local
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Node
-node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-build/
+*.egg-info/
 dist/
-
-# Data
-data/
-!data/.gitkeep
-
-# Models
-models/
-*.pkl
-*.joblib
-
-# Jupyter
-.ipynb_checkpoints/
-
-# Coverage
+build/
+.mypy_cache/
+.pytest_cache/
 .coverage
 htmlcov/
 
-# Pytest
-.pytest_cache/
+# Node
+frontend/node_modules/
+frontend/build/
+frontend/.env.local
+
+# 环境变量（含密码，禁止提交）
+.env
+
+# 日志和运行时
+logs/
+*.log
+.pids/
+*.pid
+
+# 数据库数据目录
+data/
+
+# IDE
+.idea/
+.vscode/
+*.swp

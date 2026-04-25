@@ -27,8 +27,8 @@ export interface DailyData {
   [key: string]: string | number | undefined;
 }
 
-// 前端运行时类型：含解析后的 JSON 字段（params/schema/primary_keys 为对象）
-// 注意：与后端 SyncTaskConfig（含 *_json 字符串字段）不同，不可合并
+// 前端运行时类型：任务列表展示 + Drawer 使用
+// JSONB 迁移后 *_json 字段直接是 dict/list，params/schema/primary_keys 为 parseJsonFields 填充的别名
 export interface SyncTask {
   task_id: string;
   description: string;
@@ -36,9 +36,10 @@ export interface SyncTask {
   table_name: string;
   source?: string;
   enabled?: boolean;
-  params_json?: string;
-  schema_json?: string;
-  primary_keys_json?: string;
+  params_json?: Record<string, unknown>;
+  schema_json?: Record<string, unknown>;
+  primary_keys_json?: string[];
+  // parseJsonFields 填充的运行时别名
   params?: Record<string, unknown>;
   schema?: Record<string, unknown>;
   primary_keys?: string[];
@@ -108,7 +109,11 @@ export interface ETLTask {
   sync_type?: 'full' | 'incremental';
   date_field?: string;
   enabled?: boolean;
-  schedule?: string;
+  schema_json?: Record<string, unknown>;
+  primary_keys_json?: string[];
+  // parseJsonFields 填充的运行时别名
+  schema?: Record<string, unknown>;
+  primary_keys?: string[];
   created_at?: string;
   updated_at?: string;
 }

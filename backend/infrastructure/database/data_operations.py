@@ -133,6 +133,11 @@ class DataOperations:
             trade_date: 交易日期（增量同步时提供）
             factor_id: 因子ID（增量同步时提供，用于精确删除）
         """
+        from app.validators.input_validators import validate_table_name, validate_factor_id as _vfi
+        validate_table_name(table_name)
+        if factor_id is not None:
+            _vfi(factor_id)
+
         if df.is_empty():
             logger.warning(f"空 DataFrame，跳过写入: {table_name}")
             return
@@ -185,11 +190,15 @@ class DataOperations:
                         if key_values:
                             conditions = []
                             for key_col, vals in key_values:
+                                # 根据列的 dtype 选择转义方式，避免 STRING 列被误转为日期
+                                col_dtype = df[key_col].dtype if key_col in df.columns else None
+                                is_string_col = col_dtype is not None and col_dtype == pl.String
+                                escape_fn = TypeConverter.escape_string_value if is_string_col else TypeConverter.escape_value
                                 if len(vals) == 1:
-                                    escaped_val = TypeConverter.escape_value(vals[0])
+                                    escaped_val = escape_fn(vals[0])
                                     conditions.append(f"{key_col} = {escaped_val}")
                                 else:
-                                    escaped_vals = [TypeConverter.escape_value(v) for v in vals]
+                                    escaped_vals = [escape_fn(v) for v in vals]
                                     conditions.append(f"{key_col} in [{', '.join(escaped_vals)}]")
 
                             where_clause = " and ".join(conditions)
@@ -247,6 +256,9 @@ class DataOperations:
         Returns:
             写入的行数
         """
+        from app.validators.input_validators import validate_table_name
+        validate_table_name(table_name)
+
         if df.is_empty():
             return 0
 

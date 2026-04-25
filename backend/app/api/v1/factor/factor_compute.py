@@ -16,7 +16,7 @@ from infrastructure.database.dolphindb_client import db_client
 from app.services.factor_service import FactorComputeService, DEFAULT_PREPROCESS as _DEFAULT_PREPROCESS
 from engine.factor.registry import FactorDefinition, StorageConfig
 from app.core.logger import logger
-from app.core.sandbox import check_security, SandboxSecurityError
+from app.core.sandbox import check_security, SandboxSecurityError, SAFE_GLOBALS
 from app.core.utils import (
     DateUtils,
     safe_json_parse,
@@ -103,7 +103,7 @@ async def run_production(
     try:
         import polars as pl
         # 生成 run_id
-        run_id = f"{req.factor_id}_{int(time.time() * 1000)}"
+        run_id = str(uuid.uuid4())
 
         # 写入统一任务表
         await TaskRunner.start(run_id, "factor", req.factor_id, f"因子计算: {req.factor_id}",
@@ -151,7 +151,7 @@ async def batch_run_production(
 
         for fid in req.factor_ids:
             # 使用 UUID 替代 timestamp + sleep，避免冲突且无需延迟
-            run_id = f"{fid}_{uuid.uuid4().hex[:12]}"
+            run_id = str(uuid.uuid4())
             run_ids.append({"factor_id": fid, "run_id": run_id, "status": "running"})
 
             # 写入统一任务表
@@ -249,17 +249,9 @@ async def test_factor_code(
     mock_registry.factor = mock_factor_decorator
 
     namespace = {
-        "__builtins__": {
-            "__import__": __import__,
-            "abs": abs, "all": all, "any": any, "bool": bool, "dict": dict,
-            "enumerate": enumerate, "filter": filter, "float": float,
-            "int": int, "isinstance": isinstance, "len": len, "list": list,
-            "map": map, "max": max, "min": min, "range": range, "round": round,
-            "set": set, "sorted": sorted, "str": str, "sum": sum, "tuple": tuple,
-            "type": type, "zip": zip, "None": None, "True": True, "False": False,
-        },
-        "pl": __import__("polars"),
-        "polars": __import__("polars"),
+        "__builtins__": SAFE_GLOBALS["__builtins__"],
+        "pl": pl,
+        "polars": pl,
         "print": lambda *a, **kw: stdout_capture.write(" ".join(str(x) for x in a) + kw.get("end", "\n")),
     }
 

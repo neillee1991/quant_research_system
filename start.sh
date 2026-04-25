@@ -107,7 +107,7 @@ start_infrastructure() {
     print_step "2/5" "启动基础服务 (DolphinDB + PostgreSQL)..."
 
     cd "$SCRIPT_DIR"
-    DOLPHINDB_DATA_DIR="/Users/lisheng/Code/application/dolphin"
+    DOLPHINDB_DATA_DIR="${DOLPHINDB_DATA_DIR:-/data/dolphindb}"
 
     # 确保 DolphinDB 顶层数据目录存在（子目录由容器自行初始化）
     mkdir -p "$DOLPHINDB_DATA_DIR"
@@ -223,12 +223,16 @@ start_backend() {
     # 创建日志和PID目录
     mkdir -p "$LOG_DIR" "$PID_DIR"
 
-    # 启动 uvicorn - 使用虚拟环境里的 python
-    nohup python -m uvicorn app.main:app \
-        --host $BACKEND_HOST \
-        --port $BACKEND_PORT \
-        $BACKEND_RELOAD \
-        > "$BACKEND_LOG" 2>&1 &
+    # 启动 uvicorn，带自动重启守护循环
+    (while true; do
+        cd "$BACKEND_DIR" && source "$VENV_DIR/bin/activate" && \
+            python -m uvicorn app.main:app \
+                --host $BACKEND_HOST \
+                --port $BACKEND_PORT \
+                $BACKEND_RELOAD
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Backend exited, restarting in 5s..."
+        sleep 5
+    done) >> "$BACKEND_LOG" 2>&1 &
 
     echo $! > "$BACKEND_PID"
     print_success "后端服务已启动 (PID: $(cat "$BACKEND_PID"))"
@@ -244,8 +248,13 @@ start_frontend() {
         npm install
     fi
 
-    # 启动前端
-    nohup npm start > "$FRONTEND_LOG" 2>&1 &
+    # 启动前端，带自动重启守护循环
+    (while true; do
+        cd "$FRONTEND_DIR" && npm start
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Frontend exited, restarting in 5s..."
+        sleep 5
+    done) >> "$FRONTEND_LOG" 2>&1 &
+
     echo $! > "$FRONTEND_PID"
     print_success "前端服务已启动 (PID: $(cat "$FRONTEND_PID"))"
 }

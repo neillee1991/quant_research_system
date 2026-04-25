@@ -2,6 +2,7 @@
 PostgreSQL 数据库连接池（Async）
 使用 asyncpg 进行异步数据库操作
 """
+import json
 import asyncpg
 from typing import Optional
 from contextlib import asynccontextmanager
@@ -21,6 +22,14 @@ class DatabasePool:
         if cls._pool is not None:
             return
 
+        async def _init_conn(conn):
+            await conn.set_type_codec(
+                "jsonb", encoder=json.dumps, decoder=json.loads, schema="pg_catalog"
+            )
+            await conn.set_type_codec(
+                "json", encoder=json.dumps, decoder=json.loads, schema="pg_catalog"
+            )
+
         try:
             cls._pool = await asyncpg.create_pool(
                 host=settings.postgresql.postgres_host,
@@ -31,6 +40,7 @@ class DatabasePool:
                 min_size=5,
                 max_size=20,
                 server_settings={"timezone": "Asia/Shanghai"},
+                init=_init_conn,
             )
             logger.info("PostgreSQL 连接池初始化成功")
         except Exception as e:

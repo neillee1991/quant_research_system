@@ -24,18 +24,20 @@ interface SyncTaskDrawerProps {
 
 function parseJsonFields(cfg: any): any {
   const result = { ...cfg };
-  if (result.params_json && typeof result.params_json === 'string') {
-    try { result.params = JSON.parse(result.params_json); } catch { result.params = {}; }
+  // JSONB 迁移后 *_json 字段直接是 dict/list，兼容旧字符串格式
+  if (typeof result.params_json === 'string') {
+    try { result.params_json = JSON.parse(result.params_json); } catch { result.params_json = {}; }
   }
-  if (result.schema_json && typeof result.schema_json === 'string') {
-    try { result.schema = JSON.parse(result.schema_json); } catch { result.schema = {}; }
+  if (typeof result.schema_json === 'string') {
+    try { result.schema_json = JSON.parse(result.schema_json); } catch { result.schema_json = {}; }
   }
-  if (result.primary_keys_json && typeof result.primary_keys_json === 'string') {
-    try { result.primary_keys = JSON.parse(result.primary_keys_json); } catch { result.primary_keys = []; }
+  if (typeof result.primary_keys_json === 'string') {
+    try { result.primary_keys_json = JSON.parse(result.primary_keys_json); } catch { result.primary_keys_json = []; }
   }
-  if (!result.params) result.params = {};
-  if (!result.schema) result.schema = {};
-  if (!result.primary_keys) result.primary_keys = [];
+  // 统一别名：组件内部用 params/schema/primary_keys
+  result.params = result.params_json ?? result.params ?? {};
+  result.schema = result.schema_json ?? result.schema ?? {};
+  result.primary_keys = result.primary_keys_json ?? result.primary_keys ?? [];
   return result;
 }
 

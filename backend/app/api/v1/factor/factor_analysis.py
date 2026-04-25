@@ -116,6 +116,9 @@ async def _save_analysis_result(task_id: str, factor_id: str, results: Dict[str,
     """保存分析结果到 PostgreSQL factor_analysis_results"""
     from scheduler.db import DatabasePool
     from app.core.config import settings
+    from app.validators.input_validators import validate_factor_id, validate_path_within
+
+    validate_factor_id(factor_id)
 
     actual_start = results.get("_actual_start")
     actual_end = results.get("_actual_end")
@@ -134,7 +137,7 @@ async def _save_analysis_result(task_id: str, factor_id: str, results: Dict[str,
 
     factor_analysis_dir = Path(settings.analysis_dir) / factor_id
     factor_analysis_dir.mkdir(parents=True, exist_ok=True)
-    report_path = factor_analysis_dir / f"{task_id}.json"
+    report_path = validate_path_within(Path(settings.analysis_dir), factor_analysis_dir / f"{task_id}.json")
     report_path.write_text(json.dumps(report), encoding='utf-8')
     logger.info(f"Analysis report saved to {report_path}")
 
@@ -311,8 +314,11 @@ async def delete_alphalens_analysis_by_id(
         report_path = row.get('report_path')
         if report_path:
             try:
-                Path(report_path).unlink()
-                logger.info(f"Deleted analysis report file: {report_path}")
+                from app.core.config import settings
+                from app.validators.input_validators import validate_path_within
+                safe_path = validate_path_within(Path(settings.analysis_dir), Path(report_path))
+                safe_path.unlink()
+                logger.info(f"Deleted analysis report file: {safe_path}")
             except Exception as e:
                 logger.warning(f"Failed to delete report file: {e}")
 

@@ -141,10 +141,26 @@ class Scheduler:
                 await asyncio.sleep(self._check_interval)
 
     async def _poll_db_changes(self):
-        """轮询 DB 检查 flow 变化"""
+        """轮询 DB 检查 flow 变化，同步删除已禁用/删除的 flow"""
         try:
-            # 重新加载所有 enabled flow
-            await self._load_flows()
+            flows = await FlowRepository.list_all(enabled_only=True)
+            active_names = {f["name"] for f in flows}
+
+            # 移除已删除或禁用的 flow
+            removed = set(self._flow_versions.keys()) - active_names
+            if removed:
+                for name in removed:
+                    del self._flow_versions[name]
+                # 重建堆，过滤掉已移除的 flow
+                self._heap = [
+                    item for item in self._heap
+                    if item.flow_config["name"] not in removed
+                ]
+                heapq.heapify(self._heap)
+                logger.info(f"已从调度堆移除 {len(removed)} 个 Flow: {removed}")
+
+            for flow in flows:
+                self._add_or_update_flow(flow)
         except Exception as e:
             logger.error(f"轮询 DB 失败: {e}", exc_info=True)
 
