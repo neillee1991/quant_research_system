@@ -216,8 +216,8 @@ class TestValidateSharedSchema:
             mock_pg_query.return_value = [
                 {
                     "task_id": "task1",
-                    "schema_json": json.dumps(existing_schema),
-                    "primary_keys_json": json.dumps(["col1"])
+                    "schema": existing_schema,
+                    "primary_keys": ["col1"]
                 }
             ]
 
@@ -238,8 +238,8 @@ class TestValidateSharedSchema:
             mock_pg_query.return_value = [
                 {
                     "task_id": "task1",
-                    "schema_json": json.dumps(existing_schema),
-                    "primary_keys_json": json.dumps(["col1"])
+                    "schema": existing_schema,
+                    "primary_keys": ["col1"]
                 }
             ]
 
@@ -260,8 +260,8 @@ class TestValidateSharedSchema:
             mock_pg_query.return_value = [
                 {
                     "task_id": "task1",
-                    "schema_json": json.dumps(existing_schema),
-                    "primary_keys_json": json.dumps(["col1"])
+                    "schema": existing_schema,
+                    "primary_keys": ["col1"]
                 }
             ]
 
@@ -280,8 +280,8 @@ class TestValidateSharedSchema:
             mock_pg_query.return_value = [
                 {
                     "task_id": "task1",
-                    "schema_json": json.dumps(schema),
-                    "primary_keys_json": json.dumps(["col1"])
+                    "schema": schema,
+                    "primary_keys": ["col1"]
                 }
             ]
 
@@ -300,8 +300,8 @@ class TestValidateSharedSchema:
             mock_pg_query.return_value = [
                 {
                     "task_id": "task2",
-                    "schema_json": json.dumps(schema),
-                    "primary_keys_json": json.dumps(["col1"])
+                    "schema": schema,
+                    "primary_keys": ["col1"]
                 }
             ]
 

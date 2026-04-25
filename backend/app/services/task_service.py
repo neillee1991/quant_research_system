@@ -158,8 +158,8 @@ class TaskService(Generic[T]):
             raise ValueError(f"Task {task_id} not found")
 
         task_data = task.model_dump()
-        schema_json = task_data.get('schema_json')
-        if not schema_json:
+        schema = task_data.get('schema')
+        if not schema:
             return {
                 "status": "success",
                 "data": {
@@ -171,7 +171,7 @@ class TaskService(Generic[T]):
             }
 
         try:
-            schema = schema_json if isinstance(schema_json, dict) else {}
+            schema = schema if isinstance(schema, dict) else {}
             columns = schema.get("columns", [])
             return {
                 "status": "success",
@@ -263,12 +263,12 @@ class TaskService(Generic[T]):
         if not table_name:
             raise ValueError(f"Task {task_id} does not have a table_name")
 
-        schema_json = task_data.get('schema_json')
-        if not schema_json:
+        schema = task_data.get('schema')
+        if not schema:
             raise ValueError(f"Task {task_id} does not have a schema defined")
 
         try:
-            schema = schema_json if isinstance(schema_json, dict) else {}
+            schema = schema if isinstance(schema, dict) else {}
             primary_keys = self._parse_primary_keys(task_data)
 
             if db_client.table_exists(table_name):
@@ -402,11 +402,11 @@ class TaskService(Generic[T]):
     async def _validate_schema(self, config_data: Dict[str, Any], task_id: str) -> None:
         if self.task_type not in ("sync", "etl"):
             return
-        schema_json = config_data.get("schema_json")
-        if not schema_json:
+        schema = config_data.get("schema")
+        if not schema:
             return
         primary_keys = self._parse_primary_keys(config_data)
-        schema = config_data.get("schema_json") or {}
+        schema = config_data.get("schema") or {}
         is_valid, errors = SchemaValidator.validate_schema(schema, primary_keys)
         if not is_valid:
             raise ValueError(f"Schema validation failed: {'; '.join(errors)}")
@@ -428,11 +428,11 @@ class TaskService(Generic[T]):
     ) -> None:
         if self.task_type not in ("sync", "etl"):
             return
-        new_schema_json = config_data.get("schema_json")
-        if not new_schema_json:
+        new_schema = config_data.get("schema")
+        if not new_schema:
             return
-        new_schema = config_data.get("schema_json") or {}
-        old_schema = existing.model_dump().get("schema_json") or {}
+        new_schema = config_data.get("schema") or {}
+        old_schema = existing.model_dump().get("schema") or {}
         if old_schema:
             primary_keys = self._parse_primary_keys(current_dict)
             is_valid, errors = SchemaValidator.validate_schema_evolution(
@@ -454,7 +454,7 @@ class TaskService(Generic[T]):
 
     @staticmethod
     def _parse_primary_keys(data: Dict[str, Any]) -> list:
-        raw = data.get("primary_keys_json") or data.get("primary_keys", [])
+        raw = data.get("primary_keys", [])
         if isinstance(raw, str):
             try:
                 import json
@@ -462,7 +462,6 @@ class TaskService(Generic[T]):
             except Exception:
                 return []
         return raw if isinstance(raw, list) else []
-        return raw or []
 
 
 # Service instances — table names updated to plural form

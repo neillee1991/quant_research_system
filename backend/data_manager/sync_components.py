@@ -65,15 +65,15 @@ class SyncConfigManager:
         rows = self._query("SELECT * FROM sync_task_configs WHERE task_id = %s", (task_id,))
         if not rows:
             raise SyncTaskNotFoundError(task_id)
-        return self._row_to_task(rows[0]).to_dict_with_parsed_json()
+        return self._row_to_task(rows[0]).model_dump()
 
     def get_all_tasks(self) -> List[Dict[str, Any]]:
         rows = self._query("SELECT * FROM sync_task_configs")
-        return [self._row_to_task(r).to_dict_with_parsed_json() for r in rows]
+        return [self._row_to_task(r).model_dump() for r in rows]
 
     def get_enabled_tasks(self) -> List[Dict[str, Any]]:
         rows = self._query("SELECT * FROM sync_task_configs WHERE enabled = true")
-        return [self._row_to_task(r).to_dict_with_parsed_json() for r in rows]
+        return [self._row_to_task(r).model_dump() for r in rows]
 
     def reload(self) -> None:
         pass  # 无缓存，无需重载
@@ -169,7 +169,7 @@ class SyncLogManager:
                     row = cur.fetchone()
                     if row:
                         from app.models.base_task import SyncTaskConfig
-                        return SyncTaskConfig.from_row(dict(row)).to_dict_with_parsed_json()
+                        return SyncTaskConfig.from_row(dict(row)).model_dump()
                     return None
             finally:
                 conn.close()
@@ -258,27 +258,8 @@ class TableManager:
             logger.warning("Task config missing table_name, skipping table creation")
             return
 
-        # 解析 primary_keys（可能是 JSON 字符串或列表）
-        primary_keys_raw = task.get("primary_keys") or task.get("primary_keys_json", "[]")
-        if isinstance(primary_keys_raw, str):
-            try:
-                primary_keys = json.loads(primary_keys_raw)
-            except json.JSONDecodeError:
-                logger.warning(f"Failed to parse primary_keys: {primary_keys_raw}")
-                primary_keys = []
-        else:
-            primary_keys = primary_keys_raw
-
-        # 解析 schema（可能是 JSON 字符串或字典）
-        schema_raw = task.get("schema") or task.get("schema_json", "{}")
-        if isinstance(schema_raw, str):
-            try:
-                schema = json.loads(schema_raw)
-            except json.JSONDecodeError:
-                logger.warning(f"Failed to parse schema: {schema_raw}")
-                schema = {}
-        else:
-            schema = schema_raw
+        primary_keys = task.get("primary_keys", [])
+        schema = task.get("schema", {})
 
         # 先注册到元数据表集合，确保 table_exists / _resolve_db_path 路由到正确的库
         self.repository.register_meta_table(table_name)
@@ -513,12 +494,7 @@ class SyncTaskExecutor(ISyncTaskExecutor):
 
             rows_count = len(df)
             # 列重命名（如 con_code → ts_code）
-            col_mapping = task.get("column_mapping") or task.get("column_mapping_json")
-            if isinstance(col_mapping, str):
-                try:
-                    col_mapping = json.loads(col_mapping)
-                except Exception:
-                    col_mapping = None
+            col_mapping = task.get("column_mapping")
             if col_mapping:
                 df = df.rename({k: v for k, v in col_mapping.items() if k in df.columns})
             # 全量同步：清空整个表再写入
@@ -594,12 +570,7 @@ class SyncTaskExecutor(ISyncTaskExecutor):
 
                 if df is not None and not df.is_empty():
                     # 列重命名（如 con_code → ts_code）
-                    col_mapping = task.get("column_mapping") or task.get("column_mapping_json")
-                    if isinstance(col_mapping, str):
-                        try:
-                            col_mapping = json.loads(col_mapping)
-                        except Exception:
-                            col_mapping = None
+                    col_mapping = task.get("column_mapping")
                     if col_mapping:
                         df = df.rename({k: v for k, v in col_mapping.items() if k in df.columns})
                     # 增量同步：只清空当前 trade_date 的数据再写入

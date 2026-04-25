@@ -97,11 +97,11 @@ async def _get_subscribed_indices() -> List[str]:
             task_id = task.task_id
             if task_id.startswith("sync_index_weight_"):
                 try:
-                    params = json.loads(task.params_json) if task.params_json else {}
+                    params = task.params if task.params else {}
                     index_code = params.get("index_code")
                     if index_code:
                         subscribed.append(index_code)
-                except json.JSONDecodeError:
+                except Exception:
                     continue
         return subscribed
     except Exception as e:
@@ -118,11 +118,11 @@ async def _get_subscription_task_map() -> dict:
             task_id = task.task_id
             if task_id.startswith("sync_index_weight_"):
                 try:
-                    params = json.loads(task.params_json) if task.params_json else {}
+                    params = task.params if task.params else {}
                     index_code = params.get("index_code")
                     if index_code:
                         mapping[index_code] = task_id
-                except json.JSONDecodeError:
+                except Exception:
                     continue
         return mapping
     except Exception as e:
@@ -277,11 +277,11 @@ async def subscribe_index(
             "api_name": "index_weight",
             "api_limit": 5000,
             "sync_type": "incremental",
-            "params_json": json.dumps(template_params),
+            "params": template_params,
             "date_field": "trade_date",
-            "primary_keys_json": json.dumps(["index_code", "con_code", "trade_date"]),
+            "primary_keys": ["index_code", "con_code", "trade_date"],
             "table_name": table_name,
-            "schema_json": json.dumps(schema),
+            "schema": schema,
             "enabled": True
         }
 

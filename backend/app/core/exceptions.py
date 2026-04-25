@@ -127,40 +127,6 @@ class RateLimitExceededError(SyncException):
         )
 
 
-# ==================== 回测相关异常 ====================
-
-class BacktestException(QuantException):
-    """回测相关异常基类"""
-
-    def __init__(self, message: str, **kwargs):
-        super().__init__(
-            message,
-            **kwargs
-        )
-
-
-class BacktestConfigError(BacktestException):
-    """回测配置错误"""
-
-    def __init__(self, reason: str, **kwargs):
-        super().__init__(
-            message=f"Backtest configuration error: {reason}",
-            status_code=status.HTTP_400_BAD_REQUEST,
-            context={"reason": reason, **kwargs.get("context", {})}
-        )
-
-
-class InsufficientDataError(BacktestException):
-    """数据不足"""
-
-    def __init__(self, required: int, actual: int, **kwargs):
-        super().__init__(
-            message=f"Insufficient data for backtest: required {required}, got {actual}",
-            status_code=status.HTTP_400_BAD_REQUEST,
-            context={"required": required, "actual": actual, **kwargs.get("context", {})}
-        )
-
-
 # ==================== 因子相关异常 ====================
 
 class FactorException(QuantException):

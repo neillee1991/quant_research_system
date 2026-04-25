@@ -8,7 +8,6 @@ from typing import Optional
 from app.core.config import settings
 from app.core.logger import logger
 from app.services.factor_service import FactorService
-from app.services.backtest_service import BacktestService
 from infrastructure.database.dolphindb_client import db_client
 from data_manager.refactored_sync_engine import RefactoredSyncEngine
 
@@ -34,11 +33,6 @@ class Container:
         return FactorService()
 
     @lru_cache(maxsize=1)
-    def get_backtest_service(self) -> BacktestService:
-        """获取回测服务"""
-        return BacktestService()
-
-    @lru_cache(maxsize=1)
     def get_sync_engine(self) -> RefactoredSyncEngine:
         """获取同步引擎"""
         return RefactoredSyncEngine()
@@ -52,11 +46,6 @@ container = Container()
 def get_factor_service() -> FactorService:
     """FastAPI 依赖：因子服务"""
     return container.get_factor_service()
-
-
-def get_backtest_service() -> BacktestService:
-    """FastAPI 依赖：回测服务"""
-    return container.get_backtest_service()
 
 
 def get_sync_engine() -> RefactoredSyncEngine:

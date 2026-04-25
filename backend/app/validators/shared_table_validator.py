@@ -89,18 +89,18 @@ class SharedTableValidator:
         if not sharing_tasks:
             return result
 
-        # 获取现有任务的 schema 和主键配置（仅 sync_task_configs 有 schema_json）
+        # 获取现有任务的 schema 和主键配置
         conflicts = []
         for config_table in self.config_tables:
             try:
                 if config_table == "etl_task_configs":
                     rows = _pg_query(
-                        f"SELECT task_id, primary_keys_json FROM {config_table} WHERE table_name = %s",
+                        f"SELECT task_id, primary_keys FROM {config_table} WHERE table_name = %s",
                         (table_name,)
                     )
                 else:
                     rows = _pg_query(
-                        f"SELECT task_id, schema_json, primary_keys_json FROM {config_table} WHERE table_name = %s",
+                        f"SELECT task_id, schema, primary_keys FROM {config_table} WHERE table_name = %s",
                         (table_name,)
                     )
 
@@ -109,8 +109,8 @@ class SharedTableValidator:
                     if exclude_task_id and task_id == exclude_task_id:
                         continue
 
-                    existing_schema_raw = row.get("schema_json")
-                    existing_primary_keys_raw = row.get("primary_keys_json")
+                    existing_schema_raw = row.get("schema")
+                    existing_primary_keys_raw = row.get("primary_keys")
 
                     existing_schema = json.loads(existing_schema_raw) if isinstance(existing_schema_raw, str) else existing_schema_raw
                     existing_primary_keys = json.loads(existing_primary_keys_raw) if isinstance(existing_primary_keys_raw, str) else existing_primary_keys_raw

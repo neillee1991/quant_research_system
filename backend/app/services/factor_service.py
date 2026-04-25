@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from app.core.logger import logger
 from app.core.utils import DateUtils, TradingCalendar
 from engine.factor.registry import get_factor, discover_factors, FactorDefinition
+from engine.factor.data_config import DataConfigLoader
 from infrastructure.processor.pipeline import ProcessContext
 from infrastructure.processor.pipeline_factory import PipelineFactory
 
@@ -313,25 +314,3 @@ class FactorComputeService:
             "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
         self.db.upsert("factor_configs", record, ["factor_id"])
-
-
-# 数据配置加载器（需要在 factor_service.py 中定义，因为它被 FactorComputeService 引用）
-class DataConfigLoader:
-    """数据配置加载器"""
-
-    def __init__(self, db_client):
-        self.db = db_client
-
-    def load(self) -> Dict[str, Any]:
-        """从数据库加载数据配置"""
-        try:
-            result = self.db.query("SELECT * FROM factor_data_config")
-            if result.is_empty():
-                return {}
-            config_dict = {}
-            for row in result.iter_rows(named=True):
-                config_dict[row["factor_id"]] = row
-            return config_dict
-        except Exception as e:
-            logger.warning(f"Failed to load data config: {e}")
-            return {}

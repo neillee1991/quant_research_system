@@ -99,20 +99,6 @@ class IFactorEngine(ABC):
         pass
 
 
-class IBacktestEngine(ABC):
-    """回测引擎接口"""
-
-    @abstractmethod
-    def run_backtest(
-        self,
-        data: pl.DataFrame,
-        signals: pl.DataFrame,
-        config: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """执行回测"""
-        pass
-
-
 class ISyncTaskExecutor(ABC):
     """同步任务执行器接口"""
 

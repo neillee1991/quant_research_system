@@ -32,8 +32,8 @@ async def execute_etl_task(task_id: str, start_date: Optional[str], end_date: Op
     task = dict(row)
 
     table_name = task.get("table_name")
-    schema = task.get("schema_json") or {}
-    primary_keys = task.get("primary_keys_json") or []
+    schema = task.get("schema") or {}
+    primary_keys = task.get("primary_keys") or []
     if table_name and schema:
         import asyncio
         from data_manager.sync_components import TableManager as SyncTableManager
@@ -41,8 +41,8 @@ async def execute_etl_task(task_id: str, start_date: Optional[str], end_date: Op
             None,
             lambda: SyncTableManager(db_client).ensure_table_exists({
                 "table_name": table_name,
-                "schema_json": schema,
-                "primary_keys_json": primary_keys,
+                "schema": schema,
+                "primary_keys": primary_keys,
             })
         )
 

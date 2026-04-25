@@ -10,5 +10,5 @@
 - 完整的执行流水线
 """
 
-from engine.factor.registry import factor, get_registry, get_factor, list_factors
-__all__ = ["factor", "get_registry", "get_factor", "list_factors"]
+from engine.factor.registry import get_registry, get_factor, list_factors
+__all__ = ["get_registry", "get_factor", "list_factors"]

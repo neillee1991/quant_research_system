@@ -47,15 +47,6 @@ class PostgreSQLConfig(_BaseConfig):
     postgres_password: str = Field(default="", env="POSTGRES_PASSWORD")
 
 
-class BacktestConfig(_BaseConfig):
-    """回测配置"""
-    initial_capital: float = Field(default=1_000_000.0, gt=0)
-    commission_rate: float = Field(default=0.0003, ge=0, le=0.01)
-    slippage_rate: float = Field(default=0.0001, ge=0, le=0.01)
-    min_position_size: float = Field(default=0.01, ge=0, le=1)
-    max_position_size: float = Field(default=0.2, ge=0, le=1)
-
-
 class MLConfig(_BaseConfig):
     """机器学习配置"""
     n_trials: int = Field(default=100, ge=10, le=1000)
@@ -99,7 +90,6 @@ class Settings(BaseSettings):
     collector: DataCollectorConfig = Field(default_factory=DataCollectorConfig)
     database: DolphinDBConfig = Field(default_factory=DolphinDBConfig)
     postgresql: PostgreSQLConfig = Field(default_factory=PostgreSQLConfig)
-    backtest: BacktestConfig = Field(default_factory=BacktestConfig)
     ml: MLConfig = Field(default_factory=MLConfig)
     sync: SyncConfig = Field(default_factory=SyncConfig)
 

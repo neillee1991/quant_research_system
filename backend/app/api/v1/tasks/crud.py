@@ -25,7 +25,7 @@ async def list_tasks(
         service = _get_service(task_type)
         tasks = await service.list_tasks(enabled_only=enabled_only)
         return TaskListResponse(
-            tasks=[t.to_dict_with_parsed_json() for t in tasks],
+            tasks=[t.model_dump() for t in tasks],
             total=len(tasks),
             task_type=task_type,
         )
@@ -46,7 +46,7 @@ async def get_task(
         task = await service.get_task(task_id)
         if not task:
             raise HTTPException(status_code=404, detail=f"Task {task_id} not found in {task_type}")
-        return TaskResponse(task=task.to_dict_with_parsed_json(), task_type=task_type)
+        return TaskResponse(task=task.model_dump(), task_type=task_type)
     except HTTPException:
         raise
     except Exception as e:
@@ -63,7 +63,7 @@ async def create_task(
         service = _get_service(task_type)
         validated = _parse_task_config(task_type, request.config_data)
         task = await service.create_task(config_data=validated.model_dump(exclude_none=True))
-        return TaskResponse(task=task.to_dict_with_parsed_json(), task_type=task_type)
+        return TaskResponse(task=task.model_dump(), task_type=task_type)
     except HTTPException:
         raise
     except ValueError as e:
@@ -86,7 +86,7 @@ async def update_task(
             task_id=task_id,
             config_data=validated.model_dump(exclude_none=True),
         )
-        return TaskResponse(task=task.to_dict_with_parsed_json(), task_type=task_type)
+        return TaskResponse(task=task.model_dump(), task_type=task_type)
     except HTTPException:
         raise
     except ValueError as e:

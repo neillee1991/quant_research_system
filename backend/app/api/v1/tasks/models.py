@@ -94,16 +94,8 @@ def _get_service(task_type: str) -> TaskService:
 
 
 def _normalize_task_config(config_data: Dict[str, Any]) -> Dict[str, Any]:
-    """将前端发送的字段名规范化为模型期望的字段名。
-
-    前端可能发送 primary_keys (list) 和 schema (dict)，
-    模型期望 primary_keys_json (list) 和 schema_json (dict)。
-    """
+    """清理前端发送的额外字段"""
     data = dict(config_data)
-    if "primary_keys" in data and "primary_keys_json" not in data:
-        data["primary_keys_json"] = data.pop("primary_keys")
-    if "schema" in data and "schema_json" not in data:
-        data["schema_json"] = data.pop("schema")
     data.pop("confirm_schema_change", None)
     return data
 
@@ -116,6 +108,7 @@ def _parse_task_config(task_type: str, config_data: Dict[str, Any]) -> TaskConfi
 
 
 def _format_task_row(row: dict) -> dict:
+    import json
     from zoneinfo import ZoneInfo
     _TZ = ZoneInfo("Asia/Shanghai")
     for field in ["started_at", "finished_at", "created_at"]:
@@ -127,4 +120,10 @@ def _format_task_row(row: dict) -> dict:
                 row[field] = val.isoformat()
             else:
                 row[field] = str(val)
+    for field in ["params", "extra"]:
+        if field in row and isinstance(row[field], str) and row[field]:
+            try:
+                row[field] = json.loads(row[field])
+            except (json.JSONDecodeError, ValueError):
+                pass
     return row

@@ -1,61 +1,6 @@
 /**
- * Strategy and Backtest Types
+ * Strategy Types
  */
-
-export interface BacktestMetrics {
-    total_return: number;
-    annual_return: number;
-    sharpe_ratio: number;
-    max_drawdown: number;
-    win_rate: number;
-    total_trades: number;
-    profit_factor?: number;
-    calmar_ratio?: number;
-    sortino_ratio?: number;
-    [key: string]: number | undefined;
-}
-
-export interface EquityPoint {
-    date: string;
-    equity: number;
-    drawdown?: number;
-    benchmark?: number;
-}
-
-export interface BacktestResult {
-    metrics: BacktestMetrics;
-    equity_curve: EquityPoint[];
-    trades?: Trade[];
-    positions?: Position[];
-    start_date: string;
-    end_date: string;
-    initial_capital: number;
-}
-
-export interface Trade {
-    trade_id: string;
-    ts_code: string;
-    direction: "long" | "short";
-    entry_date: string;
-    entry_price: number;
-    exit_date?: string;
-    exit_price?: number;
-    quantity: number;
-    pnl?: number;
-    pnl_pct?: number;
-    status: "open" | "closed";
-}
-
-export interface Position {
-    ts_code: string;
-    quantity: number;
-    avg_price: number;
-    current_price: number;
-    market_value: number;
-    pnl: number;
-    pnl_pct: number;
-    weight: number;
-}
 
 export type ScriptRunStatus =
     | "idle"
@@ -111,14 +56,6 @@ export interface StrategyScriptCompileFailureResponse {
 }
 
 export type StrategyScriptCompileResponse = StrategyScriptCompileSuccessResponse | StrategyScriptCompileFailureResponse;
-
-export interface StrategyScriptBacktestRequest {
-    script: string;
-    name?: string;
-    language?: string;
-    entry_point?: string;
-    params?: Record<string, unknown>;
-}
 
 export interface MLTrainRequest {
     ts_code: string;

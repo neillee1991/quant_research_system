@@ -1,6 +1,6 @@
 """
 因子注册表
-通过装饰器模式注册因子计算函数，框架自动处理数据加载和结果存储
+从 PostgreSQL factor_configs 表动态加载因子代码，exec 编译后注册到内存注册表。
 """
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Any, Optional
@@ -38,58 +38,6 @@ class FactorDefinition:
 
 # 全局因子注册表
 _factor_registry: Dict[str, FactorDefinition] = {}
-
-
-def factor(
-    factor_id: str,
-    description: str = "",
-    depends_on: list = None,
-    category: str = "custom",
-    params: dict = None,
-    compute_mode: str = "incremental",
-    storage: dict = None
-):
-    """因子注册装饰器
-
-    Args:
-        factor_id: 因子唯一标识
-        description: 因子描述
-        depends_on: 依赖的数据源列表（表名或因子ID）
-            - "sync_daily_data": 从日线行情表加载
-            - "sync_daily_basic": 从每日指标表加载
-            - "factor_xxx": 从已计算的因子加载
-        category: 因子分类 ("momentum", "value", "technical", "custom")
-        params: 因子参数（如窗口大小等）
-        compute_mode: 计算模式
-            - "incremental": 增量计算（只算最新数据，需要加载窗口期历史数据）
-            - "full": 全量重算（加载所有历史数据）
-        storage: 存储配置字典
-            - None: 存到统一因子表 factor_values
-            - {"target": "factor_values"}: 同上
-            - {"target": "my_table", "columns": {"col": "TYPE"}, "primary_keys": ["col1"]}: 自定义表
-
-    Usage:
-        @factor("factor_ma_20", description="20日均线",
-                depends_on=["sync_daily_data"], category="technical")
-        def compute_ma_20(df, params):
-            # df: 含 ts_code, trade_date, close 等列的 Polars DataFrame
-            # 返回: 含 ts_code, trade_date, factor_value 的 DataFrame
-            return df.with_columns(...)
-    """
-    def decorator(func):
-        storage_config = StorageConfig(**(storage or {}))
-        _factor_registry[factor_id] = FactorDefinition(
-            factor_id=factor_id,
-            description=description,
-            func=func,
-            depends_on=depends_on or [],
-            category=category,
-            params=params or {},
-            compute_mode=compute_mode,
-            storage=storage_config
-        )
-        return func
-    return decorator
 
 
 def get_registry() -> Dict[str, FactorDefinition]:

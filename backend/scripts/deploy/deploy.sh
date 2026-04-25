@@ -311,15 +311,15 @@ database_migration() {
     cd "${BACKEND_DIR}"
     source .venv/bin/activate
 
-    log_info "执行数据库迁移..."
+    log_info "初始化数据库表结构..."
     if [[ "${DRY_RUN}" == "false" ]]; then
-        python database/migrations/v2.0/migrate.py || {
-            log_error "数据库迁移失败"
+        python database/init_postgres.py || {
+            log_error "数据库初始化失败"
             exit 1
         }
-        log_success "数据库迁移完成"
+        log_success "数据库初始化完成"
     else
-        log_info "[DRY RUN] 跳过数据库迁移"
+        log_info "[DRY RUN] 跳过数据库初始化"
     fi
 }
 

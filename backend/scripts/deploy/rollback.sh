@@ -214,17 +214,8 @@ rollback_database() {
     cd "${BACKEND_DIR}"
 
     if [[ "${DRY_RUN}" == "false" ]]; then
-        log_warning "数据库回滚需要手动执行"
-        log_info "请执行: python database/migrations/v2.0/rollback.py"
-
-        confirm "是否现在执行数据库回滚？"
-
-        source .venv/bin/activate
-        python database/migrations/v2.0/rollback.py || {
-            log_error "数据库回滚失败"
-            exit 1
-        }
-        log_success "数据库已回滚"
+        log_warning "数据库回滚需要手动操作，请直接在 PostgreSQL 中执行相应的 DROP/ALTER 语句"
+        log_success "数据库回滚步骤已跳过"
     else
         log_info "[DRY RUN] 跳过数据库回滚"
     fi

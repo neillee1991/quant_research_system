@@ -1,20 +1,6 @@
 import { create } from 'zustand';
 import type { RunningTask } from '../api';
 
-interface BacktestState {
-  result: any | null;
-  loading: boolean;
-  setResult: (r: any) => void;
-  setLoading: (v: boolean) => void;
-}
-
-export const useBacktestStore = create<BacktestState>((set) => ({
-  result: null,
-  loading: false,
-  setResult: (result) => set({ result }),
-  setLoading: (loading) => set({ loading }),
-}));
-
 type ThemeMode = 'dark' | 'light';
 
 interface ThemeState {

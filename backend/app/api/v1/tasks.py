@@ -150,18 +150,8 @@ def _parse_task_config(task_type: str, config_data: Dict[str, Any]) -> TaskConfi
 
 
 def _normalize_task_config(config_data: Dict[str, Any]) -> Dict[str, Any]:
-    """将前端发送的字段名规范化为模型期望的字段名。
-
-    前端 SyncTaskDrawer/ETLTaskDrawer 发送 primary_keys (list) 和 schema (dict)，
-    但 SyncTaskConfig/ETLTaskConfig 期望 primary_keys_json (string) 和 schema_json (string)。
-    """
+    """清理前端发送的额外字段"""
     data = dict(config_data)
-    if "primary_keys" in data and "primary_keys_json" not in data:
-        pk = data.pop("primary_keys")
-        data["primary_keys_json"] = json.dumps(pk) if isinstance(pk, list) else str(pk)
-    if "schema" in data and "schema_json" not in data:
-        schema = data.pop("schema")
-        data["schema_json"] = json.dumps(schema, ensure_ascii=False) if isinstance(schema, dict) else str(schema)
     data.pop("confirm_schema_change", None)
     return data
 
@@ -433,7 +423,7 @@ async def list_tasks(
         service = _get_service(task_type)
         tasks = await service.list_tasks(enabled_only=enabled_only)
         return TaskListResponse(
-            tasks=[t.to_dict_with_parsed_json() for t in tasks],
+            tasks=[t.model_dump() for t in tasks],
             total=len(tasks),
             task_type=task_type
         )
@@ -487,7 +477,7 @@ async def get_task(
                 detail=f"Task {task_id} not found in {task_type}"
             )
 
-        return TaskResponse(task=task.to_dict_with_parsed_json(), task_type=task_type)
+        return TaskResponse(task=task.model_dump(), task_type=task_type)
     except HTTPException:
         raise
     except Exception as e:
@@ -505,7 +495,7 @@ async def create_task(
         service = _get_service(task_type)
         validated = _parse_task_config(task_type, request.config_data)
         task = await service.create_task(config_data=validated.model_dump(exclude_none=True))
-        return TaskResponse(task=task.to_dict_with_parsed_json(), task_type=task_type)
+        return TaskResponse(task=task.model_dump(), task_type=task_type)
     except HTTPException:
         raise
     except ValueError as e:
@@ -529,7 +519,7 @@ async def update_task(
             task_id=task_id,
             config_data=validated.model_dump(exclude_none=True),
         )
-        return TaskResponse(task=task.to_dict_with_parsed_json(), task_type=task_type)
+        return TaskResponse(task=task.model_dump(), task_type=task_type)
     except HTTPException:
         raise
     except ValueError as e:
@@ -630,26 +620,23 @@ async def _execute_etl_task_background(task_id: str, start_date: Optional[str], 
                     row = cur.fetchone()
                     if row is None:
                         raise ValueError(f"ETL task {task_id} not found")
-                    task = dict(row)
+                    from app.models.base_task import ETLTaskConfig
+                    task = ETLTaskConfig.from_row(dict(row)).model_dump()
         finally:
             conn.close()
 
         # 执行前确保目标表存在（仅当 schema 非空时建表）
         table_name = task.get("table_name")
-        schema_json = task.get("schema_json") or "{}"
-        primary_keys_json = task.get("primary_keys_json") or "[]"
-        if table_name:
-            import json as _json
-            _schema = _json.loads(schema_json) if isinstance(schema_json, str) else schema_json
-            _pks = _json.loads(primary_keys_json) if isinstance(primary_keys_json, str) else primary_keys_json
-            if _schema:  # schema 为空时跳过，让 ETL 脚本自行处理
-                from data_manager.sync_components import TableManager as SyncTableManager
-                _tm = SyncTableManager(db_client)
-                _tm.ensure_table_exists({
-                    "table_name": table_name,
-                    "schema_json": _json.dumps(_schema),
-                    "primary_keys_json": _json.dumps(_pks),
-                })
+        _schema = task.get("schema") or {}
+        _pks = task.get("primary_keys") or []
+        if table_name and _schema:
+            from data_manager.sync_components import TableManager as SyncTableManager
+            _tm = SyncTableManager(db_client)
+            _tm.ensure_table_exists({
+                "table_name": table_name,
+                "schema": _schema,
+                "primary_keys": _pks,
+            })
 
         script_template = task.get("script", "")
         if not script_template or not script_template.strip():
@@ -677,8 +664,6 @@ async def _execute_etl_task_background(task_id: str, start_date: Optional[str], 
 
             # 写入目标表
             if table_name:
-                import json as _json
-                _pks = _json.loads(primary_keys_json) if isinstance(primary_keys_json, str) else primary_keys_json
                 is_full = task.get("sync_type", "incremental") == "full"
                 db_client.upsert(
                     table_name=table_name,
