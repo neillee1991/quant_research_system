@@ -56,8 +56,6 @@ class TaskService(Generic[T]):
     async def create_task(
         self,
         config_data: Dict[str, Any],
-        changed_by: str = "api",
-        change_reason: str = "Create new task"
     ) -> T:
         task = self.model_class(**config_data)
         task_id = getattr(task, self.id_field)
@@ -87,8 +85,6 @@ class TaskService(Generic[T]):
         self,
         task_id: str,
         config_data: Dict[str, Any],
-        changed_by: str = "api",
-        change_reason: str = "Update task"
     ) -> T:
         existing = await self.get_task(task_id)
         if not existing:
@@ -108,8 +104,6 @@ class TaskService(Generic[T]):
     async def delete_task(
         self,
         task_id: str,
-        changed_by: str = "api",
-        change_reason: str = "Delete task",
         drop_table: bool = False,
         hard_delete: bool = False
     ) -> bool:

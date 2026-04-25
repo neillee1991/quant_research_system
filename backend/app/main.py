@@ -1,18 +1,13 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.security import OAuth2PasswordRequestForm
+from fastapi.responses import Response
+from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 
 from app.core.config import settings
 from app.core.logger import logger
 from app.core.exceptions import QuantException, quant_exception_handler, general_exception_handler
-from app.core.auth import (
-    create_access_token,
-    get_current_active_user,
-    User,
-    fake_users_db,
-)
 from app.core.rate_limit import setup_rate_limiter
 from app.api.v1 import flows, tasks
 from app.api.v1 import factor  # 使用拆分后的 factor 模块
@@ -107,25 +102,47 @@ def create_app() -> FastAPI:
     app.add_exception_handler(QuantException, quant_exception_handler)
     app.add_exception_handler(Exception, general_exception_handler)
 
-    # 认证端点
-    @app.post(f"{settings.api_v1_prefix}/auth/token", tags=["auth"])
-    async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
-        """OAuth2 兼容的 token 端点"""
-        user_dict = fake_users_db.get(form_data.username)
-        if not user_dict:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="用户名或密码错误",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
+    @app.get("/health", tags=["monitoring"])
+    async def health():
+        """存活检查 - 进程是否在运行"""
+        from datetime import datetime, timezone
+        return {"status": "ok", "timestamp": datetime.now(timezone.utc).isoformat()}
 
-        access_token = create_access_token(data={"sub": form_data.username})
-        return {"access_token": access_token, "token_type": "bearer"}
+    @app.get("/ready", tags=["monitoring"])
+    async def ready():
+        """就绪检查 - 依赖服务是否可用"""
+        import asyncio
+        from scheduler.db import get_pool
 
-    @app.get(f"{settings.api_v1_prefix}/auth/me", tags=["auth"])
-    async def read_users_me(current_user: User = Depends(get_current_active_user)):
-        """获取当前用户信息"""
-        return current_user
+        results: dict[str, str] = {}
+
+        # 检查 PostgreSQL
+        try:
+            pool = get_pool()
+            async with pool.acquire() as conn:
+                await conn.fetchval("SELECT 1")
+            results["postgres"] = "ok"
+        except Exception as e:
+            results["postgres"] = f"error: {e}"
+
+        # 检查 DolphinDB
+        try:
+            db_client.query("1+1")
+            results["dolphindb"] = "ok"
+        except Exception as e:
+            results["dolphindb"] = f"error: {e}"
+
+        all_ok = all(v == "ok" for v in results.values())
+        return Response(
+            content=str({"status": "ok" if all_ok else "degraded", "checks": results}),
+            status_code=200 if all_ok else 503,
+            media_type="application/json",
+        )
+
+    @app.get("/metrics", tags=["monitoring"])
+    async def metrics():
+        """Prometheus 指标端点"""
+        return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
     # 路由注册
     app.include_router(data.router, prefix=settings.api_v1_prefix, tags=["data"])

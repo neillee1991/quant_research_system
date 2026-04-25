@@ -203,7 +203,10 @@ async def _run_analysis_background(task_id: str, req: AnalysisRequest, run_id: s
 # ==================== API Endpoints ====================
 
 @router.post("/factor/analysis/alphalens", response_model=dict)
-async def submit_analysis(req: AnalysisRequest, background_tasks: BackgroundTasks):
+async def submit_analysis(
+    req: AnalysisRequest,
+    background_tasks: BackgroundTasks,
+):
     """提交因子分析任务（异步）。立即返回 task_id，后台执行分析。"""
     import asyncio
     task_id = str(uuid.uuid4())
@@ -288,7 +291,10 @@ async def get_alphalens_analysis_by_id(factor_id: str, analysis_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.delete("/factor/analysis/{factor_id}/detail/{analysis_id}")
-async def delete_alphalens_analysis_by_id(factor_id: str, analysis_id: str):
+async def delete_alphalens_analysis_by_id(
+    factor_id: str,
+    analysis_id: str,
+):
     """删除指定的 Alphalens 分析结果"""
     from scheduler.db import DatabasePool
 

@@ -27,12 +27,14 @@
   },
   "devDependencies": {
     "@types/highcharts": "^5.0.44",
+    "openapi-typescript": "^6.7.6",
     "react-app-rewired": "^2.2.1",
     "react-scripts": "5.0.1"
   },
   "scripts": {
     "start": "react-app-rewired start",
-    "build": "react-app-rewired build"
+    "build": "react-app-rewired build",
+    "gen:types": "openapi-typescript http://localhost:8000/openapi.json -o src/types/generated.ts"
   },
   "browserslist": {
     "production": [

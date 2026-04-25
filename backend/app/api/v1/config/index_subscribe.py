@@ -233,7 +233,9 @@ async def list_available_indices(
 
 
 @router.post("/config/index/subscribe", response_model=IndexSubscribeResponse)
-async def subscribe_index(request: IndexSubscribeRequest):
+async def subscribe_index(
+    request: IndexSubscribeRequest,
+):
     """订阅指数：创建同步任务并建表"""
     index_code = request.index_code.strip()
 
@@ -283,11 +285,7 @@ async def subscribe_index(request: IndexSubscribeRequest):
             "enabled": True
         }
 
-        await sync_service.create_task(
-            task_config_data,
-            changed_by="api",
-            change_reason=f"Subscribe index {index_code}"
-        )
+        await sync_service.create_task(task_config_data)
 
         try:
             db_client.create_table(table_name, schema, if_not_exists=True)
@@ -312,7 +310,9 @@ async def subscribe_index(request: IndexSubscribeRequest):
 
 
 @router.delete("/config/index/subscribe/{index_code}", response_model=IndexUnsubscribeResponse)
-async def unsubscribe_index(index_code: str):
+async def unsubscribe_index(
+    index_code: str,
+):
     """取消订阅指数：删除同步任务和数据表"""
     index_code = index_code.strip()
 
@@ -325,8 +325,6 @@ async def unsubscribe_index(index_code: str):
 
         await sync_service.delete_task(
             task_id,
-            changed_by="api",
-            change_reason=f"Unsubscribe index {index_code}",
             drop_table=True,
             hard_delete=True
         )
@@ -384,7 +382,9 @@ async def get_user_preference():
 
 
 @router.post("/config/index/preference", response_model=UserSyncPreferenceResponse)
-async def save_user_preference(request: UserSyncPreference):
+async def save_user_preference(
+    request: UserSyncPreference,
+):
     """保存用户的同步偏好配置"""
     try:
         index_table = request.index_basic_table.strip()

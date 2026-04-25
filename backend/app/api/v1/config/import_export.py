@@ -21,7 +21,9 @@ import_service = ConfigImportService()
 
 
 @router.post("/config/export", response_model=ExportResponse)
-def export_configs(request: ExportRequest) -> ExportResponse:
+def export_configs(
+    request: ExportRequest,
+) -> ExportResponse:
     """
     导出配置
 
@@ -47,7 +49,9 @@ def export_configs(request: ExportRequest) -> ExportResponse:
 
 
 @router.post("/config/import/verify", response_model=ImportVerifyResponse)
-def verify_import(request: ImportVerifyRequest) -> ImportVerifyResponse:
+def verify_import(
+    request: ImportVerifyRequest,
+) -> ImportVerifyResponse:
     """
     验证导入文件并预览差异
 
@@ -74,7 +78,9 @@ def verify_import(request: ImportVerifyRequest) -> ImportVerifyResponse:
 
 
 @router.post("/config/import/apply", response_model=ImportApplyResponse)
-def apply_import(request: ImportApplyRequest) -> ImportApplyResponse:
+def apply_import(
+    request: ImportApplyRequest,
+) -> ImportApplyResponse:
     """
     执行导入
 

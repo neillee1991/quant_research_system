@@ -2,6 +2,7 @@
 import sys
 import io
 import traceback
+import ast
 from typing import Any, Optional, Dict
 from datetime import datetime, timedelta
 
@@ -49,6 +50,131 @@ SAFE_GLOBALS = {
         "False": False,
     },
 }
+
+
+# 禁止的模块列表
+DANGEROUS_MODULES = {
+    "os", "sys", "subprocess", "pickle", "ctypes", "builtins", "importlib",
+    "socket", "threading", "multiprocessing", "timeit", "gc", "inspect",
+    "eval", "exec", "compile", "open", "file", "__import__"
+}
+
+
+# 禁止的属性访问
+DANGEROUS_ATTRIBUTES = {
+    "__dict__", "__class__", "__bases__", "__subclasses__", "__mro__",
+    "__globals__", "__locals__", "__name__", "__module__", "__code__",
+    "__defaults__", "__kwdefaults__", "__annotations__", "__closure__",
+    "__doc__", "__init__", "__new__", "__call__", "__getattribute__",
+    "__setattr__", "__delattr__", "__get__", "__set__", "__delete__"
+}
+
+
+# 禁止的函数调用
+DANGEROUS_FUNCTIONS = {
+    "eval", "exec", "compile", "open", "file", "input", "raw_input",
+    "globals", "locals", "vars", "getattr", "setattr", "delattr"
+}
+
+
+class SecurityAnalyzer(ast.NodeVisitor):
+    """安全分析器，使用AST分析代码"""
+
+    def __init__(self):
+        self.violations = []
+
+    def visit_Import(self, node):
+        """检查导入语句"""
+        for alias in node.names:
+            module_name = alias.name
+            if module_name in DANGEROUS_MODULES or any(d in module_name for d in DANGEROUS_MODULES):
+                self.violations.append(f"禁止导入危险模块: {module_name}")
+        return self.generic_visit(node)
+
+    def visit_ImportFrom(self, node):
+        """检查from ... import语句"""
+        if node.module in DANGEROUS_MODULES or any(d in (node.module or "") for d in DANGEROUS_MODULES):
+            self.violations.append(f"禁止导入危险模块: {node.module}")
+        return self.generic_visit(node)
+
+    def visit_Attribute(self, node):
+        """检查属性访问"""
+        if isinstance(node.ctx, ast.Load) or isinstance(node.ctx, ast.Store):
+            attr = node.attr
+            if attr in DANGEROUS_ATTRIBUTES:
+                self.violations.append(f"禁止访问危险属性: {attr}")
+        return self.generic_visit(node)
+
+    def visit_Call(self, node):
+        """检查函数调用"""
+        if isinstance(node.func, ast.Name):
+            func_name = node.func.id
+            if func_name in DANGEROUS_FUNCTIONS:
+                self.violations.append(f"禁止调用危险函数: {func_name}")
+
+        elif isinstance(node.func, ast.Attribute):
+            attr = node.func.attr
+            if attr in DANGEROUS_FUNCTIONS or attr in DANGEROUS_ATTRIBUTES:
+                self.violations.append(f"禁止调用危险函数: {attr}")
+
+        return self.generic_visit(node)
+
+    def visit_Name(self, node):
+        """检查变量引用"""
+        name = node.id
+        if name in DANGEROUS_MODULES or name in DANGEROUS_FUNCTIONS:
+            self.violations.append(f"禁止使用危险标识符: {name}")
+        return self.generic_visit(node)
+
+    def visit_Str(self, node):
+        """检查字符串字面量中的危险内容"""
+        s = node.s
+        dangerous_patterns = ["/etc/", "/proc/", "/dev/", "/sys/",
+                           "C:\\Windows", "C:\\Program", "__import__"]
+        for pattern in dangerous_patterns:
+            if pattern in s:
+                self.violations.append(f"字符串包含危险内容: {pattern}")
+        return self.generic_visit(node)
+
+
+def check_security(code: str) -> list[str]:
+    """
+    使用AST分析检查代码中的安全违规
+
+    Returns:
+        违规列表，如果没有违规则返回空列表
+    """
+    violations = []
+
+    try:
+        # 解析代码为AST
+        tree = ast.parse(code)
+
+        # 使用AST访问者进行安全分析
+        analyzer = SecurityAnalyzer()
+        analyzer.visit(tree)
+        violations.extend(analyzer.violations)
+
+        # 额外的字符串模式匹配作为补充
+        dangerous_patterns = [
+            "import os", "from os", "import sys", "from sys",
+            "import subprocess", "from subprocess", "import pickle", "from pickle",
+            "import ctypes", "from ctypes", "import builtins", "from builtins",
+            "import importlib", "from importlib", "__import__",
+        ]
+
+        for pattern in dangerous_patterns:
+            if pattern in code:
+                violations.append(f"禁止的导入模式: {pattern}")
+
+        return list(set(violations))  # 去重
+
+    except SyntaxError as e:
+        violations.append(f"语法错误 (第{e.lineno}行, 第{e.offset}列): {e.msg}")
+        return violations
+    except Exception as e:
+        violations.append(f"安全检查失败: {str(e)}")
+        return violations
 
 
 def execute_safe_code(
@@ -149,59 +275,6 @@ def execute_safe_code(
     result["stderr"] = stderr_capture.getvalue()
 
     return result
-
-
-def check_security(code: str) -> list[str]:
-    """
-    检查代码中的安全违规模式
-
-    Returns:
-        违规列表，如果没有违规则返回空列表
-    """
-    violations = []
-
-    # 危险的导入模式
-    dangerous_imports = [
-        "import os", "from os",
-        "import sys", "from sys",
-        "import subprocess", "from subprocess",
-        "import pickle", "from pickle",
-        "import ctypes", "from ctypes",
-        "import builtins", "from builtins",
-        "import importlib", "from importlib",
-        "__import__",
-    ]
-
-    for pattern in dangerous_imports:
-        if pattern in code:
-            violations.append(f"禁止的导入: {pattern}")
-
-    # 危险的操作
-    dangerous_ops = [
-        "eval(", "exec(", "compile(",
-        "open(", "file(",
-        "globals()", "locals()", "vars()",
-        "__dict__", "__class__", "__bases__",
-        "__subclasses__", "__mro__",
-        "getattr(", "setattr(", "delattr(",
-        "input(", "raw_input(",
-    ]
-
-    for pattern in dangerous_ops:
-        if pattern in code:
-            violations.append(f"禁止的操作: {pattern}")
-
-    # 检查文件访问模式
-    file_patterns = [
-        "/etc/", "/proc/", "/dev/", "/sys/",
-        "C:\\Windows", "C:\\Program",
-    ]
-
-    for pattern in file_patterns:
-        if pattern in code:
-            violations.append(f"禁止的路径: {pattern}")
-
-    return violations
 
 
 def validate_factor_code(code: str) -> tuple[bool, list[str]]:

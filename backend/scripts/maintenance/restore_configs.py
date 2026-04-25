@@ -61,26 +61,8 @@ def restore_table(table_name: str, backup_file: Path, primary_keys: list) -> dic
             logger.warning(f"备份文件为空，跳过恢复: {backup_file}")
             return {"table": table_name, "rows": 0, "status": "empty"}
 
-        # 移除版本管理字段
-        version_fields = [
-            "version_number",
-            "is_current",
-            "changed_by",
-            "change_reason",
-            "effective_from",
-            "effective_to",
-        ]
-
-        cleaned_records = []
-        for record in records:
-            cleaned_record = {
-                k: v for k, v in record.items()
-                if k not in version_fields
-            }
-            cleaned_records.append(cleaned_record)
-
         # 转换为 Polars DataFrame
-        df = pl.DataFrame(cleaned_records)
+        df = pl.DataFrame(records)
 
         # 处理日期时间字段
         for col in df.columns:

@@ -10,7 +10,7 @@ DolphinDB 数据库初始化脚本
     DOLPHINDB_HOST  - DolphinDB 主机地址 (默认: 127.0.0.1)
     DOLPHINDB_PORT  - DolphinDB 端口 (默认: 8848)
     DOLPHINDB_USER  - 用户名 (默认: admin)
-    DOLPHINDB_PASS  - 密码 (默认: 123456)
+    DOLPHINDB_PASSWORD  - 密码 (默认: 123456)
 """
 
 import os
@@ -25,7 +25,7 @@ def get_config() -> dict:
         "host": os.getenv("DOLPHINDB_HOST", "127.0.0.1"),
         "port": int(os.getenv("DOLPHINDB_PORT", "8848")),
         "user": os.getenv("DOLPHINDB_USER", "admin"),
-        "password": os.getenv("DOLPHINDB_PASS", "123456"),
+        "password": os.getenv("DOLPHINDB_PASSWORD", "123456"),
     }
 
 

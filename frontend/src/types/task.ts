@@ -2,7 +2,9 @@
  * Task Management Abstraction Types
  *
  * Provides unified type definitions for all task types (sync, etl, factor).
+ * SyncTaskConfig, ETLTaskConfig, FactorConfig are sourced from generated.ts (backend Pydantic models).
  */
+import type { components } from './generated';
 
 // Task type discriminator
 export type TaskType = 'sync' | 'etl' | 'factor';
@@ -11,44 +13,14 @@ export type TaskType = 'sync' | 'etl' | 'factor';
 export interface BaseTaskConfig {
   created_at?: string;
   updated_at?: string;
-  description: string;
-  enabled: boolean;
+  description?: string;
+  enabled?: boolean;
 }
 
-// Sync task configuration
-export interface SyncTaskConfig extends BaseTaskConfig {
-  task_id: string;
-  api_name: string;
-  api_limit?: number;
-  fields?: string;
-  start_date?: string;
-  end_date?: string;
-  sync_type?: string;
-  table_name?: string;
-  source?: string;
-  schedule?: string;
-  cron_expression?: string;
-}
-
-// ETL task configuration
-export interface ETLTaskConfig extends BaseTaskConfig {
-  task_id: string;
-  source_table: string;
-  target_table: string;
-  script: string;
-  schedule?: string;
-  table_name?: string;
-}
-
-// Factor configuration
-export interface FactorConfig extends BaseTaskConfig {
-  factor_id: string;
-  code: string;
-  depends_on?: string;
-  params?: string;
-  lookback_days?: number;
-  category?: string;
-}
+// Backend model types — single source of truth from generated.ts
+export type SyncTaskConfig = components['schemas']['SyncTaskConfig'];
+export type ETLTaskConfig = components['schemas']['ETLTaskConfig'];
+export type FactorConfig = components['schemas']['FactorConfig'];
 
 // Generic task type union
 export type TaskConfig = SyncTaskConfig | ETLTaskConfig | FactorConfig;
@@ -89,3 +61,4 @@ export type TaskConfigMap = {
   etl: ETLTaskConfig;
   factor: FactorConfig;
 };
+

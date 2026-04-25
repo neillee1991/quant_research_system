@@ -48,7 +48,9 @@ async def get_field_mappings():
 
 
 @router.put("/config/field-mappings")
-async def update_field_mappings(req: DataConfigUpdateRequest):
+async def update_field_mappings(
+    req: DataConfigUpdateRequest,
+):
     """批量更新字段映射配置（PostgreSQL factor_field_mappings）"""
     from scheduler.db import DatabasePool
 
@@ -123,10 +125,13 @@ async def get_resolved_field_mappings():
 async def get_table_columns(table_name: str):
     """获取指定 DolphinDB 表的列名列表"""
     from app.core.config import settings
+    from app.core.sql_security import validate_table_name
     cached = api_cache.get(f"production:table-columns:{table_name}")
     if cached is not None:
         return cached
     try:
+        # 验证表名安全性
+        validate_table_name(table_name)
         db_path = settings.database.db_path
         df = db_client.query(f"schema(loadTable('{db_path}', '{table_name}')).colDefs")
         columns = df["name"].to_list()

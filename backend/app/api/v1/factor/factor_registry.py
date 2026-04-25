@@ -123,7 +123,9 @@ async def list_registered_factors():
     return result
 
 @router.post("/factor/factors")
-async def create_factor(req: FactorCreateRequest):
+async def create_factor(
+    req: FactorCreateRequest,
+):
     """创建新因子（写入 PostgreSQL factor_configs）"""
     from scheduler.db import DatabasePool
 
@@ -155,7 +157,10 @@ async def create_factor(req: FactorCreateRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.put("/factor/factors/{factor_id}")
-async def update_factor(factor_id: str, req: FactorUpdateRequest):
+async def update_factor(
+    factor_id: str,
+    req: FactorUpdateRequest,
+):
     """更新因子元数据（PostgreSQL factor_configs）"""
     from scheduler.db import DatabasePool
 
@@ -202,7 +207,10 @@ async def update_factor(factor_id: str, req: FactorUpdateRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.delete("/factor/factors/{factor_id}")
-async def delete_factor(factor_id: str, delete_data: bool = False):
+async def delete_factor(
+    factor_id: str,
+    delete_data: bool = False,
+):
     """删除因子元数据，可选删除因子值数据"""
     from scheduler.db import DatabasePool
 
@@ -212,8 +220,7 @@ async def delete_factor(factor_id: str, delete_data: bool = False):
             "DELETE FROM factor_configs WHERE factor_id = $1", factor_id
         )
         if delete_data:
-            from infrastructure.database.type_converter import TypeConverter
-            db_client.execute(f"DELETE FROM factor_values WHERE factor_id = {TypeConverter.escape_symbol(factor_id)}")
+            db_client.execute("DELETE FROM factor_values WHERE factor_id = %s", (factor_id,))
 
         unregister_factor(factor_id)
         api_cache.invalidate("production:factors")
@@ -244,7 +251,10 @@ async def get_factor_code(factor_id: str):
     raise HTTPException(status_code=404, detail=f"因子 {factor_id} 的源代码未找到")
 
 @router.put("/factor/factors/{factor_id}/code")
-async def update_factor_code(factor_id: str, req: FactorCodeUpdateRequest):
+async def update_factor_code(
+    factor_id: str,
+    req: FactorCodeUpdateRequest,
+):
     """更新因子源代码（保存到 PostgreSQL factor_configs）"""
     from scheduler.db import DatabasePool
 

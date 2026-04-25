@@ -99,7 +99,7 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
     if (!task) return;
     try {
       const res = await dataApi.getTaskConfig(task.task_id);
-      const cfg = parseJsonFields(res.data.config);
+      const cfg = parseJsonFields(res.data.task ?? res.data.config ?? res.data);
       setConfig(cfg);
       setJsonText(JSON.stringify(cfg, null, 2));
     } catch (error) {

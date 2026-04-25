@@ -27,6 +27,8 @@ export interface DailyData {
   [key: string]: string | number | undefined;
 }
 
+// 前端运行时类型：含解析后的 JSON 字段（params/schema/primary_keys 为对象）
+// 注意：与后端 SyncTaskConfig（含 *_json 字符串字段）不同，不可合并
 export interface SyncTask {
   task_id: string;
   description: string;
@@ -34,7 +36,6 @@ export interface SyncTask {
   table_name: string;
   source?: string;
   enabled?: boolean;
-  // Index subscription fields
   params_json?: string;
   schema_json?: string;
   primary_keys_json?: string;
@@ -44,27 +45,6 @@ export interface SyncTask {
   api_name?: string;
   date_field?: string;
   api_limit?: number;
-}
-
-export interface SyncTaskConfig {
-  task_id: string;
-  description: string;
-  sync_type: string;
-  table_name: string;
-  source: string;
-  api_name: string;
-  fields: SyncFieldMapping[];
-  params?: Record<string, unknown>;
-  enabled?: boolean;
-  schedule?: string;
-  cron_expression?: string;
-}
-
-export interface SyncFieldMapping {
-  name: string;
-  type: string;
-  source_field?: string;
-  description?: string;
 }
 
 export interface TaskStatus {
@@ -119,6 +99,7 @@ export interface ScheduleInfo {
   last_run_time?: string;
 }
 
+// 前端运行时类型：ETL 任务列表展示用
 export interface ETLTask {
   task_id: string;
   description: string;
@@ -132,16 +113,7 @@ export interface ETLTask {
   updated_at?: string;
 }
 
-export interface ETLTaskConfig {
-  task_id: string;
-  description: string;
-  table_name: string;
-  script: string;
-  fields: ETLFieldDefinition[];
-  enabled?: boolean;
-  schedule?: string;
-}
-
+// ETL 字段定义（前端专用，后端无对应 schema）
 export interface ETLFieldDefinition {
   name: string;
   type: string;
@@ -155,3 +127,4 @@ export interface ETLTestResult {
   row_count: number;
   error?: string;
 }
+

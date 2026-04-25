@@ -1,6 +1,10 @@
 /**
  * Factor-related Types
  */
+import type { components } from './generated';
+
+// 从 generated.ts 导出，保持向后兼容
+export type DataFieldMapping = components['schemas']['DataFieldMapping'];
 
 export interface PreprocessOptions {
   adjust_price: 'none' | 'forward' | 'backward';
@@ -8,15 +12,6 @@ export interface PreprocessOptions {
   filter_new_stock: boolean;
   new_stock_days: number;
   mark_limit: boolean;
-}
-
-export interface DataFieldMapping {
-  field_key: string;
-  field_name?: string;
-  table_name: string;
-  column_name: string;
-  description?: string;
-  extra_config?: string;
 }
 
 export interface FactorDefinition {

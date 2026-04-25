@@ -1,5 +1,6 @@
 import axios from 'axios';
 import type { DataFieldMapping } from '../types/factor';
+import type { PreprocessOptions } from '../types/factor';
 import type {
   ConfigType,
   ImportMode,
@@ -12,14 +13,7 @@ import type {
   ImportApplyResponse,
 } from '../pages/ConfigCenter/types';
 
-// 因子计算预处理选项
-export interface PreprocessOptions {
-  adjust_price: 'none' | 'forward' | 'backward';  // 复权方式
-  filter_st: boolean;           // 过滤 ST/*ST
-  filter_new_stock: boolean;    // 过滤新股
-  new_stock_days: number;       // 新股排除天数
-  mark_limit: boolean;          // 标记涨跌停
-}
+export type { PreprocessOptions };
 
 export const DEFAULT_PREPROCESS: PreprocessOptions = {
   adjust_price: 'forward',

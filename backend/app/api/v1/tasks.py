@@ -2,15 +2,16 @@
 统一任务管理 API 路由
 提供跨任务类型的统一 RESTful API 端点
 """
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Union, Annotated
 from fastapi import APIRouter, HTTPException, Query, Path, BackgroundTasks
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, Discriminator, Tag
 import time
 import json
 
 from app.services.task_service import sync_service, etl_service, factor_service, TaskService
 from app.services.task_runner import TaskRunner, tracked_task
 from app.core.logger import logger
+from app.models.base_task import SyncTaskConfig, ETLTaskConfig, FactorConfig
 from infrastructure.database.dolphindb_client import db_client
 from scheduler.db import DatabasePool
 
@@ -19,25 +20,41 @@ router = APIRouter()
 
 # ==================== 请求/响应模型 ====================
 
+# 任务配置 Union 类型（用于请求和响应）
+TaskConfigUnion = Union[SyncTaskConfig, ETLTaskConfig, FactorConfig]
+
+
+def _discriminate_task_config(v: Any) -> str:
+    """根据字段特征判断任务类型"""
+    if isinstance(v, dict):
+        if "api_name" in v:
+            return "sync"
+        if "script" in v:
+            return "etl"
+        if "factor_id" in v or "code" in v:
+            return "factor"
+    if isinstance(v, SyncTaskConfig):
+        return "sync"
+    if isinstance(v, ETLTaskConfig):
+        return "etl"
+    if isinstance(v, FactorConfig):
+        return "factor"
+    return "sync"
+
+
 class TaskCreateRequest(BaseModel):
     """创建任务请求"""
     config_data: Dict[str, Any] = Field(..., description="任务配置数据")
-    changed_by: str = Field(default="api", description="修改人")
-    change_reason: str = Field(default="Create new task", description="修改原因")
 
 
 class TaskUpdateRequest(BaseModel):
     """更新任务请求"""
     config_data: Dict[str, Any] = Field(..., description="更新的配置数据")
-    changed_by: str = Field(default="api", description="修改人")
-    change_reason: str = Field(default="Update task", description="修改原因")
 
 
 class TaskDeleteRequest(BaseModel):
     """删除任务请求"""
     drop_table: bool = Field(default=False, description="是否删除关联表")
-    changed_by: str = Field(default="api", description="修改人")
-    change_reason: str = Field(default="Delete task", description="修改原因")
 
 
 class TaskExecuteRequest(BaseModel):
@@ -112,7 +129,23 @@ def _get_service(task_type: str) -> TaskService:
             status_code=400,
             detail=f"Invalid task_type: {task_type}. Must be one of: sync, etl, factor"
         )
+    return service
 
+
+_TASK_CONFIG_MODELS = {
+    "sync": SyncTaskConfig,
+    "etl": ETLTaskConfig,
+    "factor": FactorConfig,
+}
+
+
+def _parse_task_config(task_type: str, config_data: Dict[str, Any]) -> TaskConfigUnion:
+    """normalize + 用具体模型验证，返回强类型对象"""
+    model_cls = _TASK_CONFIG_MODELS.get(task_type)
+    if not model_cls:
+        raise HTTPException(status_code=400, detail=f"Invalid task_type: {task_type}")
+    normalized = _normalize_task_config(config_data)
+    return model_cls(**normalized)
     return service
 
 
@@ -150,7 +183,7 @@ class TaskHistoryResponse(BaseModel):
 @router.get("/tasks/running", response_model=RunningTaskResponse)
 async def get_running_tasks(
     task_type: Optional[str] = Query(default=None, description="按任务类型过滤 (sync/etl/factor)"),
-    task_id: Optional[str] = Query(default=None, description="按任务ID过滤")
+    task_id: Optional[str] = Query(default=None, description="按任务ID过滤"),
 ):
     """获取所有正在运行的任务（查询 PostgreSQL task_runs 表）"""
     try:
@@ -216,8 +249,11 @@ async def get_task_history(
             idx += 1
 
         where = " AND ".join(conditions)
+        from app.core.sql_security import validate_limit_value
+        safe_limit = validate_limit_value(limit)
+        params.append(safe_limit)
         rows = await DatabasePool.fetch(
-            f"SELECT * FROM task_runs WHERE {where} ORDER BY COALESCE(finished_at, started_at) DESC LIMIT {limit}",
+            f"SELECT * FROM task_runs WHERE {where} ORDER BY COALESCE(finished_at, started_at) DESC LIMIT ${idx}",
             *params,
         )
         tasks = [_format_task_row(dict(r)) for r in rows]
@@ -229,7 +265,9 @@ async def get_task_history(
 
 
 @router.post("/tasks/cleanup")
-async def cleanup_stale_tasks(timeout_minutes: int = Query(default=0, ge=0, description="超时分钟数，0=清理所有running")):
+async def cleanup_stale_tasks(
+    timeout_minutes: int = Query(default=0, ge=0, description="超时分钟数，0=清理所有running"),
+):
     """清理僵尸任务（将长时间 running 的记录标记为 failed）"""
     try:
         from app.services.task_runner import TaskRunner
@@ -262,7 +300,9 @@ def _format_task_row(row: dict) -> dict:
 # ==================== ETL / Sync 专用端点 ====================
 
 @router.post("/tasks/etl/test")
-async def test_etl_script(payload: dict):
+async def test_etl_script(
+    payload: dict,
+):
     """测试 ETL 脚本，返回执行结果及字段类型"""
     # 使用 etl_service 来测试脚本
     script = payload.get("script", "")
@@ -386,17 +426,15 @@ async def get_task_data_status(
 @router.get("/tasks/{task_type}", response_model=TaskListResponse)
 async def list_tasks(
     task_type: str = Path(..., description="任务类型: sync, etl, factor"),
-    enabled_only: bool = Query(default=False, description="是否只返回启用的任务")
+    enabled_only: bool = Query(default=False, description="是否只返回启用的任务"),
 ):
     """列出所有任务"""
     try:
         service = _get_service(task_type)
         tasks = await service.list_tasks(enabled_only=enabled_only)
-        task_dicts = [task.model_dump() for task in tasks]
-
         return TaskListResponse(
-            tasks=task_dicts,
-            total=len(task_dicts),
+            tasks=[t.to_dict_with_parsed_json() for t in tasks],
+            total=len(tasks),
             task_type=task_type
         )
     except HTTPException:
@@ -409,7 +447,7 @@ async def list_tasks(
 @router.get("/tasks/{task_type}/status/{run_id}")
 async def get_task_status(
     task_type: str = Path(..., description="任务类型: sync, etl, factor"),
-    run_id: str = Path(..., description="运行ID")
+    run_id: str = Path(..., description="运行ID"),
 ):
     """查询任务执行状态（查询 PostgreSQL task_runs 表）"""
     try:
@@ -436,7 +474,7 @@ async def get_task_status(
 @router.get("/tasks/{task_type}/{task_id}", response_model=TaskResponse)
 async def get_task(
     task_type: str = Path(..., description="任务类型: sync, etl, factor"),
-    task_id: str = Path(..., description="任务ID")
+    task_id: str = Path(..., description="任务ID"),
 ):
     """获取单个任务"""
     try:
@@ -449,7 +487,7 @@ async def get_task(
                 detail=f"Task {task_id} not found in {task_type}"
             )
 
-        return TaskResponse(task=task.model_dump(), task_type=task_type)
+        return TaskResponse(task=task.to_dict_with_parsed_json(), task_type=task_type)
     except HTTPException:
         raise
     except Exception as e:
@@ -460,17 +498,14 @@ async def get_task(
 @router.post("/tasks/{task_type}", response_model=TaskResponse)
 async def create_task(
     task_type: str = Path(..., description="任务类型: sync, etl, factor"),
-    request: TaskCreateRequest = None
+    request: TaskCreateRequest = None,
 ):
     """创建新任务"""
     try:
         service = _get_service(task_type)
-        task = await service.create_task(
-            config_data=_normalize_task_config(request.config_data),
-            changed_by=request.changed_by,
-            change_reason=request.change_reason
-        )
-        return TaskResponse(task=task.model_dump(), task_type=task_type)
+        validated = _parse_task_config(task_type, request.config_data)
+        task = await service.create_task(config_data=validated.model_dump(exclude_none=True))
+        return TaskResponse(task=task.to_dict_with_parsed_json(), task_type=task_type)
     except HTTPException:
         raise
     except ValueError as e:
@@ -484,18 +519,17 @@ async def create_task(
 async def update_task(
     task_type: str = Path(..., description="任务类型: sync, etl, factor"),
     task_id: str = Path(..., description="任务ID"),
-    request: TaskUpdateRequest = None
+    request: TaskUpdateRequest = None,
 ):
     """更新任务"""
     try:
         service = _get_service(task_type)
+        validated = _parse_task_config(task_type, request.config_data)
         task = await service.update_task(
             task_id=task_id,
-            config_data=_normalize_task_config(request.config_data),
-            changed_by=request.changed_by,
-            change_reason=request.change_reason
+            config_data=validated.model_dump(exclude_none=True),
         )
-        return TaskResponse(task=task.model_dump(), task_type=task_type)
+        return TaskResponse(task=task.to_dict_with_parsed_json(), task_type=task_type)
     except HTTPException:
         raise
     except ValueError as e:
@@ -511,8 +545,6 @@ async def delete_task(
     task_type: str = Path(..., description="任务类型: sync, etl, factor"),
     task_id: str = Path(..., description="任务ID"),
     drop_table: bool = Query(default=False, description="是否删除关联表"),
-    changed_by: str = Query(default="api", description="修改人"),
-    change_reason: str = Query(default="Delete task", description="修改原因")
 ):
     """删除任务（软删除，设置 enabled=false）"""
     try:
@@ -536,8 +568,6 @@ async def delete_task(
 
         success = await service.delete_task(
             task_id=task_id,
-            changed_by=changed_by,
-            change_reason=change_reason
         )
         return DeleteResponse(
             success=success,
@@ -692,7 +722,7 @@ async def execute_task(
     task_type: str = Path(..., description="任务类型: sync, etl, factor"),
     task_id: str = Path(..., description="任务ID"),
     request: TaskExecuteRequest = None,
-    background_tasks: BackgroundTasks = None
+    background_tasks: BackgroundTasks = None,
 ):
     """执行任务（异步）
 

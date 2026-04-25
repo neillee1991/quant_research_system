@@ -43,6 +43,26 @@ npm install
 npm start  # Runs on http://localhost:3000
 ```
 
+### Frontend Type Sync (MANDATORY after backend model changes)
+
+**CRITICAL RULE**: After modifying ANY Pydantic model in `backend/app/models/`, you MUST regenerate frontend types:
+
+```bash
+# 确保后端服务运行中，然后执行：
+cd frontend
+npm run gen:types
+```
+
+- 生成文件: `src/types/generated.ts`
+- 禁止手动编辑 `generated.ts`，所有类型从此文件引用：
+  ```typescript
+  import type { components } from '../types/generated'
+  type FactorConfig = components['schemas']['FactorConfig']
+  type SyncTaskConfig = components['schemas']['SyncTaskConfig']
+  type ETLTaskConfig = components['schemas']['ETLTaskConfig']
+  ```
+- 手写类型文件 (`task.ts`, `factor.ts`, `data.ts`) 已过时，逐步迁移到 `generated.ts`
+
 ### Database (DolphinDB via Docker)
 
 ```bash
@@ -312,6 +332,8 @@ db_client.upsert("table_name", polars_df, ["primary", "keys"])
 8.文件一定要分批次写入
 9.拒绝硬代码，尽量使用环境变量配置，如果有硬代码，一定要提前和我确认
 10.每次重点更新，都自动帮我写好 git 日志并提交
+11.每次更新，都要同时更新系统架构、memory 和本文件。确保文档都是最新的。
+
 ---
 
 ## 项目标准与规范

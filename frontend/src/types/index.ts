@@ -10,14 +10,5 @@ export * from './task';
 export * from './stockPool';
 export * from './indexSubscribe';
 
-// Re-export commonly used types for convenience
-export type { PreprocessOptions, DataFieldMapping } from './factor';
-export type { SyncTask, SyncLog, TableInfo } from './data';
-export type { BacktestResult, BacktestMetrics } from './strategy';
-export type {
-  TaskType,
-  BaseTaskConfig,
-  SyncTaskConfig,
-  ETLTaskConfig,
-  FactorConfig,
-} from './task';
+// Generated types — backend Pydantic models, single source of truth
+export type { components } from './generated';
