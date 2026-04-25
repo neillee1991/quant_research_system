@@ -66,16 +66,31 @@ const getTaskTypeLabel = (type: string): string => {
   }
 };
 
-const formatParams = (params: string | undefined): string => {
+const formatParams = (params: string | object | undefined): string => {
   if (!params) return '';
   try {
-    const obj = JSON.parse(params.replace(/'/g, '"'));
+    let obj;
+    if (typeof params === 'string') {
+      // 如果是字符串，尝试解析为 JSON 对象
+      obj = JSON.parse(params.replace(/'/g, '"'));
+    } else if (typeof params === 'object') {
+      // 如果是对象，直接使用
+      obj = params;
+    } else {
+      // 如果是其他类型，直接返回字符串
+      return String(params);
+    }
+
     return Object.entries(obj)
       .filter(([, v]) => v != null && v !== '')
-      .map(([k, v]) => `${k}: ${v}`)
+      .map(([k, v]) => {
+        // 对于对象或数组，先转为字符串，避免 React 渲染错误
+        const strVal = typeof v === 'object' ? JSON.stringify(v) : String(v);
+        return `${k}: ${strVal}`;
+      })
       .join('  ');
   } catch {
-    return params;
+    return String(params);
   }
 };
 

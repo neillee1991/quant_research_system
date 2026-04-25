@@ -162,8 +162,23 @@ def load_factors_from_db(db_client):
             continue
 
         try:
-            depends_on = json.loads(row.get("depends_on") or "[]")
-            params = json.loads(row.get("params") or "{}")
+            # 处理 depends_on
+            depends_on_raw = row.get("depends_on")
+            if isinstance(depends_on_raw, str):
+                depends_on = json.loads(depends_on_raw or "[]")
+            elif isinstance(depends_on_raw, list):
+                depends_on = depends_on_raw
+            else:
+                depends_on = []
+
+            # 处理 params
+            params_raw = row.get("params")
+            if isinstance(params_raw, str):
+                params = json.loads(params_raw or "{}")
+            elif isinstance(params_raw, dict):
+                params = params_raw
+            else:
+                params = {}
 
             from app.core.sandbox import code_sandbox
             is_safe, error = code_sandbox.check_security(code)

@@ -697,7 +697,17 @@ const AnalysisPanel: React.FC = () => {
                 const record = analysisHistory.find(r => r.run_id === runId);
                 if (!record) return;
                 try {
-                  const extra = JSON.parse(record.extra || '{}');
+                  let extra;
+                  if (typeof record.extra === 'string') {
+                    // 如果是字符串，尝试解析为 JSON 对象
+                    extra = JSON.parse(record.extra || '{}');
+                  } else if (typeof record.extra === 'object') {
+                    // 如果是对象，直接使用
+                    extra = record.extra || {};
+                  } else {
+                    // 如果是其他类型，使用空对象
+                    extra = {};
+                  }
                   if (extra.result_id) {
                     loadAnalysisById(record.task_id, extra.result_id);
                   }
@@ -708,7 +718,17 @@ const AnalysisPanel: React.FC = () => {
                 .map(r => {
                   let paramsSummary = '';
                   try {
-                    const p = JSON.parse(r.params || '{}');
+                    let p;
+                    if (typeof r.params === 'string') {
+                      // 如果是字符串，尝试解析为 JSON 对象
+                      p = JSON.parse(r.params || '{}');
+                    } else if (typeof r.params === 'object') {
+                      // 如果是对象，直接使用
+                      p = r.params || {};
+                    } else {
+                      // 如果是其他类型，使用空对象
+                      p = {};
+                    }
                     const parts: string[] = [];
                     if (p.start_date || p.end_date) parts.push(`${p.start_date || ''}~${p.end_date || ''}`);
                     if (p.periods) parts.push(`T+${Array.isArray(p.periods) ? p.periods.join(',') : p.periods}`);

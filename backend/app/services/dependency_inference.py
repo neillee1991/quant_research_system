@@ -52,7 +52,13 @@ class DependencyInferenceService:
                 "SELECT depends_on FROM factor_configs WHERE factor_id = $1", factor_id
             )
             if row and row["depends_on"]:
-                return json.loads(row["depends_on"])
+                depends_on_raw = row["depends_on"]
+                if isinstance(depends_on_raw, str):
+                    return json.loads(depends_on_raw)
+                elif isinstance(depends_on_raw, list):
+                    return depends_on_raw
+                else:
+                    return []
         except Exception as e:
             logger.warning(f"Failed to infer factor dependencies for {factor_id}: {e}")
         return []

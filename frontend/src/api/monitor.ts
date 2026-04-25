@@ -9,7 +9,7 @@ export interface RunningTask {
   elapsed_sec?: number | null;
   rows?: number | null;
   error?: string | null;
-  params?: string;
+  params?: string | object;
 }
 
 export interface TaskRun {
@@ -23,8 +23,8 @@ export interface TaskRun {
   elapsed_sec: number | null;
   rows: number | null;
   error: string | null;
-  params: string;
-  extra?: string | null;
+  params: string | object; // 可能是字符串或对象
+  extra?: string | object | null; // 可能是字符串、对象或 null
 }
 
 export interface RunningTasksResponse {

@@ -123,7 +123,17 @@ const formatDate = (date: string | null | undefined): string => {
 export const formatRunParams = (record: TaskRun): string => {
   const parts: string[] = [];
   try {
-    const p = record.params ? JSON.parse(record.params) : {};
+    let p;
+    if (typeof record.params === 'string') {
+      // 如果是字符串，尝试解析为 JSON 对象
+      p = record.params ? JSON.parse(record.params) : {};
+    } else if (typeof record.params === 'object') {
+      // 如果是对象，直接使用
+      p = record.params || {};
+    } else {
+      // 如果是其他类型，使用空对象
+      p = {};
+    }
     const start = formatDate(p.start_date);
     const end = formatDate(p.end_date);
     if (start || end) parts.push(`${start}~${end}`);

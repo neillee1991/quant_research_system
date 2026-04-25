@@ -21,13 +21,28 @@ const statusColorMap: Record<string, string> = {
   running: 'blue',
 };
 
-function renderJsonCell(v: string | null) {
+function renderJsonCell(v: string | object | null) {
   if (!v) return '-';
   try {
-    const obj = JSON.parse(v);
+    let obj;
+    if (typeof v === 'string') {
+      // 如果是字符串，尝试解析为 JSON 对象
+      obj = JSON.parse(v);
+    } else if (typeof v === 'object') {
+      // 如果是对象，直接使用
+      obj = v;
+    } else {
+      // 如果是其他类型，直接返回字符串
+      return <Text style={{ fontSize: '12px' }} ellipsis>{String(v)}</Text>;
+    }
+
     const text = Object.entries(obj)
       .filter(([, val]) => val != null && val !== '')
-      .map(([k, val]) => `${k}: ${val}`)
+      .map(([k, val]) => {
+        // 对于对象或数组，先转为字符串，避免 React 渲染错误
+        const strVal = typeof val === 'object' ? JSON.stringify(val) : String(val);
+        return `${k}: ${strVal}`;
+      })
       .join(', ');
     return (
       <Tooltip title={<pre style={{ margin: 0, fontSize: 11 }}>{JSON.stringify(obj, null, 2)}</pre>}>
@@ -35,7 +50,7 @@ function renderJsonCell(v: string | null) {
       </Tooltip>
     );
   } catch {
-    return <Text style={{ fontSize: '12px' }} ellipsis>{v}</Text>;
+    return <Text style={{ fontSize: '12px' }} ellipsis>{String(v)}</Text>;
   }
 }
 
@@ -101,9 +116,19 @@ export const TaskLogTable: React.FC<TaskLogTableProps> = ({
       dataIndex: 'params',
       key: 'mode',
       width: 70,
-      render: (v: string | null) => {
+      render: (v: string | object | null) => {
         try {
-          const obj = v ? JSON.parse(v) : {};
+          let obj;
+          if (typeof v === 'string') {
+            // 如果是字符串，尝试解析为 JSON 对象
+            obj = v ? JSON.parse(v) : {};
+          } else if (typeof v === 'object') {
+            // 如果是对象，直接使用
+            obj = v || {};
+          } else {
+            // 如果是其他类型，使用空对象
+            obj = {};
+          }
           const mode = obj.mode || 'graph';
           return <Tag color={mode === 'script' ? 'purple' : 'blue'}>{mode === 'script' ? '脚本' : '图'}</Tag>;
         } catch {
@@ -174,6 +199,20 @@ export const TaskLogTable: React.FC<TaskLogTableProps> = ({
       key: 'extra',
       width: 160,
       render: renderJsonCell,
+    },
+    {
+      title: '错误',
+      dataIndex: 'error',
+      key: 'error',
+      width: 200,
+      render: (v: string | null) => {
+        if (!v) return '-';
+        return (
+          <Tooltip title={v}>
+            <Text type="danger" style={{ fontSize: '12px' }} ellipsis>{String(v)}</Text>
+          </Tooltip>
+        );
+      },
     },
   ];
 

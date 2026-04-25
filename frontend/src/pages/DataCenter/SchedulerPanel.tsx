@@ -396,12 +396,26 @@ const SchedulerPanel: React.FC = () => {
                     { title: '行数', dataIndex: 'rows', key: 'rows', width: 80, render: (v?: number) => v != null ? v.toLocaleString() : '-' },
                     {
                       title: '参数', dataIndex: 'params', key: 'params',
-                      render: (v?: string) => {
+                      render: (v?: string | object) => {
                         if (!v || v === '{}' || v === '') return '-';
                         try {
-                          const obj = JSON.parse(v);
-                          return <Typography.Text type="secondary" style={{ fontSize: 11 }}>{Object.entries(obj).map(([k, val]) => `${k}:${val}`).join(' ')}</Typography.Text>;
-                        } catch { return <Typography.Text type="secondary" style={{ fontSize: 11 }}>{v}</Typography.Text>; }
+                          let obj;
+                          if (typeof v === 'string') {
+                            obj = JSON.parse(v);
+                          } else if (typeof v === 'object') {
+                            obj = v;
+                          } else {
+                            return <Typography.Text type="secondary" style={{ fontSize: 11 }}>{String(v)}</Typography.Text>;
+                          }
+                          // 对于对象或数组，先转为字符串，避免 React 渲染错误
+                          const text = Object.entries(obj)
+                            .map(([k, val]) => {
+                              const strVal = typeof val === 'object' ? JSON.stringify(val) : String(val);
+                              return `${k}:${strVal}`;
+                            })
+                            .join(' ');
+                          return <Typography.Text type="secondary" style={{ fontSize: 11 }}>{text}</Typography.Text>;
+                        } catch { return <Typography.Text type="secondary" style={{ fontSize: 11 }}>{String(v)}</Typography.Text>; }
                       },
                     },
                     {

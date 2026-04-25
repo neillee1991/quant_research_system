@@ -3,6 +3,7 @@
 直接调用后台任务函数，绕过 HTTP 层
 """
 import asyncio
+import json
 from typing import Optional
 
 from app.core.logger import logger
@@ -28,11 +29,19 @@ class TaskSubmitter:
 
         try:
             from app.services.task_runner import TaskRunner
+
+            # 构建与 API 层相同格式的参数
+            params_dict = {
+                "start_date": target_date,
+                "end_date": target_date,
+            }
+
             await TaskRunner.start(
                 run_id=run_id,
                 task_type=task_type,
                 task_id=task_id,
                 task_name=f"{task_type.upper()} 任务: {task_id}",
+                params=json.dumps(params_dict),
                 flow_run_id=task_run.flow_run_id,
             )
 
