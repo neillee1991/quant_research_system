@@ -90,13 +90,23 @@ async def execute_factor_task(task_id: str, start_date: Optional[str], end_date:
     import asyncio
     from app.services.factor_service import FactorComputeService
     from infrastructure.database.dolphindb_client import db_client
+    from engine.factor.registry import get_factor, discover_factors
+
     service = FactorComputeService(db_client)
+    discover_factors(db_client=db_client)
+    definition = get_factor(task_id)
+
+    preprocess_options = None
+    if definition and definition.params:
+        preprocess_options = definition.params.get("preprocess")
+
     compute_result = await asyncio.get_event_loop().run_in_executor(
         None, lambda: service.compute_factor(
             factor_id=task_id,
             start_date=start_date,
             end_date=end_date,
             mode="full" if start_date else "incremental",
+            preprocess=preprocess_options,
         )
     )
     rows = getattr(compute_result, "rows", 0)

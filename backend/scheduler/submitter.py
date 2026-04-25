@@ -29,12 +29,19 @@ class TaskSubmitter:
 
         try:
             from app.services.task_runner import TaskRunner
+            from engine.factor.registry import get_factor, discover_factors
 
             # 构建与 API 层相同格式的参数
             params_dict = {
                 "start_date": target_date,
                 "end_date": target_date,
             }
+
+            # 获取因子定义，添加预处理参数
+            discover_factors(db_client=None)  # 使用默认配置
+            definition = get_factor(task_id)
+            if definition and definition.params:
+                params_dict["preprocess"] = definition.params.get("preprocess", {})
 
             await TaskRunner.start(
                 run_id=run_id,
