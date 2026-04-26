@@ -164,7 +164,14 @@ export const ETLPanel: React.FC<ETLPanelProps> = ({
                 fontSize: '12px',
               }}
             >
-              {String(v).slice(0, 16)}
+              {(() => {
+                const normalized = String(v).replace(' ', 'T');
+                const d = new Date(normalized);
+                return isNaN(d.getTime()) ? String(v).slice(0, 16) : d.toLocaleString('zh-CN', {
+                  year: 'numeric', month: '2-digit', day: '2-digit',
+                  hour: '2-digit', minute: '2-digit', hour12: false,
+                });
+              })()}
             </div>
           </Tooltip>
         );

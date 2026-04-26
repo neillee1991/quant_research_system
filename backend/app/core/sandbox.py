@@ -189,7 +189,7 @@ def execute_safe_code(
     注意：这是一个基础的安全层，主要通过以下方式提供保护：
     1. 限制可用的 builtins
     2. 禁止危险操作（文件访问、网络、导入等）
-    3. 提供安全的模块访问（仅 polars）
+    3. 提供安全的模块访问（仅 polars 和策略相关模块）
     4. timeout_seconds 超时强制终止
 
     Args:
@@ -211,10 +211,30 @@ def execute_safe_code(
     """
     import concurrent.futures
 
-    # 安全检查
+    # 安全检查 - 允许导入策略相关的模块
     security_violations = check_security(code)
     if security_violations:
-        raise SandboxSecurityError(f"安全违规检测: {', '.join(security_violations)}")
+        # 检查是否是允许的策略相关导入
+        allowed_imports = [
+            "from backend.engine.backtest.core.base_strategy import",
+            "import backend.engine.backtest.core.base_strategy",
+            "from backend.engine.backtest.core import",
+        ]
+
+        filtered_violations = []
+        for violation in security_violations:
+            # 如果是允许的策略相关导入，忽略违规
+            is_allowed = False
+            for allowed_import in allowed_imports:
+                if allowed_import in code:
+                    is_allowed = True
+                    break
+
+            if not is_allowed:
+                filtered_violations.append(violation)
+
+        if filtered_violations:
+            raise SandboxSecurityError(f"安全违规检测: {', '.join(filtered_violations)}")
 
     def _run() -> Dict[str, Any]:
         return _execute_in_sandbox(code, local_vars)
@@ -240,6 +260,30 @@ def _execute_in_sandbox(code: str, local_vars: Optional[Dict[str, Any]] = None) 
         globals_dict["polars"] = pl
     except ImportError:
         logger.warning("Polars not available in sandbox")
+
+    # 允许导入策略相关的模块
+    try:
+        from backend.engine.backtest.core.base_strategy import BaseStrategy, VectorBTStrategy, RQAlphaStrategy, TradingSignal
+        from backend.engine.backtest.core.context import BacktestContext, Portfolio, Position, Order, Transaction
+        from backend.engine.backtest.core.strategy_loader import StrategyLoader, StrategyFactory
+        from backend.engine.backtest.core.base_strategy import StrategyMode, StrategyConfig
+
+        globals_dict["BaseStrategy"] = BaseStrategy
+        globals_dict["VectorBTStrategy"] = VectorBTStrategy
+        globals_dict["RQAlphaStrategy"] = RQAlphaStrategy
+        globals_dict["TradingSignal"] = TradingSignal
+        globals_dict["BacktestContext"] = BacktestContext
+        globals_dict["Portfolio"] = Portfolio
+        globals_dict["Position"] = Position
+        globals_dict["Order"] = Order
+        globals_dict["Transaction"] = Transaction
+        globals_dict["StrategyLoader"] = StrategyLoader
+        globals_dict["StrategyFactory"] = StrategyFactory
+        globals_dict["StrategyMode"] = StrategyMode
+        globals_dict["StrategyConfig"] = StrategyConfig
+
+    except ImportError as e:
+        logger.warning(f"Strategy modules not available in sandbox: {e}")
 
     def safe_print(*args, **kwargs):
         end = kwargs.get("end", "\n")

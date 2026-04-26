@@ -3,7 +3,7 @@
  */
 
 import { useState } from 'react';
-import { notify } from '../../../utils/notify';
+import { notify, extractApiError } from '../../../utils/notify';
 import { productionApi } from '../../../api';
 import type { PreprocessOptions } from '../../../types';
 import type { TestResult, TestLog } from '../types';
@@ -50,7 +50,7 @@ export const useFactorTest = () => {
         notify.success('测试成功');
       }
     } catch (error: any) {
-      const errorMessage = error.response?.data?.detail || error.message || '测试失败';
+      const errorMessage = extractApiError(error.response?.data?.detail, error.message || '测试失败');
       setTestError(errorMessage);
       notify.error(errorMessage);
       throw error;

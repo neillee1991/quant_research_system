@@ -56,7 +56,11 @@ function renderJsonCell(v: string | object | null) {
 
 function renderTime(v: string | null) {
   if (!v) return <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>-</span>;
-  const d = new Date(v);
+  // 把 "2026-04-26 18:46:03" 格式（无时区）当本地时间处理，避免被当成 UTC
+  const normalized = v.includes('T') || v.includes('+') || v.endsWith('Z')
+    ? v
+    : v.replace(' ', 'T');
+  const d = new Date(normalized);
   const formatted = isNaN(d.getTime()) ? v.slice(0, 19) : d.toLocaleString('zh-CN', {
     year: 'numeric', month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit', second: '2-digit',

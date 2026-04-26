@@ -1,4 +1,4 @@
-import { notify } from '../../utils/notify';
+import { notify, extractApiError } from '../../utils/notify';
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   Modal,
@@ -101,7 +101,7 @@ const FlowEditor: React.FC<FlowEditorProps> = ({ visible, flowName, onClose, onS
       onSaved();
       onClose();
     } catch (e: any) {
-      notify.error(e?.response?.data?.detail || '保存失败');
+      notify.error(extractApiError(e?.response?.data?.detail, '保存失败'));
     } finally {
       setSaving(false);
     }

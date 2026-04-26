@@ -2,7 +2,7 @@
  * 快速订阅指数 Modal
  * 搜索订阅 + 显示已订阅列表
  */
-import { notify } from '../../utils/notify';
+import { notify, extractApiError } from '../../utils/notify';
 import React, { useState, useCallback, useEffect } from 'react';
 import { Modal, Select, Space, Tag, Table, Button, Popconfirm, Spin } from 'antd';
 import { CheckOutlined, DeleteOutlined } from '@ant-design/icons';
@@ -87,7 +87,7 @@ const QuickSubscribeModal: React.FC<QuickSubscribeModalProps> = ({
       await loadSubscribed();
       onSuccess();
     } catch (error: any) {
-      notify.error(`订阅失败: ${error.response?.data?.detail || error.message}`);
+      notify.error(`订阅失败: ${extractApiError(error.response?.data?.detail, error.message)}`);
     } finally {
       setSubscribing(false);
     }
@@ -102,7 +102,7 @@ const QuickSubscribeModal: React.FC<QuickSubscribeModalProps> = ({
       await loadSubscribed();
       onSuccess();
     } catch (error: any) {
-      notify.error(`取消订阅失败: ${error.response?.data?.detail || error.message}`);
+      notify.error(`取消订阅失败: ${extractApiError(error.response?.data?.detail, error.message)}`);
     } finally {
       setUnsubscribingCode('');
     }

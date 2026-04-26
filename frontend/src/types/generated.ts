@@ -248,38 +248,24 @@ export interface paths {
      */
     post: operations["infer_dependencies_api_v1_flows_infer_dependencies_post"];
   };
-  "/api/v1/config/field-mappings": {
+  "/api/v1/config/data-mappings": {
     /**
-     * Get Field Mappings
-     * @description 获取所有字段映射配置（PostgreSQL factor_field_mappings）
+     * Get Data Mappings
+     * @description 获取所有数据字段映射配置（PostgreSQL data_field_mappings）
      */
-    get: operations["get_field_mappings_api_v1_config_field_mappings_get"];
+    get: operations["get_data_mappings_api_v1_config_data_mappings_get"];
     /**
-     * Update Field Mappings
-     * @description 批量更新字段映射配置（PostgreSQL factor_field_mappings）
+     * Update Data Mappings
+     * @description 批量更新数据字段映射配置（PostgreSQL data_field_mappings）
      */
-    put: operations["update_field_mappings_api_v1_config_field_mappings_put"];
+    put: operations["update_data_mappings_api_v1_config_data_mappings_put"];
   };
-  "/api/v1/config/field-mappings/resolved": {
+  "/api/v1/config/data-mappings/resolved": {
     /**
-     * Get Resolved Field Mappings
-     * @description 返回简化的 field_key → source_label 字典，供前端注解显示
+     * Get Resolved Data Mappings
+     * @description 返回简化的 field_key -> source_label 字典，供前端注解显示
      */
-    get: operations["get_resolved_field_mappings_api_v1_config_field_mappings_resolved_get"];
-  };
-  "/api/v1/config/table-columns/{table_name}": {
-    /**
-     * Get Table Columns
-     * @description 获取指定 DolphinDB 表的列名列表
-     */
-    get: operations["get_table_columns_api_v1_config_table_columns__table_name__get"];
-  };
-  "/api/v1/config/available-tables": {
-    /**
-     * Get Available Tables
-     * @description 获取所有可用的数据表（sync/etl/factor，均从 PostgreSQL 查询）
-     */
-    get: operations["get_available_tables_api_v1_config_available_tables_get"];
+    get: operations["get_resolved_data_mappings_api_v1_config_data_mappings_resolved_get"];
   };
   "/api/v1/config/index/available": {
     /**
@@ -291,16 +277,23 @@ export interface paths {
   "/api/v1/config/index/subscribe": {
     /**
      * Subscribe Index
-     * @description 订阅指数：创建同步任务并建表
+     * @description 订阅指数：同时创建日线行情和成分股两个同步任务并建表
      */
     post: operations["subscribe_index_api_v1_config_index_subscribe_post"];
   };
-  "/api/v1/config/index/subscribe/{index_code}": {
+  "/api/v1/config/index/unsubscribe/task/{task_id}": {
+    /**
+     * Unsubscribe Task
+     * @description 取消单个任务的订阅：删除同步任务和数据表
+     */
+    delete: operations["unsubscribe_task_api_v1_config_index_unsubscribe_task__task_id__delete"];
+  };
+  "/api/v1/config/index/unsubscribe/all/{index_code}": {
     /**
      * Unsubscribe Index
-     * @description 取消订阅指数：删除同步任务和数据表
+     * @description 取消整个指数的订阅：删除所有相关同步任务和数据表
      */
-    delete: operations["unsubscribe_index_api_v1_config_index_subscribe__index_code__delete"];
+    delete: operations["unsubscribe_index_api_v1_config_index_unsubscribe_all__index_code__delete"];
   };
   "/api/v1/config/index/preference": {
     /**
@@ -313,6 +306,20 @@ export interface paths {
      * @description 保存用户的同步偏好配置
      */
     post: operations["save_user_preference_api_v1_config_index_preference_post"];
+  };
+  "/api/v1/config/index/subscription-status": {
+    /**
+     * Get Subscription Status
+     * @description 获取所有已订阅指数的详细状态
+     */
+    get: operations["get_subscription_status_api_v1_config_index_subscription_status_get"];
+  };
+  "/api/v1/config/index/recreate-task": {
+    /**
+     * Recreate Task
+     * @description 重新创建单个失败的任务
+     */
+    post: operations["recreate_task_api_v1_config_index_recreate_task_post"];
   };
   "/api/v1/config/index-pool/list": {
     /**
@@ -380,111 +387,57 @@ export interface paths {
     get: operations["get_config_types_api_v1_config_types_get"];
   };
   "/api/v1/tasks/running": {
-    /**
-     * Get Running Tasks
-     * @description 获取所有正在运行的任务（查询 PostgreSQL task_runs 表）
-     */
+    /** Get Running Tasks */
     get: operations["get_running_tasks_api_v1_tasks_running_get"];
   };
   "/api/v1/tasks/history": {
-    /**
-     * Get Task History
-     * @description 获取最近完成/失败的任务历史（查询 PostgreSQL task_runs 表）
-     */
+    /** Get Task History */
     get: operations["get_task_history_api_v1_tasks_history_get"];
   };
   "/api/v1/tasks/cleanup": {
-    /**
-     * Cleanup Stale Tasks
-     * @description 清理僵尸任务（将长时间 running 的记录标记为 failed）
-     */
+    /** Cleanup Stale Tasks */
     post: operations["cleanup_stale_tasks_api_v1_tasks_cleanup_post"];
   };
+  "/api/v1/tasks/{task_type}/status/{run_id}": {
+    /** Get Task Status */
+    get: operations["get_task_status_api_v1_tasks__task_type__status__run_id__get"];
+  };
   "/api/v1/tasks/etl/test": {
-    /**
-     * Test Etl Script
-     * @description 测试 ETL 脚本，返回执行结果及字段类型
-     */
+    /** Test Etl Script */
     post: operations["test_etl_script_api_v1_tasks_etl_test_post"];
   };
   "/api/v1/tasks/etl/{task_id}/create-table": {
-    /**
-     * Create Etl Table
-     * @description 根据字段定义创建 ETL 目标表
-     */
+    /** Create Etl Table */
     post: operations["create_etl_table_api_v1_tasks_etl__task_id__create_table_post"];
   };
   "/api/v1/tasks/etl/{task_id}/schema": {
-    /**
-     * Get Etl Table Schema
-     * @description 获取 ETL 任务的字段定义
-     */
+    /** Get Etl Table Schema */
     get: operations["get_etl_table_schema_api_v1_tasks_etl__task_id__schema_get"];
   };
-  "/api/v1/tasks/{task_type}/{task_id}/status": {
-    /**
-     * Get Task Data Status
-     * @description 获取任务数据状态（最新数据日期、上次同步时间）
-     */
-    get: operations["get_task_data_status_api_v1_tasks__task_type___task_id__status_get"];
-  };
-  "/api/v1/tasks/{task_type}": {
-    /**
-     * List Tasks
-     * @description 列出所有任务
-     */
-    get: operations["list_tasks_api_v1_tasks__task_type__get"];
-    /**
-     * Create Task
-     * @description 创建新任务
-     */
-    post: operations["create_task_api_v1_tasks__task_type__post"];
-  };
-  "/api/v1/tasks/{task_type}/status/{run_id}": {
-    /**
-     * Get Task Status
-     * @description 查询任务执行状态（查询 PostgreSQL task_runs 表）
-     */
-    get: operations["get_task_status_api_v1_tasks__task_type__status__run_id__get"];
-  };
-  "/api/v1/tasks/{task_type}/{task_id}": {
-    /**
-     * Get Task
-     * @description 获取单个任务
-     */
-    get: operations["get_task_api_v1_tasks__task_type___task_id__get"];
-    /**
-     * Update Task
-     * @description 更新任务
-     */
-    put: operations["update_task_api_v1_tasks__task_type___task_id__put"];
-    /**
-     * Delete Task
-     * @description 删除任务（软删除，设置 enabled=false）
-     */
-    delete: operations["delete_task_api_v1_tasks__task_type___task_id__delete"];
-  };
   "/api/v1/tasks/{task_type}/{task_id}/execute": {
-    /**
-     * Execute Task
-     * @description 执行任务（异步）
-     *
-     * 立即返回 run_id，后台执行任务。使用 /tasks/{task_type}/status/{run_id} 查询状态。
-     */
+    /** Execute Task */
     post: operations["execute_task_api_v1_tasks__task_type___task_id__execute_post"];
   };
+  "/api/v1/tasks/{task_type}": {
+    /** List Tasks */
+    get: operations["list_tasks_api_v1_tasks__task_type__get"];
+    /** Create Task */
+    post: operations["create_task_api_v1_tasks__task_type__post"];
+  };
+  "/api/v1/tasks/{task_type}/{task_id}": {
+    /** Get Task */
+    get: operations["get_task_api_v1_tasks__task_type___task_id__get"];
+    /** Update Task */
+    put: operations["update_task_api_v1_tasks__task_type___task_id__put"];
+    /** Delete Task */
+    delete: operations["delete_task_api_v1_tasks__task_type___task_id__delete"];
+  };
+  "/api/v1/tasks/{task_type}/{task_id}/status": {
+    /** Get Task Data Status */
+    get: operations["get_task_data_status_api_v1_tasks__task_type___task_id__status_get"];
+  };
   "/api/v1/tasks/{task_type}/{task_id}/inspect": {
-    /**
-     * Inspect Task Data
-     * @description 数据探查：检查任务表的数据完整性
-     *
-     * 返回：
-     * - 表的存在性
-     * - 数据日期范围（最早/最晚日期）
-     * - 实际数据天数 vs 预期交易日天数
-     * - 缺失的交易日列表
-     * - 数据覆盖率
-     */
+    /** Inspect Task Data */
     get: operations["inspect_task_data_api_v1_tasks__task_type___task_id__inspect_get"];
   };
 }
@@ -660,11 +613,16 @@ export interface components {
        * @default {}
        */
       extra_config?: string;
+      /**
+       * Used By
+       * @default [
+       *   "factor",
+       *   "backtest"
+       * ]
+       */
+      used_by?: string[];
     };
-    /**
-     * DataInspectionResponse
-     * @description 数据探查响应
-     */
+    /** DataInspectionResponse */
     DataInspectionResponse: {
       /** Table Name */
       table_name: string;
@@ -693,10 +651,7 @@ export interface components {
       /** Message */
       message?: string | null;
     };
-    /**
-     * DeleteResponse
-     * @description 删除响应
-     */
+    /** DeleteResponse */
     DeleteResponse: {
       /** Success */
       success: boolean;
@@ -1125,8 +1080,18 @@ export interface components {
        * @default false
        */
       is_subscribed?: boolean;
-      /** Subscribed Task Id */
-      subscribed_task_id?: string | null;
+      /**
+       * Has Daily
+       * @default false
+       */
+      has_daily?: boolean;
+      /**
+       * Has Weight
+       * @default false
+       */
+      has_weight?: boolean;
+      /** Subscribed Tasks */
+      subscribed_tasks?: string[] | null;
     };
     /**
      * IndexListResponse
@@ -1168,6 +1133,44 @@ export interface components {
       status: string;
       /** Message */
       message: string;
+    };
+    /**
+     * IndexSubscriptionStatus
+     * @description 指数订阅状态
+     */
+    IndexSubscriptionStatus: {
+      /** Index Code */
+      index_code: string;
+      /** Name */
+      name?: string | null;
+      /**
+       * Has Daily
+       * @default false
+       */
+      has_daily?: boolean;
+      /**
+       * Has Weight
+       * @default false
+       */
+      has_weight?: boolean;
+      daily_task?: components["schemas"]["IndexTaskInfo"] | null;
+      weight_task?: components["schemas"]["IndexTaskInfo"] | null;
+    };
+    /**
+     * IndexTaskInfo
+     * @description 指数单个任务信息
+     */
+    IndexTaskInfo: {
+      /** Task Id */
+      task_id: string;
+      /** Task Type */
+      task_type: string;
+      /** Enabled */
+      enabled: boolean;
+      /** Status */
+      status: string;
+      /** Last Sync */
+      last_sync?: string | null;
     };
     /**
      * IndexUnsubscribeResponse
@@ -1232,10 +1235,7 @@ export interface components {
       end_date?: string | null;
       preprocess?: components["schemas"]["PreprocessOptions"] | null;
     };
-    /**
-     * RunningTaskResponse
-     * @description 正在运行的任务响应
-     */
+    /** RunningTaskResponse */
     RunningTaskResponse: {
       /** Tasks */
       tasks: {
@@ -1244,10 +1244,7 @@ export interface components {
       /** Total */
       total: number;
     };
-    /**
-     * TaskCreateRequest
-     * @description 创建任务请求
-     */
+    /** TaskCreateRequest */
     TaskCreateRequest: {
       /**
        * Config Data
@@ -1257,10 +1254,7 @@ export interface components {
         [key: string]: unknown;
       };
     };
-    /**
-     * TaskExecuteRequest
-     * @description 执行任务请求
-     */
+    /** TaskExecuteRequest */
     TaskExecuteRequest: {
       /**
        * Start Date
@@ -1281,19 +1275,16 @@ export interface components {
       };
       /**
        * Flow Run Id
-       * @description 关联的 flow_run_id（调度器传入）
+       * @description 关联的 flow_run_id
        */
       flow_run_id?: number | null;
       /**
        * Run Id
-       * @description 预生成的 run_id（调度器传入，用于合并记录）
+       * @description 预生成的 run_id
        */
       run_id?: string | null;
     };
-    /**
-     * TaskExecuteResponse
-     * @description 任务执行响应
-     */
+    /** TaskExecuteResponse */
     TaskExecuteResponse: {
       /** Status */
       status: string;
@@ -1308,10 +1299,7 @@ export interface components {
         [key: string]: unknown;
       } | null;
     };
-    /**
-     * TaskHistoryResponse
-     * @description 历史任务响应
-     */
+    /** TaskHistoryResponse */
     TaskHistoryResponse: {
       /** Tasks */
       tasks: {
@@ -1346,10 +1334,7 @@ export interface components {
        */
       flow_name?: string | null;
     };
-    /**
-     * TaskListResponse
-     * @description 任务列表响应
-     */
+    /** TaskListResponse */
     TaskListResponse: {
       /** Tasks */
       tasks: {
@@ -1360,10 +1345,7 @@ export interface components {
       /** Task Type */
       task_type: string;
     };
-    /**
-     * TaskResponse
-     * @description 单个任务响应
-     */
+    /** TaskResponse */
     TaskResponse: {
       /** Task */
       task: {
@@ -1372,10 +1354,7 @@ export interface components {
       /** Task Type */
       task_type: string;
     };
-    /**
-     * TaskUpdateRequest
-     * @description 更新任务请求
-     */
+    /** TaskUpdateRequest */
     TaskUpdateRequest: {
       /**
        * Config Data
@@ -2277,10 +2256,10 @@ export interface operations {
     };
   };
   /**
-   * Get Field Mappings
-   * @description 获取所有字段映射配置（PostgreSQL factor_field_mappings）
+   * Get Data Mappings
+   * @description 获取所有数据字段映射配置（PostgreSQL data_field_mappings）
    */
-  get_field_mappings_api_v1_config_field_mappings_get: {
+  get_data_mappings_api_v1_config_data_mappings_get: {
     responses: {
       /** @description Successful Response */
       200: {
@@ -2291,10 +2270,10 @@ export interface operations {
     };
   };
   /**
-   * Update Field Mappings
-   * @description 批量更新字段映射配置（PostgreSQL factor_field_mappings）
+   * Update Data Mappings
+   * @description 批量更新数据字段映射配置（PostgreSQL data_field_mappings）
    */
-  update_field_mappings_api_v1_config_field_mappings_put: {
+  update_data_mappings_api_v1_config_data_mappings_put: {
     requestBody: {
       content: {
         "application/json": components["schemas"]["DataConfigUpdateRequest"];
@@ -2316,49 +2295,10 @@ export interface operations {
     };
   };
   /**
-   * Get Resolved Field Mappings
-   * @description 返回简化的 field_key → source_label 字典，供前端注解显示
+   * Get Resolved Data Mappings
+   * @description 返回简化的 field_key -> source_label 字典，供前端注解显示
    */
-  get_resolved_field_mappings_api_v1_config_field_mappings_resolved_get: {
-    responses: {
-      /** @description Successful Response */
-      200: {
-        content: {
-          "application/json": unknown;
-        };
-      };
-    };
-  };
-  /**
-   * Get Table Columns
-   * @description 获取指定 DolphinDB 表的列名列表
-   */
-  get_table_columns_api_v1_config_table_columns__table_name__get: {
-    parameters: {
-      path: {
-        table_name: string;
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        content: {
-          "application/json": unknown;
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  /**
-   * Get Available Tables
-   * @description 获取所有可用的数据表（sync/etl/factor，均从 PostgreSQL 查询）
-   */
-  get_available_tables_api_v1_config_available_tables_get: {
+  get_resolved_data_mappings_api_v1_config_data_mappings_resolved_get: {
     responses: {
       /** @description Successful Response */
       200: {
@@ -2404,7 +2344,7 @@ export interface operations {
   };
   /**
    * Subscribe Index
-   * @description 订阅指数：创建同步任务并建表
+   * @description 订阅指数：同时创建日线行情和成分股两个同步任务并建表
    */
   subscribe_index_api_v1_config_index_subscribe_post: {
     requestBody: {
@@ -2416,7 +2356,32 @@ export interface operations {
       /** @description Successful Response */
       200: {
         content: {
-          "application/json": components["schemas"]["IndexSubscribeResponse"];
+          "application/json": components["schemas"]["IndexSubscribeResponse"][];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Unsubscribe Task
+   * @description 取消单个任务的订阅：删除同步任务和数据表
+   */
+  unsubscribe_task_api_v1_config_index_unsubscribe_task__task_id__delete: {
+    parameters: {
+      path: {
+        task_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["IndexUnsubscribeResponse"];
         };
       };
       /** @description Validation Error */
@@ -2429,9 +2394,9 @@ export interface operations {
   };
   /**
    * Unsubscribe Index
-   * @description 取消订阅指数：删除同步任务和数据表
+   * @description 取消整个指数的订阅：删除所有相关同步任务和数据表
    */
-  unsubscribe_index_api_v1_config_index_subscribe__index_code__delete: {
+  unsubscribe_index_api_v1_config_index_unsubscribe_all__index_code__delete: {
     parameters: {
       path: {
         index_code: string;
@@ -2481,6 +2446,45 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["UserSyncPreferenceResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /**
+   * Get Subscription Status
+   * @description 获取所有已订阅指数的详细状态
+   */
+  get_subscription_status_api_v1_config_index_subscription_status_get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["IndexSubscriptionStatus"][];
+        };
+      };
+    };
+  };
+  /**
+   * Recreate Task
+   * @description 重新创建单个失败的任务
+   */
+  recreate_task_api_v1_config_index_recreate_task_post: {
+    parameters: {
+      query: {
+        task_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
         };
       };
       /** @description Validation Error */
@@ -2626,16 +2630,11 @@ export interface operations {
       };
     };
   };
-  /**
-   * Get Running Tasks
-   * @description 获取所有正在运行的任务（查询 PostgreSQL task_runs 表）
-   */
+  /** Get Running Tasks */
   get_running_tasks_api_v1_tasks_running_get: {
     parameters: {
       query?: {
-        /** @description 按任务类型过滤 (sync/etl/factor) */
         task_type?: string | null;
-        /** @description 按任务ID过滤 */
         task_id?: string | null;
       };
     };
@@ -2654,21 +2653,14 @@ export interface operations {
       };
     };
   };
-  /**
-   * Get Task History
-   * @description 获取最近完成/失败的任务历史（查询 PostgreSQL task_runs 表）
-   */
+  /** Get Task History */
   get_task_history_api_v1_tasks_history_get: {
     parameters: {
       query?: {
         limit?: number;
-        /** @description 按任务类型过滤 (sync/etl/factor) */
         task_type?: string | null;
-        /** @description 按任务ID过滤 */
         task_id?: string | null;
-        /** @description 开始日期 (YYYYMMDD)，按 started_at 过滤 */
         start_date?: string | null;
-        /** @description 结束日期 (YYYYMMDD)，按 started_at 过滤 */
         end_date?: string | null;
       };
     };
@@ -2687,14 +2679,10 @@ export interface operations {
       };
     };
   };
-  /**
-   * Cleanup Stale Tasks
-   * @description 清理僵尸任务（将长时间 running 的记录标记为 failed）
-   */
+  /** Cleanup Stale Tasks */
   cleanup_stale_tasks_api_v1_tasks_cleanup_post: {
     parameters: {
       query?: {
-        /** @description 超时分钟数，0=清理所有running */
         timeout_minutes?: number;
       };
     };
@@ -2713,10 +2701,30 @@ export interface operations {
       };
     };
   };
-  /**
-   * Test Etl Script
-   * @description 测试 ETL 脚本，返回执行结果及字段类型
-   */
+  /** Get Task Status */
+  get_task_status_api_v1_tasks__task_type__status__run_id__get: {
+    parameters: {
+      path: {
+        task_type: string;
+        run_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Test Etl Script */
   test_etl_script_api_v1_tasks_etl_test_post: {
     requestBody: {
       content: {
@@ -2740,14 +2748,10 @@ export interface operations {
       };
     };
   };
-  /**
-   * Create Etl Table
-   * @description 根据字段定义创建 ETL 目标表
-   */
+  /** Create Etl Table */
   create_etl_table_api_v1_tasks_etl__task_id__create_table_post: {
     parameters: {
       path: {
-        /** @description 任务ID */
         task_id: string;
       };
     };
@@ -2773,14 +2777,10 @@ export interface operations {
       };
     };
   };
-  /**
-   * Get Etl Table Schema
-   * @description 获取 ETL 任务的字段定义
-   */
+  /** Get Etl Table Schema */
   get_etl_table_schema_api_v1_tasks_etl__task_id__schema_get: {
     parameters: {
       path: {
-        /** @description 任务ID */
         task_id: string;
       };
     };
@@ -2799,228 +2799,11 @@ export interface operations {
       };
     };
   };
-  /**
-   * Get Task Data Status
-   * @description 获取任务数据状态（最新数据日期、上次同步时间）
-   */
-  get_task_data_status_api_v1_tasks__task_type___task_id__status_get: {
-    parameters: {
-      path: {
-        /** @description 任务类型: sync, etl */
-        task_type: string;
-        /** @description 任务ID */
-        task_id: string;
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        content: {
-          "application/json": unknown;
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  /**
-   * List Tasks
-   * @description 列出所有任务
-   */
-  list_tasks_api_v1_tasks__task_type__get: {
-    parameters: {
-      query?: {
-        /** @description 是否只返回启用的任务 */
-        enabled_only?: boolean;
-      };
-      path: {
-        /** @description 任务类型: sync, etl, factor */
-        task_type: string;
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        content: {
-          "application/json": components["schemas"]["TaskListResponse"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  /**
-   * Create Task
-   * @description 创建新任务
-   */
-  create_task_api_v1_tasks__task_type__post: {
-    parameters: {
-      path: {
-        /** @description 任务类型: sync, etl, factor */
-        task_type: string;
-      };
-    };
-    requestBody?: {
-      content: {
-        "application/json": components["schemas"]["TaskCreateRequest"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        content: {
-          "application/json": components["schemas"]["TaskResponse"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  /**
-   * Get Task Status
-   * @description 查询任务执行状态（查询 PostgreSQL task_runs 表）
-   */
-  get_task_status_api_v1_tasks__task_type__status__run_id__get: {
-    parameters: {
-      path: {
-        /** @description 任务类型: sync, etl, factor */
-        task_type: string;
-        /** @description 运行ID */
-        run_id: string;
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        content: {
-          "application/json": unknown;
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  /**
-   * Get Task
-   * @description 获取单个任务
-   */
-  get_task_api_v1_tasks__task_type___task_id__get: {
-    parameters: {
-      path: {
-        /** @description 任务类型: sync, etl, factor */
-        task_type: string;
-        /** @description 任务ID */
-        task_id: string;
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        content: {
-          "application/json": components["schemas"]["TaskResponse"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  /**
-   * Update Task
-   * @description 更新任务
-   */
-  update_task_api_v1_tasks__task_type___task_id__put: {
-    parameters: {
-      path: {
-        /** @description 任务类型: sync, etl, factor */
-        task_type: string;
-        /** @description 任务ID */
-        task_id: string;
-      };
-    };
-    requestBody?: {
-      content: {
-        "application/json": components["schemas"]["TaskUpdateRequest"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        content: {
-          "application/json": components["schemas"]["TaskResponse"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  /**
-   * Delete Task
-   * @description 删除任务（软删除，设置 enabled=false）
-   */
-  delete_task_api_v1_tasks__task_type___task_id__delete: {
-    parameters: {
-      query?: {
-        /** @description 是否删除关联表 */
-        drop_table?: boolean;
-      };
-      path: {
-        /** @description 任务类型: sync, etl, factor */
-        task_type: string;
-        /** @description 任务ID */
-        task_id: string;
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        content: {
-          "application/json": components["schemas"]["DeleteResponse"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  /**
-   * Execute Task
-   * @description 执行任务（异步）
-   *
-   * 立即返回 run_id，后台执行任务。使用 /tasks/{task_type}/status/{run_id} 查询状态。
-   */
+  /** Execute Task */
   execute_task_api_v1_tasks__task_type___task_id__execute_post: {
     parameters: {
       path: {
-        /** @description 任务类型: sync, etl, factor */
         task_type: string;
-        /** @description 任务ID */
         task_id: string;
       };
     };
@@ -3044,23 +2827,163 @@ export interface operations {
       };
     };
   };
-  /**
-   * Inspect Task Data
-   * @description 数据探查：检查任务表的数据完整性
-   *
-   * 返回：
-   * - 表的存在性
-   * - 数据日期范围（最早/最晚日期）
-   * - 实际数据天数 vs 预期交易日天数
-   * - 缺失的交易日列表
-   * - 数据覆盖率
-   */
+  /** List Tasks */
+  list_tasks_api_v1_tasks__task_type__get: {
+    parameters: {
+      query?: {
+        enabled_only?: boolean;
+      };
+      path: {
+        task_type: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["TaskListResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Create Task */
+  create_task_api_v1_tasks__task_type__post: {
+    parameters: {
+      path: {
+        task_type: string;
+      };
+    };
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["TaskCreateRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["TaskResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Get Task */
+  get_task_api_v1_tasks__task_type___task_id__get: {
+    parameters: {
+      path: {
+        task_type: string;
+        task_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["TaskResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Update Task */
+  update_task_api_v1_tasks__task_type___task_id__put: {
+    parameters: {
+      path: {
+        task_type: string;
+        task_id: string;
+      };
+    };
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["TaskUpdateRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["TaskResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Delete Task */
+  delete_task_api_v1_tasks__task_type___task_id__delete: {
+    parameters: {
+      query?: {
+        drop_table?: boolean;
+      };
+      path: {
+        task_type: string;
+        task_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["DeleteResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Get Task Data Status */
+  get_task_data_status_api_v1_tasks__task_type___task_id__status_get: {
+    parameters: {
+      path: {
+        task_type: string;
+        task_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  /** Inspect Task Data */
   inspect_task_data_api_v1_tasks__task_type___task_id__inspect_get: {
     parameters: {
       path: {
-        /** @description 任务类型 (sync/etl/factor) */
         task_type: string;
-        /** @description 任务 ID */
         task_id: string;
       };
     };

@@ -11,7 +11,7 @@ import { BaseTaskDrawer } from '../../components/TaskDrawer/BaseTaskDrawer';
 import {
   EditOutlined, SaveOutlined, CodeOutlined, DatabaseOutlined, SearchOutlined, BarChartOutlined,
 } from '@ant-design/icons';
-import { notify } from '../../utils/notify';
+import { notify, extractApiError } from '../../utils/notify';
 import { useTaskLogs } from '../../hooks/useTaskLogs';
 import Editor from '@monaco-editor/react';
 import { productionApi, DEFAULT_PREPROCESS } from '../../api';
@@ -184,7 +184,7 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
       notify.success('保存成功');
       onSaved();
     } catch (e: any) {
-      const errorMessage = e.response?.data?.detail || '保存失败';
+      const errorMessage = extractApiError(e.response?.data?.detail, '保存失败');
       console.error('Failed to save factor:', e);
       notify.error(errorMessage);
     }
@@ -200,7 +200,7 @@ const FactorDrawer: React.FC<FactorDrawerProps> = ({ factor, open, initialTab, o
       notify.success('代码已保存');
       setCodeChanged(false);
     } catch (e: any) {
-      const errorMessage = e.response?.data?.detail || '保存失败';
+      const errorMessage = extractApiError(e.response?.data?.detail, '保存失败');
       console.error('Failed to save code:', e);
       notify.error(errorMessage);
     }

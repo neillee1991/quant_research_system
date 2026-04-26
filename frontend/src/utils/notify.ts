@@ -35,6 +35,16 @@ const open = (type: 'success' | 'error' | 'info' | 'warning', content: string, d
   });
 };
 
+// 处理 pydantic v2 校验错误数组或普通字符串
+export const extractApiError = (detail: unknown, fallback = '操作失败'): string => {
+  if (!detail) return fallback;
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    return detail.map((e: any) => e?.msg ?? JSON.stringify(e)).join('; ');
+  }
+  return fallback;
+};
+
 export const notify = {
   success: (content: string) => open('success', content, 1.5),
   error:   (content: string) => open('error',   content, 3),

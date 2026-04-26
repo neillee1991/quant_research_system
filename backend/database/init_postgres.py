@@ -18,7 +18,7 @@ CREATE_TABLES_SQL = Path(__file__).parent / "create_tables.sql"
 TABLES = [
     "flow_configs", "flow_runs", "task_runs",
     "sync_task_configs", "etl_task_configs",
-    "factor_configs", "factor_field_mappings",
+    "factor_configs", "data_field_mappings",
     "index_configs", "user_preferences",
     "factor_analysis_results", "schema_migrations",
 ]

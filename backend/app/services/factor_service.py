@@ -144,9 +144,6 @@ class FactorComputeService:
             rows = context.get_state("saved_rows") or (len(result_df) if result_df is not None else 0)
             quality_metrics = context.get_state("quality_metrics")
 
-            if save_results and rows > 0:
-                self._update_metadata(factor_id, definition, calc_end, rows)
-
             logger.info(f"Factor {factor_id} completed: {rows} rows in {elapsed:.1f}s")
             return ComputeResult(
                 success=True, factor_id=factor_id, rows=rows,
@@ -287,7 +284,7 @@ class FactorComputeService:
             "status": "running",
             "started_at": datetime.now().strftime("%Y%m%d %H:%M:%S")
         }
-        self.db.upsert("production_task_run", record, ["run_id"])
+        self.db.upsert("production_task_run", pl.DataFrame([record]), ["run_id"])
         return run_id
 
     def _finish_run_record(self, run_id: str, status: str, rows: int, started_at: datetime, error_message: Optional[str] = None):
@@ -302,7 +299,7 @@ class FactorComputeService:
         }
         if error_message:
             record["error_message"] = error_message
-        self.db.upsert("production_task_run", record, ["run_id"])
+        self.db.upsert("production_task_run", pl.DataFrame([record]), ["run_id"])
         logger.info(f"Run {run_id} completed with {rows} rows in {duration:.1f} seconds")
 
     def _update_metadata(self, factor_id: str, definition: FactorDefinition, last_date: str, rows: int):
@@ -313,4 +310,4 @@ class FactorComputeService:
             "rows": rows,
             "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
-        self.db.upsert("factor_configs", record, ["factor_id"])
+        self.db.upsert("factor_configs", pl.DataFrame([record]), ["factor_id"])

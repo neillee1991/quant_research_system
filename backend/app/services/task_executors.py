@@ -3,6 +3,7 @@
 从 API 层分离，供 execute.py 端点和 scheduler/submitter 共同调用
 """
 from typing import Optional
+import polars as pl
 
 from app.core.logger import logger
 from app.services.task_runner import tracked_task
@@ -118,7 +119,15 @@ async def execute_etl_task(task_id: str, start_date: Optional[str], end_date: Op
 
 
 @tracked_task("factor", task_id_kwarg="task_id")
-async def execute_factor_task(task_id: str, start_date: Optional[str], end_date: Optional[str], run_id: str):
+async def execute_factor_task(
+    task_id: str,
+    start_date: Optional[str],
+    end_date: Optional[str],
+    run_id: str,
+    target_date: Optional[str] = None,
+    mode: Optional[str] = None,
+    preprocess: Optional[dict] = None,
+):
     import asyncio
     from app.services.factor_service import FactorComputeService
     from infrastructure.database.dolphindb_client import db_client
@@ -128,19 +137,26 @@ async def execute_factor_task(task_id: str, start_date: Optional[str], end_date:
     discover_factors(db_client=db_client)
     definition = get_factor(task_id)
 
-    preprocess_options = None
-    if definition and definition.params:
-        preprocess_options = definition.params.get("preprocess")
+    # preprocess 优先用调用方传入的，其次从 definition.params 取
+    if preprocess is None and definition and definition.params:
+        preprocess = definition.params.get("preprocess")
+
+    # mode 优先用调用方传入的，其次根据 start_date 推断
+    resolved_mode = mode or ("full" if start_date else "incremental")
 
     compute_result = await asyncio.get_event_loop().run_in_executor(
         None, lambda: service.compute_factor(
             factor_id=task_id,
+            target_date=target_date,
             start_date=start_date,
             end_date=end_date,
-            mode="full" if start_date else "incremental",
-            preprocess=preprocess_options,
+            mode=resolved_mode,
+            preprocess=preprocess,
+            run_id=run_id,
         )
     )
     rows = getattr(compute_result, "rows", 0)
+    if not getattr(compute_result, "success", True):
+        raise RuntimeError(getattr(compute_result, "message", f"Factor {task_id} failed"))
     logger.info(f"Factor task {task_id} completed: run_id={run_id}, rows={rows}")
     return {"rows": rows, "extra": {"start_date": start_date, "end_date": end_date}}

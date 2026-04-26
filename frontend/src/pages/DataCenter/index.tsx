@@ -142,16 +142,21 @@ const DataCenter: React.FC = () => {
 
 
   // ========== 初始化加载 ==========
+  const syncLoadTasksRef = useRef(syncTasksHook.loadTasks);
+  const etlLoadTasksRef = useRef(etlTasksHook.loadTasks);
+  syncLoadTasksRef.current = syncTasksHook.loadTasks;
+  etlLoadTasksRef.current = etlTasksHook.loadTasks;
+
   const loadInitialData = useCallback(async () => {
     try {
       await Promise.all([
-        syncTasksHook.loadTasks(),
-        etlTasksHook.loadTasks(),
+        syncLoadTasksRef.current(),
+        etlLoadTasksRef.current(),
       ]);
     } catch (error) {
       console.error('Failed to load initial data:', error);
     }
-  }, [syncTasksHook.loadTasks, etlTasksHook.loadTasks, message]);
+  }, []);
 
   useEffect(() => {
     loadInitialData();

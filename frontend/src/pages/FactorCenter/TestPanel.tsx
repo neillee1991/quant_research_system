@@ -1,4 +1,4 @@
-import { notify } from '../../utils/notify';
+import { notify, extractApiError } from '../../utils/notify';
 /**
  * 因子代码测试面板
  */
@@ -74,7 +74,7 @@ const TestPanel: React.FC<TestPanelProps> = ({ code, dependsOn, preprocess, look
       }
     } catch (e) {
       const error = e as { response?: { data?: { detail?: string } }; message?: string };
-      setTestError(error.response?.data?.detail || error.message || '测试请求失败');
+      setTestError(extractApiError(error.response?.data?.detail, error.message || '测试请求失败'));
     } finally {
       setTesting(false);
     }

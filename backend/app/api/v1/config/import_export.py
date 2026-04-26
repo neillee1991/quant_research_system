@@ -122,6 +122,6 @@ def get_config_types() -> List[Dict[str, str]]:
         {"value": ConfigType.SYNC_TASKS.value, "label": "同步任务配置"},
         {"value": ConfigType.ETL_TASKS.value, "label": "ETL任务配置"},
         {"value": ConfigType.FACTOR_CONFIGS.value, "label": "因子配置"},
-        {"value": ConfigType.FACTOR_FIELD_MAPPINGS.value, "label": "因子字段映射配置"},
+        {"value": ConfigType.DATA_FIELD_MAPPINGS.value, "label": "数据字段映射配置"},
         {"value": ConfigType.FLOW_CONFIGS.value, "label": "调度Flow配置"},
     ]

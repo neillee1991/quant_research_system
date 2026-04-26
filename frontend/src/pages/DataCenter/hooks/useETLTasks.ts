@@ -2,7 +2,7 @@
  * ETL 任务管理 Hook
  */
 import { useState, useCallback } from 'react';
-import { notify } from '../../../utils/notify';
+import { notify, extractApiError } from '../../../utils/notify';
 import { dataApi } from '../../../api';
 import { useTaskLogs } from '../../../hooks/useTaskLogs';
 import type { ETLTask, ETLTestResult, ETLFieldDefinition } from '../../../types';
@@ -55,7 +55,7 @@ export const useETLTasks = () => {
       notify.success(`测试成功，返回 ${result.row_count} 行数据`);
       return result;
     } catch (error: any) {
-      const errorMsg = error.response?.data?.detail || '脚本测试失败';
+      const errorMsg = extractApiError(error.response?.data?.detail, '脚本测试失败');
       notify.error(errorMsg);
       return {
         success: false,
@@ -74,7 +74,7 @@ export const useETLTasks = () => {
       await loadEtlTasks();
       return true;
     } catch (error: any) {
-      notify.error(`创建任务失败: ${error.response?.data?.detail || error.message}`);
+      notify.error(`创建任务失败: ${extractApiError(error.response?.data?.detail, error.message)}`);
       return false;
     }
   }, [loadEtlTasks]);
@@ -86,7 +86,7 @@ export const useETLTasks = () => {
       await loadEtlTasks();
       return true;
     } catch (error: any) {
-      notify.error(`更新任务失败: ${error.response?.data?.detail || error.message}`);
+      notify.error(`更新任务失败: ${extractApiError(error.response?.data?.detail, error.message)}`);
       return false;
     }
   }, [loadEtlTasks]);
@@ -97,7 +97,7 @@ export const useETLTasks = () => {
       notify.success(`ETL 任务 ${taskId} 已删除`);
       await loadEtlTasks();
     } catch (error: any) {
-      notify.error(`删除任务失败: ${error.response?.data?.detail || error.message}`);
+      notify.error(`删除任务失败: ${extractApiError(error.response?.data?.detail, error.message)}`);
       throw error;
     }
   }, [loadEtlTasks]);
@@ -128,7 +128,7 @@ export const useETLTasks = () => {
       }, 2000);
       return true;
     } catch (error: any) {
-      notify.error(`回溯失败: ${error.response?.data?.detail || error.message}`);
+      notify.error(`回溯失败: ${extractApiError(error.response?.data?.detail, error.message)}`);
       return false;
     } finally {
       setRunningEtlTasks((prev) => {
@@ -169,7 +169,7 @@ export const useETLTasks = () => {
         await dataApi.runEtlTask(taskId);
         notify.success(`全量任务 ${taskId} 回溯成功`);
       } catch (error: any) {
-        notify.error(`任务 ${taskId} 回溯失败: ${error.response?.data?.detail || error.message}`);
+        notify.error(`任务 ${taskId} 回溯失败: ${extractApiError(error.response?.data?.detail, error.message)}`);
       }
     }
 
@@ -179,7 +179,7 @@ export const useETLTasks = () => {
         await dataApi.runEtlTask(taskId, startDate, endDate);
         notify.success(`增量任务 ${taskId} 回溯成功`);
       } catch (error: any) {
-        notify.error(`任务 ${taskId} 回溯失败: ${error.response?.data?.detail || error.message}`);
+        notify.error(`任务 ${taskId} 回溯失败: ${extractApiError(error.response?.data?.detail, error.message)}`);
       }
     }
 
@@ -209,8 +209,9 @@ export const useETLTasks = () => {
       notify.success(`目标表 ${tableName} 已创建`);
       return true;
     } catch (error: any) {
-      if (!error.response?.data?.detail?.includes('已存在')) {
-        notify.warning(error.response?.data?.detail || '建表失败');
+      const errMsg = extractApiError(error.response?.data?.detail, '建表失败');
+      if (!errMsg.includes('已存在')) {
+        notify.warning(errMsg);
       }
       return false;
     }

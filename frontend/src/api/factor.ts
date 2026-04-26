@@ -32,9 +32,9 @@ export const productionApi = {
     api.get(`/factor/factors/${factorId}/data`, { params }),
   getFactorStats: (factorId: string) => api.get(`/factor/factors/${factorId}/stats`),
 
-  getDataConfig: () => api.get('/config/field-mappings'),
-  updateDataConfig: (mappings: any[]) => api.put('/config/field-mappings', { mappings }),
-  getResolvedDataConfig: () => api.get('/config/field-mappings/resolved'),
+  getDataConfig: () => api.get('/config/data-mappings'),
+  updateDataConfig: (mappings: any[]) => api.put('/config/data-mappings', { mappings }),
+  getResolvedDataConfig: () => api.get('/config/data-mappings/resolved'),
   getAvailableTables: () => api.get('/config/available-tables'),
   getTableColumns: (tableName: string) => api.get(`/config/table-columns/${tableName}`),
 

@@ -3,3 +3,4 @@
  */
 export { TaskTable } from './TaskTable';
 export { TaskPanel } from './TaskPanelContainer';
+export { GroupedTaskTable } from './GroupedTaskTable';

@@ -13,10 +13,11 @@ from typing import Optional, List, Dict, Any
 import polars as pl
 
 from infrastructure.database.dolphindb_client import db_client
-from app.services.factor_service import FactorComputeService, DEFAULT_PREPROCESS as _DEFAULT_PREPROCESS
+from app.services.factor_service import DEFAULT_PREPROCESS as _DEFAULT_PREPROCESS
+from app.services.task_executors import execute_factor_task as _execute_factor_task
 from engine.factor.registry import FactorDefinition, StorageConfig
 from app.core.logger import logger
-from app.core.sandbox import check_security, SandboxSecurityError, SAFE_GLOBALS
+from app.core.sandbox import check_security, SandboxSecurityError, SAFE_GLOBALS, DANGEROUS_MODULES
 from app.core.utils import (
     DateUtils,
     safe_json_parse,
@@ -24,10 +25,9 @@ from app.core.utils import (
     safe_str_datetime,
     normalize_trade_date_pl,
 )
-from app.services.task_runner import TaskRunner, tracked_task
+from app.services.task_runner import TaskRunner
 
 router = APIRouter()
-factor_service = FactorComputeService(db_client)
 
 # ==================== Pydantic Models ====================
 
@@ -68,69 +68,31 @@ class FactorTestRequest(BaseModel):
 
 # ==================== API Endpoints ====================
 
-@tracked_task("factor", task_id_kwarg="factor_id")
-async def _run_factor_background(
-    factor_id: str,
-    mode: str,
-    target_date: Optional[str],
-    start_date: Optional[str],
-    end_date: Optional[str],
-    preprocess: Optional[Dict],
-    run_id: str
-):
-    """后台执行因子计算"""
-    result = factor_service.compute_factor(
-        factor_id=factor_id,
-        mode=mode,
-        target_date=target_date,
-        start_date=start_date,
-        end_date=end_date,
-        preprocess=preprocess,
-        run_id=run_id,
-    )
-    logger.info(f"Factor {factor_id} computation completed: run_id={run_id}, success={result.success}, rows={result.rows}")
-    return result
-
 @router.post("/factor/run")
 async def run_production(
     req: ProductionRunRequest,
     background_tasks: BackgroundTasks,
 ):
-    """运行生产任务（异步）
-
-    立即返回 run_id，后台执行计算。使用 /production/status/{run_id} 查询状态。
-    """
     try:
-        import polars as pl
-        # 生成 run_id
         run_id = str(uuid.uuid4())
-
-        # 写入统一任务表
         await TaskRunner.start(run_id, "factor", req.factor_id, f"因子计算: {req.factor_id}",
                                params=json.dumps({"mode": req.mode, "start_date": req.start_date, "end_date": req.end_date}))
 
         preprocess = req.preprocess.model_dump() if req.preprocess else None
-
-        # 添加后台任务
         background_tasks.add_task(
-            _run_factor_background,
-            factor_id=req.factor_id,
-            mode=req.mode,
-            target_date=req.target_date,
+            _execute_factor_task,
+            task_id=req.factor_id,
             start_date=req.start_date,
             end_date=req.end_date,
+            run_id=run_id,
+            target_date=req.target_date,
+            mode=req.mode,
             preprocess=preprocess,
-            run_id=run_id
         )
-
         return {
             "status": "success",
-            "data": {
-                "run_id": run_id,
-                "factor_id": req.factor_id,
-                "status": "running",
-                "message": "Factor computation started in background"
-            }
+            "data": {"run_id": run_id, "factor_id": req.factor_id, "status": "running",
+                     "message": "Factor computation started in background"}
         }
     except Exception as e:
         logger.error(f"Failed to start factor computation: {e}")
@@ -160,14 +122,14 @@ async def batch_run_production(
 
             # 每个因子独立后台任务
             background_tasks.add_task(
-                _run_factor_background,
-                factor_id=fid,
-                mode=req.mode,
-                target_date=None,
+                _execute_factor_task,
+                task_id=fid,
                 start_date=req.start_date,
                 end_date=req.end_date,
+                run_id=run_id,
+                target_date=None,
+                mode=req.mode,
                 preprocess=preprocess,
-                run_id=run_id
             )
 
         return {
@@ -248,8 +210,13 @@ async def test_factor_code(
     mock_registry = types.ModuleType("engine.factor.registry")
     mock_registry.factor = mock_factor_decorator
 
+    def _safe_import(name, *args, **kwargs):
+        if name in DANGEROUS_MODULES or any(d in name for d in DANGEROUS_MODULES):
+            raise ImportError(f"禁止导入模块: {name}")
+        return __import__(name, *args, **kwargs)
+
     namespace = {
-        "__builtins__": SAFE_GLOBALS["__builtins__"],
+        "__builtins__": {**SAFE_GLOBALS["__builtins__"], "__import__": _safe_import},
         "pl": pl,
         "polars": pl,
         "print": lambda *a, **kw: stdout_capture.write(" ".join(str(x) for x in a) + kw.get("end", "\n")),
@@ -351,7 +318,6 @@ async def test_factor_code(
     # 5. 生成预览和统计
     log("stats", "生成统计信息...")
     try:
-        import polars as pl
         if "factor_value" not in result.columns:
             return make_error("stats", "结果缺少 'factor_value' 列")
 

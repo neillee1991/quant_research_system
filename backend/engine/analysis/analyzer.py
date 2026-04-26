@@ -129,9 +129,19 @@ class FactorAnalyzer:
         end_dt = datetime.strptime(max_date, "%Y%m%d") + timedelta(days=extra_days)
         load_end = end_dt.strftime("%Y%m%d")
 
+        # 从配置读取 OHLCV 字段映射
+        price_field_keys = ["open", "high", "low", "close", "volume"]
+        field_configs = self.data_config_loader.load_price_fields(price_field_keys)
+        table = field_configs["open"].get("table_name") or "sync_daily_data"
+        select_cols = ", ".join(
+            f"{cfg['column_name']} AS {fk}"
+            for fk, cfg in field_configs.items()
+            if cfg.get("column_name")
+        )
+
         sql = f"""
-            SELECT ts_code, trade_date, open, high, low, close
-            FROM sync_daily_data
+            SELECT ts_code, trade_date, {select_cols}
+            FROM {table}
             WHERE trade_date >= temporalParse('{min_date}','yyyyMMdd')
               AND trade_date <= temporalParse('{load_end}','yyyyMMdd')
             ORDER BY ts_code, trade_date

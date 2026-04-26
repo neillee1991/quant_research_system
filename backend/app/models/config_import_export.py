@@ -8,7 +8,7 @@ class ConfigType(str, Enum):
     SYNC_TASKS = "sync_tasks"
     ETL_TASKS = "etl_tasks"
     FACTOR_CONFIGS = "factor_configs"
-    FACTOR_FIELD_MAPPINGS = "factor_field_mappings"
+    DATA_FIELD_MAPPINGS = "data_field_mappings"
     FLOW_CONFIGS = "flow_configs"
 
 

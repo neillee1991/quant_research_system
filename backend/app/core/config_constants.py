@@ -9,7 +9,7 @@ CONFIG_TYPE_TABLE_MAP: Dict[ConfigType, str] = {
     ConfigType.SYNC_TASKS: "sync_task_configs",
     ConfigType.ETL_TASKS: "etl_task_configs",
     ConfigType.FACTOR_CONFIGS: "factor_configs",
-    ConfigType.FACTOR_FIELD_MAPPINGS: "factor_field_mappings",
+    ConfigType.DATA_FIELD_MAPPINGS: "data_field_mappings",
     ConfigType.FLOW_CONFIGS: "flow_configs",
 }
 
@@ -18,7 +18,7 @@ CONFIG_TYPE_ID_FIELD_MAP: Dict[ConfigType, str] = {
     ConfigType.SYNC_TASKS: "task_id",
     ConfigType.ETL_TASKS: "task_id",
     ConfigType.FACTOR_CONFIGS: "factor_id",
-    ConfigType.FACTOR_FIELD_MAPPINGS: "field_key",
+    ConfigType.DATA_FIELD_MAPPINGS: "field_key",
     ConfigType.FLOW_CONFIGS: "name",
 }
 

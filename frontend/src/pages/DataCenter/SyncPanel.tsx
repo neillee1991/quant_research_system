@@ -163,7 +163,14 @@ export const SyncPanel: React.FC<SyncPanelProps> = ({
                 fontSize: '12px',
               }}
             >
-              {String(syncTime).slice(0, 16)}
+              {(() => {
+                const normalized = String(syncTime).replace(' ', 'T');
+                const d = new Date(normalized);
+                return isNaN(d.getTime()) ? String(syncTime).slice(0, 16) : d.toLocaleString('zh-CN', {
+                  year: 'numeric', month: '2-digit', day: '2-digit',
+                  hour: '2-digit', minute: '2-digit', hour12: false,
+                });
+              })()}
             </div>
           </Tooltip>
         );

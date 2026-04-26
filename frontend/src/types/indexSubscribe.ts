@@ -21,7 +21,26 @@ export interface IndexInfo {
   desc?: string;
   exp_date?: string;
   is_subscribed: boolean;
-  subscribed_task_id?: string;
+  has_daily: boolean;
+  has_weight: boolean;
+  subscribed_tasks?: string[];
+}
+
+export interface IndexTaskInfo {
+  task_id: string;
+  task_type: string; // "daily" or "weight"
+  enabled: boolean;
+  status: string;
+  last_sync?: string;
+}
+
+export interface IndexSubscriptionStatus {
+  index_code: string;
+  name?: string;
+  has_daily: boolean;
+  has_weight: boolean;
+  daily_task?: IndexTaskInfo;
+  weight_task?: IndexTaskInfo;
 }
 
 // 筛选字段配置类型

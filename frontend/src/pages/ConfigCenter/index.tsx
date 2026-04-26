@@ -1,15 +1,16 @@
 /**
  * 统一配置中心
- * 整合字段映射、指数订阅、导入导出三个配置模块
+ * 整合数据配置、指数订阅、导入导出三个配置模块
+ * 数据配置同时管理因子分析和回测所需的字段映射
  */
 import React, { useState } from 'react';
 import { Tabs } from 'antd';
-import FieldMappingsTab from './FieldMappingsTab';
+import DataMappingsTab from './DataMappingsTab';
 import IndexSubscribeTab from './IndexSubscribeTab';
 import ImportExportTab from './ImportExportTab';
 
 const ConfigCenter: React.FC = () => {
-  const [activeKey, setActiveKey] = useState('field-mappings');
+  const [activeKey, setActiveKey] = useState('data-mappings');
 
   return (
     <div style={{ height: '100%', overflow: 'auto' }}>
@@ -19,9 +20,9 @@ const ConfigCenter: React.FC = () => {
         style={{ padding: '0 24px' }}
         items={[
           {
-            key: 'field-mappings',
-            label: '字段映射',
-            children: <FieldMappingsTab />,
+            key: 'data-mappings',
+            label: '数据配置',
+            children: <DataMappingsTab />,
           },
           {
             key: 'index-subscribe',

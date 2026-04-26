@@ -3,7 +3,7 @@
  * 为所有任务类型提供统一的状态管理和操作接口
  */
 import { useState, useCallback, useMemo } from 'react';
-import { notify } from '../utils/notify';
+import { notify, extractApiError } from '../utils/notify';
 import type { TaskTypeConfig, GenericTaskStatus } from '../config/taskTypes';
 import { useTaskLogs } from './useTaskLogs';
 import { useTaskMonitorStore } from '../store';
@@ -123,7 +123,7 @@ export function useTasks<TTask, TStatus extends GenericTaskStatus, TRunParams ex
       }, 2000);
       return true;
     } catch (error: any) {
-      notify.error(`${config.label} ${taskId} 启动失败: ${error.response?.data?.detail || error.message}`);
+      notify.error(`${config.label} ${taskId} 启动失败: ${extractApiError(error.response?.data?.detail, error.message)}`);
       return false;
     }
   }, [config, loadLogs, loadTaskStatus]);
@@ -157,7 +157,7 @@ export function useTasks<TTask, TStatus extends GenericTaskStatus, TRunParams ex
         await config.api.runTask(taskId, params);
         notify.success(`${config.label} ${taskId} 执行成功`);
       } catch (error: any) {
-        notify.error(`${config.label} ${taskId} 执行失败: ${error.response?.data?.detail || error.message}`);
+        notify.error(`${config.label} ${taskId} 执行失败: ${extractApiError(error.response?.data?.detail, error.message)}`);
       }
     }
 
@@ -167,7 +167,7 @@ export function useTasks<TTask, TStatus extends GenericTaskStatus, TRunParams ex
         await config.api.runTask(taskId, params);
         notify.success(`${config.label} ${taskId} 执行成功`);
       } catch (error: any) {
-        notify.error(`${config.label} ${taskId} 执行失败: ${error.response?.data?.detail || error.message}`);
+        notify.error(`${config.label} ${taskId} 执行失败: ${extractApiError(error.response?.data?.detail, error.message)}`);
       }
     }
 
@@ -195,7 +195,7 @@ export function useTasks<TTask, TStatus extends GenericTaskStatus, TRunParams ex
       notify.success(`${config.label} ${taskId} 已删除`);
       await loadTasks();
     } catch (error: any) {
-      notify.error(`删除任务失败: ${error.response?.data?.detail || error.message}`);
+      notify.error(`删除任务失败: ${extractApiError(error.response?.data?.detail, error.message)}`);
       throw error;
     }
   }, [config, loadTasks]);

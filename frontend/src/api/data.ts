@@ -32,8 +32,8 @@ export const dataApi = {
 
   // ETL 任务管理
   listEtlTasks: () => api.get('/tasks/etl'),
-  createEtlTask: (config: any) => api.post('/data/etl/tasks', config),
-  updateEtlTask: (taskId: string, config: any) => api.put(`/data/etl/task/${taskId}`, config),
+  createEtlTask: (config: any) => api.post('/tasks/etl', { config_data: config }),
+  updateEtlTask: (taskId: string, config: any) => api.put(`/tasks/etl/${taskId}`, { config_data: config }),
   deleteEtlTask: (taskId: string, dropTable?: boolean) => api.delete(`/tasks/etl/${taskId}`, { params: { drop_table: dropTable } }),
   getEtlTaskStatus: (taskId: string) => api.get(`/tasks/etl/${taskId}/status`),
   getEtlTableSchema: (taskId: string) => api.get(`/tasks/etl/${taskId}/schema`),

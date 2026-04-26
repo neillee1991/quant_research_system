@@ -28,7 +28,6 @@ class MetadataManager:
             "array(INT,0) as quality_flag,"
             "array(INT,0) as task_version,"
             "array(STRING,0) as run_id,"
-            "array(STRING,0) as data_version,"
             "array(TIMESTAMP,0) as created_at)",
             ["ts_code", "factor_id", "trade_date"],
         ),

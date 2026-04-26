@@ -133,12 +133,13 @@ CREATE TABLE IF NOT EXISTS factor_configs (
   updated_at     TIMESTAMPTZ  DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS factor_field_mappings (
+CREATE TABLE IF NOT EXISTS data_field_mappings (
   field_key    VARCHAR(255) PRIMARY KEY,
   description  TEXT         DEFAULT '',
   table_name   VARCHAR(255) DEFAULT '',
   column_name  VARCHAR(255) DEFAULT '',
   extra_config TEXT         DEFAULT '{}',
+  used_by      JSONB        DEFAULT '["factor", "backtest"]', -- 支持数组，标注使用模块
   created_at   TIMESTAMPTZ  DEFAULT NOW(),
   updated_at   TIMESTAMPTZ  DEFAULT NOW()
 );
@@ -272,4 +273,9 @@ CREATE TRIGGER update_factor_configs_updated_at
 DROP TRIGGER IF EXISTS update_factor_analysis_results_updated_at ON factor_analysis_results;
 CREATE TRIGGER update_factor_analysis_results_updated_at
   BEFORE UPDATE ON factor_analysis_results
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS update_data_field_mappings_updated_at ON data_field_mappings;
+CREATE TRIGGER update_data_field_mappings_updated_at
+  BEFORE UPDATE ON data_field_mappings
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();

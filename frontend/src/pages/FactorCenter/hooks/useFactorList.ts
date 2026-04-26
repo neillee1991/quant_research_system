@@ -3,7 +3,7 @@
  */
 
 import { useState, useCallback, useEffect } from 'react';
-import { notify } from '../../../utils/notify';
+import { notify, extractApiError } from '../../../utils/notify';
 import { productionApi } from '../../../api';
 import { useTaskLogs } from '../../../hooks/useTaskLogs';
 import type { FactorDefinition } from '../../../types';
@@ -44,7 +44,7 @@ export const useFactorList = () => {
       await loadFactors();
       await loadHistory({ taskId: selectedFactor || undefined });
     } catch (error: any) {
-      const errorMessage = error.response?.data?.detail || '执行失败';
+      const errorMessage = extractApiError(error.response?.data?.detail, '执行失败');
       notify.error(errorMessage);
       throw error;
     } finally {
@@ -59,7 +59,7 @@ export const useFactorList = () => {
       await loadFactors();
       await loadHistory();
     } catch (error: any) {
-      const errorMessage = error.response?.data?.detail || '删除失败';
+      const errorMessage = extractApiError(error.response?.data?.detail, '删除失败');
       notify.error(errorMessage);
       throw error;
     }

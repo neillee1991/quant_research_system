@@ -1,4 +1,4 @@
-import { notify } from '../../../utils/notify';
+import { notify, extractApiError } from '../../../utils/notify';
 /**
  * 同步任务配置抽屉 - 组装层
  */
@@ -156,7 +156,7 @@ export const SyncTaskDrawer: React.FC<SyncTaskDrawerProps> = ({
       if (error instanceof SyntaxError) {
         notify.error('JSON 格式无效');
       } else {
-        notify.error(error.response?.data?.detail || '保存配置失败');
+        notify.error(extractApiError(error.response?.data?.detail, '保存配置失败'));
       }
     }
   };

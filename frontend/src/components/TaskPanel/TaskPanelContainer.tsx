@@ -11,21 +11,12 @@ import { TaskLogTable } from '../TaskLogTable';
 import type { UseTasksResult } from '../../hooks/useTasks';
 
 interface TaskPanelProps<TTask, TStatus extends GenericTaskStatus, TRunParams extends Record<string, unknown> = Record<string, unknown>> {
-  // 任务类型配置
   config: TaskTypeConfig<TTask, TStatus, TRunParams>;
-
-  // 任务数据和操作（来自 useTasks）
   tasksHook: UseTasksResult<TTask, TStatus, TRunParams>;
-
-  // 额外的操作按钮
   extraActions?: React.ReactNode;
-
-  // 事件处理
   onNewTask?: () => void;
   onEditTask?: (task: TTask) => void;
   onRefresh?: () => void;
-
-  // 显示控制
   showLogs?: boolean;
   logTitle?: string;
 }
@@ -50,10 +41,8 @@ export function TaskPanel<TTask, TStatus extends GenericTaskStatus, TRunParams e
     loadLogs,
     setSelectedTaskIds,
     loadTasks,
-    deleteTask,
   } = tasksHook;
 
-  // 自动加载日志
   useEffect(() => {
     loadLogs();
   }, [loadLogs]);
@@ -78,7 +67,6 @@ export function TaskPanel<TTask, TStatus extends GenericTaskStatus, TRunParams e
         }
         extra={
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            {/* 批量操作按钮 */}
             {config.batchActions?.map((batchAction) =>
               selectedTaskIds.length > 0 ? (
                 <Button
@@ -91,18 +79,12 @@ export function TaskPanel<TTask, TStatus extends GenericTaskStatus, TRunParams e
                 </Button>
               ) : null
             )}
-
-            {/* 额外操作按钮 */}
             {extraActions}
-
-            {/* 新建按钮 */}
             {onNewTask && (
               <Button onClick={onNewTask}>
                 新建任务
               </Button>
             )}
-
-            {/* 刷新按钮 */}
             <Button icon={<ReloadOutlined />} onClick={handleRefresh}>
               刷新
             </Button>
@@ -120,7 +102,6 @@ export function TaskPanel<TTask, TStatus extends GenericTaskStatus, TRunParams e
         />
       </Card>
 
-      {/* 日志展示 */}
       {showLogs && (
         <Card
           className="content-card"
@@ -131,11 +112,7 @@ export function TaskPanel<TTask, TStatus extends GenericTaskStatus, TRunParams e
             </span>
           }
           extra={
-            <Button
-              icon={<ReloadOutlined />}
-              onClick={() => loadLogs()}
-              type="text"
-            >
+            <Button icon={<ReloadOutlined />} onClick={() => loadLogs()} type="text">
               刷新
             </Button>
           }

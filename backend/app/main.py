@@ -41,13 +41,15 @@ async def lifespan(app: FastAPI):
         logger.error(f"创建维度表失败: {e}")
         raise  # 表结构创建失败应该终止启动
 
-    # 预加载因子字段映射缓存
+    # 预加载数据字段映射缓存
     try:
+        import engine.factor.data_config as _dc_module
         from engine.factor.data_config import DataConfigLoader
         _data_config = DataConfigLoader(db_client)
         await _data_config.refresh()
+        _dc_module.data_config_loader = _data_config  # 更新全局 loader 供 QueryBuilder 使用
     except Exception as e:
-        logger.warning(f"预加载因子字段映射缓存失败: {e}")
+        logger.warning(f"预加载数据字段映射缓存失败: {e}")
 
     # 清理僵尸任务：重启后所有 running 记录必然已中断
     try:
@@ -108,33 +110,8 @@ def create_app() -> FastAPI:
     @app.get("/ready", tags=["monitoring"])
     async def ready():
         """就绪检查 - 依赖服务是否可用"""
-        import asyncio
-        from scheduler.db import get_pool
-
-        results: dict[str, str] = {}
-
-        # 检查 PostgreSQL
-        try:
-            pool = get_pool()
-            async with pool.acquire() as conn:
-                await conn.fetchval("SELECT 1")
-            results["postgres"] = "ok"
-        except Exception as e:
-            results["postgres"] = f"error: {e}"
-
-        # 检查 DolphinDB
-        try:
-            db_client.query("1+1")
-            results["dolphindb"] = "ok"
-        except Exception as e:
-            results["dolphindb"] = f"error: {e}"
-
-        all_ok = all(v == "ok" for v in results.values())
-        return Response(
-            content=str({"status": "ok" if all_ok else "degraded", "checks": results}),
-            status_code=200 if all_ok else 503,
-            media_type="application/json",
-        )
+        from datetime import datetime, timezone
+        return {"status": "ok", "timestamp": datetime.now(timezone.utc).isoformat()}
 
     @app.get("/metrics", tags=["monitoring"])
     async def metrics():

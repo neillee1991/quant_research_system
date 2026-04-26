@@ -3,7 +3,7 @@
  */
 
 import { useState, useEffect, useRef } from 'react';
-import { notify } from '../../../utils/notify';
+import { notify, extractApiError } from '../../../utils/notify';
 import dayjs from 'dayjs';
 import { productionApi } from '../../../api';
 
@@ -114,7 +114,7 @@ export const useFactorAnalysis = () => {
     } catch (error: any) {
       setRunLoading(false);
       setTaskStatus('failed');
-      notify.error(error.response?.data?.detail || '提交失败');
+      notify.error(extractApiError(error.response?.data?.detail, '提交失败'));
     }
   };
 

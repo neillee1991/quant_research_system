@@ -28,7 +28,9 @@ class IndexBasicInfo(BaseModel):
     desc: Optional[str] = None
     exp_date: Optional[str] = None
     is_subscribed: bool = False
-    subscribed_task_id: Optional[str] = None
+    has_daily: bool = False
+    has_weight: bool = False
+    subscribed_tasks: Optional[List[str]] = None
 
 
 class IndexListResponse(BaseModel):
@@ -60,6 +62,25 @@ class IndexUnsubscribeResponse(BaseModel):
     message: str
 
 
+class IndexTaskInfo(BaseModel):
+    """指数单个任务信息"""
+    task_id: str
+    task_type: str  # "daily" or "weight"
+    enabled: bool
+    status: str  # "success", "failed", "pending"
+    last_sync: Optional[str] = None
+
+
+class IndexSubscriptionStatus(BaseModel):
+    """指数订阅状态"""
+    index_code: str
+    name: Optional[str] = None
+    has_daily: bool = False
+    has_weight: bool = False
+    daily_task: Optional[IndexTaskInfo] = None
+    weight_task: Optional[IndexTaskInfo] = None
+
+
 class FilterFieldConfig(BaseModel):
     """单个筛选字段配置"""
     field: str = Field(..., description="字段名")
@@ -88,42 +109,50 @@ def _sanitize_index_code(index_code: str) -> str:
     return index_code.replace(".", "").replace("_", "")
 
 
+def _extract_index_code_from_task(task) -> Optional[str]:
+    """从任务中提取指数代码：优先从 params 取，日线用 ts_code，成分股用 index_code"""
+    try:
+        params = task.params if task.params else {}
+        # 日线任务参数键为 ts_code，成分股任务参数键为 index_code
+        return params.get("index_code") or params.get("ts_code")
+    except Exception:
+        return None
+
+
 async def _get_subscribed_indices() -> List[str]:
-    """获取已订阅的指数列表"""
+    """获取已订阅的指数列表（去重）"""
     try:
         tasks = await sync_service.list_tasks(enabled_only=False)
-        subscribed = []
+        subscribed = set()
         for task in tasks:
             task_id = task.task_id
-            if task_id.startswith("sync_index_weight_"):
-                try:
-                    params = task.params if task.params else {}
-                    index_code = params.get("index_code")
-                    if index_code:
-                        subscribed.append(index_code)
-                except Exception:
+            if task_id.startswith("sync_index_weight_") or task_id.startswith("sync_index_daily_"):
+                if task_id.endswith("_template"):
                     continue
-        return subscribed
+                index_code = _extract_index_code_from_task(task)
+                if index_code:
+                    subscribed.add(index_code)
+        return list(subscribed)
     except Exception as e:
         logger.error(f"Failed to get subscribed indices: {e}")
         return []
 
 
 async def _get_subscription_task_map() -> dict:
-    """获取指数代码到任务ID的映射"""
+    """获取指数代码到任务ID列表的映射"""
     try:
         tasks = await sync_service.list_tasks(enabled_only=False)
         mapping = {}
         for task in tasks:
             task_id = task.task_id
-            if task_id.startswith("sync_index_weight_"):
-                try:
-                    params = task.params if task.params else {}
-                    index_code = params.get("index_code")
-                    if index_code:
-                        mapping[index_code] = task_id
-                except Exception:
+            if task_id.startswith("sync_index_weight_") or task_id.startswith("sync_index_daily_"):
+                if task_id.endswith("_template"):
                     continue
+                index_code = _extract_index_code_from_task(task)
+                if index_code:
+                    if index_code not in mapping:
+                        mapping[index_code] = []
+                    mapping[index_code].append(task_id)
         return mapping
     except Exception as e:
         logger.error(f"Failed to get subscription task map: {e}")
@@ -192,6 +221,16 @@ async def list_available_indices(
         for row in paginated_rows:
             index_code = row.get("ts_code", "")
             is_subscribed = index_code in subscribed_set
+            task_ids = task_map.get(index_code, [])
+
+            # 判断哪些任务存在
+            has_daily = False
+            has_weight = False
+            for task_id in task_ids:
+                if "sync_index_daily_" in task_id:
+                    has_daily = True
+                if "sync_index_weight_" in task_id:
+                    has_weight = True
 
             if show_subscribed_only and not is_subscribed:
                 continue
@@ -218,7 +257,9 @@ async def list_available_indices(
                 desc=row.get("desc"),
                 exp_date=exp_date,
                 is_subscribed=is_subscribed,
-                subscribed_task_id=task_map.get(index_code) if is_subscribed else None
+                has_daily=has_daily,
+                has_weight=has_weight,
+                subscribed_tasks=task_ids if is_subscribed else None
             ))
 
         if show_subscribed_only:
@@ -232,11 +273,11 @@ async def list_available_indices(
         raise HTTPException(status_code=500, detail=f"查询指数列表失败: {str(e)}")
 
 
-@router.post("/config/index/subscribe", response_model=IndexSubscribeResponse)
+@router.post("/config/index/subscribe", response_model=List[IndexSubscribeResponse])
 async def subscribe_index(
     request: IndexSubscribeRequest,
 ):
-    """订阅指数：创建同步任务并建表"""
+    """订阅指数：创建缺失的同步任务并建表（补充订阅逻辑）"""
     index_code = request.index_code.strip()
 
     try:
@@ -247,61 +288,138 @@ async def subscribe_index(
         if index_df.is_empty():
             raise HTTPException(status_code=404, detail=f"指数 {index_code} 不存在")
 
-        task_map = await _get_subscription_task_map()
-        if index_code in task_map:
-            raise HTTPException(
-                status_code=400,
-                detail=f"指数 {index_code} 已订阅，任务ID: {task_map[index_code]}"
-            )
-
         sanitized_code = _sanitize_index_code(index_code)
-        task_id = f"sync_index_weight_{sanitized_code}"
-        table_name = f"sync_index_weight_{sanitized_code}"
+        responses = []
 
-        template_params = {
-            "index_code": index_code,
-            "trade_date": "{date}",
-            "fields": "index_code,con_code,trade_date,weight"
-        }
+        # 检查已存在的任务
+        existing_tasks = await sync_service.list_tasks(enabled_only=False)
+        existing_task_ids = {task.task_id for task in existing_tasks}
 
-        schema = {
-            "index_code": {"type": "SYMBOL", "nullable": False, "comment": "指数代码"},
-            "con_code": {"type": "SYMBOL", "nullable": False, "comment": "成分股代码"},
-            "trade_date": {"type": "DATE", "nullable": False, "comment": "交易日期"},
-            "weight": {"type": "DOUBLE", "nullable": True, "comment": "权重"}
-        }
+        # 创建日线行情同步任务（如果不存在）
+        daily_task_id = f"sync_index_daily_{sanitized_code}"
+        daily_table_name = f"sync_index_daily_{sanitized_code}"
 
-        task_config_data = {
-            "task_id": task_id,
-            "description": f"指数 {index_code} 成分股权重同步",
-            "api_name": "index_weight",
-            "api_limit": 5000,
-            "sync_type": "incremental",
-            "params": template_params,
-            "date_field": "trade_date",
-            "primary_keys": ["index_code", "con_code", "trade_date"],
-            "table_name": table_name,
-            "schema": schema,
-            "enabled": True
-        }
+        if daily_task_id not in existing_task_ids:
+            daily_template_params = {
+                "ts_code": index_code,
+                "trade_date": "{date}",
+                "fields": "ts_code,trade_date,open,high,low,close,vol,amount"
+            }
 
-        await sync_service.create_task(task_config_data)
+            daily_schema = {
+                "ts_code": {"type": "SYMBOL", "nullable": False, "comment": "指数代码"},
+                "trade_date": {"type": "DATE", "nullable": False, "comment": "交易日期"},
+                "open": {"type": "DOUBLE", "nullable": True, "comment": "开盘价"},
+                "high": {"type": "DOUBLE", "nullable": True, "comment": "最高价"},
+                "low": {"type": "DOUBLE", "nullable": True, "comment": "最低价"},
+                "close": {"type": "DOUBLE", "nullable": True, "comment": "收盘价"},
+                "vol": {"type": "DOUBLE", "nullable": True, "comment": "成交量"},
+                "amount": {"type": "DOUBLE", "nullable": True, "comment": "成交额"}
+            }
 
-        try:
-            db_client.create_table(table_name, schema, if_not_exists=True)
-            logger.info(f"Created table {table_name} for index {index_code}")
-        except Exception as table_err:
-            logger.warning(f"Failed to create table {table_name}: {table_err}")
+            daily_task_config_data = {
+                "task_id": daily_task_id,
+                "description": f"指数 {index_code} 日线行情同步",
+                "api_name": "index_daily",
+                "api_limit": 5000,
+                "sync_type": "incremental",
+                "params": daily_template_params,
+                "date_field": "trade_date",
+                "primary_keys": ["ts_code", "trade_date"],
+                "table_name": daily_table_name,
+                "schema": daily_schema,
+                "enabled": True
+            }
 
-        logger.info(f"Successfully subscribed to index {index_code}, task_id={task_id}")
+            await sync_service.create_task(daily_task_config_data)
 
-        return IndexSubscribeResponse(
-            task_id=task_id,
-            index_code=index_code,
-            table_name=table_name,
-            status="success",
-            message=f"成功订阅指数 {index_code}"
-        )
+            try:
+                db_client.create_table(daily_table_name, daily_schema, if_not_exists=True)
+                logger.info(f"Created table {daily_table_name} for index {index_code}")
+            except Exception as table_err:
+                logger.warning(f"Failed to create table {daily_table_name}: {table_err}")
+
+            responses.append(IndexSubscribeResponse(
+                task_id=daily_task_id,
+                index_code=index_code,
+                table_name=daily_table_name,
+                status="success",
+                message=f"成功订阅指数 {index_code} 日线行情"
+            ))
+        else:
+            responses.append(IndexSubscribeResponse(
+                task_id=daily_task_id,
+                index_code=index_code,
+                table_name=daily_table_name,
+                status="exists",
+                message=f"指数 {index_code} 日线行情任务已存在"
+            ))
+            logger.info(f"Daily task {daily_task_id} already exists for index {index_code}")
+
+        # 创建成分股权重同步任务（如果不存在）
+        weight_task_id = f"sync_index_weight_{sanitized_code}"
+        weight_table_name = f"sync_index_weight_{sanitized_code}"
+
+        if weight_task_id not in existing_task_ids:
+            weight_template_params = {
+                "index_code": index_code,
+                "trade_date": "{date}",
+                "fields": "index_code,con_code,trade_date,weight"
+            }
+
+            weight_schema = {
+                "index_code": {"type": "SYMBOL", "nullable": False, "comment": "指数代码"},
+                "con_code": {"type": "SYMBOL", "nullable": False, "comment": "成分股代码"},
+                "trade_date": {"type": "DATE", "nullable": False, "comment": "交易日期"},
+                "weight": {"type": "DOUBLE", "nullable": True, "comment": "权重"}
+            }
+
+            weight_task_config_data = {
+                "task_id": weight_task_id,
+                "description": f"指数 {index_code} 成分股权重同步",
+                "api_name": "index_weight",
+                "api_limit": 5000,
+                "sync_type": "incremental",
+                "params": weight_template_params,
+                "date_field": "trade_date",
+                "primary_keys": ["index_code", "con_code", "trade_date"],
+                "table_name": weight_table_name,
+                "schema": weight_schema,
+                "enabled": True
+            }
+
+            await sync_service.create_task(weight_task_config_data)
+
+            try:
+                db_client.create_table(weight_table_name, weight_schema, if_not_exists=True)
+                logger.info(f"Created table {weight_table_name} for index {index_code}")
+            except Exception as table_err:
+                logger.warning(f"Failed to create table {weight_table_name}: {table_err}")
+
+            responses.append(IndexSubscribeResponse(
+                task_id=weight_task_id,
+                index_code=index_code,
+                table_name=weight_table_name,
+                status="success",
+                message=f"成功订阅指数 {index_code} 成分股"
+            ))
+        else:
+            responses.append(IndexSubscribeResponse(
+                task_id=weight_task_id,
+                index_code=index_code,
+                table_name=weight_table_name,
+                status="exists",
+                message=f"指数 {index_code} 成分股任务已存在"
+            ))
+            logger.info(f"Weight task {weight_task_id} already exists for index {index_code}")
+
+        created_tasks = [r.task_id for r in responses if r.status == "success"]
+        existing_tasks = [r.task_id for r in responses if r.status == "exists"]
+
+        logger.info(f"Successfully processed index {index_code}: "
+                    f"created={created_tasks}, existing={existing_tasks}")
+
+        return responses
     except HTTPException:
         raise
     except Exception as e:
@@ -309,19 +427,23 @@ async def subscribe_index(
         raise HTTPException(status_code=500, detail=f"订阅指数失败: {str(e)}")
 
 
-@router.delete("/config/index/subscribe/{index_code}", response_model=IndexUnsubscribeResponse)
-async def unsubscribe_index(
-    index_code: str,
+@router.delete("/config/index/unsubscribe/task/{task_id}", response_model=IndexUnsubscribeResponse)
+async def unsubscribe_task(
+    task_id: str,
 ):
-    """取消订阅指数：删除同步任务和数据表"""
-    index_code = index_code.strip()
-
+    """取消单个任务的订阅：删除同步任务和数据表"""
     try:
-        task_map = await _get_subscription_task_map()
-        if index_code not in task_map:
-            raise HTTPException(status_code=404, detail=f"指数 {index_code} 未订阅")
+        task = await sync_service.get_task(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail=f"任务 {task_id} 不存在")
 
-        task_id = task_map[index_code]
+        # 从任务参数中获取指数代码（用于响应）
+        index_code = "未知"
+        if task.params:
+            try:
+                index_code = task.params.get("index_code", "未知")
+            except Exception:
+                pass
 
         await sync_service.delete_task(
             task_id,
@@ -329,12 +451,47 @@ async def unsubscribe_index(
             hard_delete=True
         )
 
-        logger.info(f"Successfully unsubscribed from index {index_code}, task_id={task_id}")
+        logger.info(f"Successfully unsubscribed task {task_id}")
 
         return IndexUnsubscribeResponse(
             index_code=index_code,
             status="success",
-            message=f"成功取消订阅指数 {index_code}（同步任务及数据表已删除）"
+            message=f"成功取消任务 {task_id}"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to unsubscribe task {task_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"取消任务失败: {str(e)}")
+
+
+@router.delete("/config/index/unsubscribe/all/{index_code}", response_model=IndexUnsubscribeResponse)
+async def unsubscribe_index(
+    index_code: str,
+):
+    """取消整个指数的订阅：删除所有相关同步任务和数据表"""
+    index_code = index_code.strip()
+
+    try:
+        task_map = await _get_subscription_task_map()
+        if index_code not in task_map:
+            raise HTTPException(status_code=404, detail=f"指数 {index_code} 未订阅")
+
+        task_ids = task_map[index_code]
+        for task_id in task_ids:
+            await sync_service.delete_task(
+                task_id,
+                drop_table=True,
+                hard_delete=True
+            )
+            logger.info(f"Deleted task {task_id} for index {index_code}")
+
+        logger.info(f"Successfully unsubscribed from index {index_code}")
+
+        return IndexUnsubscribeResponse(
+            index_code=index_code,
+            status="success",
+            message=f"成功取消订阅指数 {index_code}（所有同步任务及数据表已删除）"
         )
     except HTTPException:
         raise
@@ -425,6 +582,105 @@ async def save_user_preference(
 
 
 # ==================== 指数股票池端点 ====================
+
+@router.get("/config/index/subscription-status", response_model=List[IndexSubscriptionStatus])
+async def get_subscription_status():
+    """获取所有已订阅指数的详细状态"""
+    try:
+        tasks = await sync_service.list_tasks(enabled_only=False)
+        index_map: Dict[str, IndexSubscriptionStatus] = {}
+
+        for task in tasks:
+            task_id = task.task_id
+            if not (task_id.startswith("sync_index_weight_") or task_id.startswith("sync_index_daily_")):
+                continue
+
+            try:
+                params = task.params if task.params else {}
+                index_code = params.get("index_code")
+                if not index_code:
+                    continue
+
+                if index_code not in index_map:
+                    index_map[index_code] = IndexSubscriptionStatus(
+                        index_code=index_code,
+                        name=None,
+                        has_daily=False,
+                        has_weight=False,
+                        daily_task=None,
+                        weight_task=None
+                    )
+
+                task_type = "daily" if "sync_index_daily_" in task_id else "weight"
+                task_info = IndexTaskInfo(
+                    task_id=task_id,
+                    task_type=task_type,
+                    enabled=task.enabled,
+                    status="success",
+                    last_sync=None
+                )
+
+                if task_type == "daily":
+                    index_map[index_code].has_daily = True
+                    index_map[index_code].daily_task = task_info
+                else:
+                    index_map[index_code].has_weight = True
+                    index_map[index_code].weight_task = task_info
+
+            except Exception as e:
+                logger.warning(f"Failed to process task {task_id}: {e}")
+                continue
+
+        # 尝试从 sync_index_basic 表获取指数名称
+        try:
+            index_df = db_client.query("SELECT ts_code, name FROM sync_index_basic")
+            if not index_df.is_empty():
+                for row in index_df.to_dicts():
+                    ts_code = row.get("ts_code")
+                    if ts_code in index_map:
+                        index_map[ts_code].name = row.get("name")
+        except Exception as e:
+            logger.warning(f"Failed to fetch index names: {e}")
+
+        return list(index_map.values())
+    except Exception as e:
+        logger.error(f"Failed to get subscription status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/config/index/recreate-task")
+async def recreate_task(task_id: str):
+    """重新创建单个失败的任务"""
+    try:
+        existing = await sync_service.get_task(task_id)
+        if not existing:
+            raise HTTPException(status_code=404, detail=f"任务 {task_id} 不存在")
+
+        # 尝试删除现有任务（硬删除）
+        await sync_service.delete_task(task_id, drop_table=False, hard_delete=True)
+
+        # 重新创建任务
+        config_data = existing.model_dump(exclude_none=True)
+        new_task = await sync_service.create_task(config_data)
+
+        # 确保表存在
+        table_name = new_task.table_name
+        schema = new_task.schema
+        if table_name and schema:
+            try:
+                db_client.create_table(table_name, schema, if_not_exists=True)
+            except Exception as table_err:
+                logger.warning(f"Failed to create table {table_name}: {table_err}")
+
+        logger.info(f"Successfully recreated task {task_id}")
+
+        return {"status": "success", "message": f"任务 {task_id} 重新创建成功", "task_id": task_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to recreate task {task_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"重新创建任务失败: {str(e)}")
+
 
 @router.get("/config/index-pool/list")
 async def list_index_pools():

@@ -1,4 +1,4 @@
-"""因子数据配置加载器 - 从 factor_field_mappings 表读取字段映射
+"""数据配置加载器 - 从 data_field_mappings 表读取字段映射
 
 架构说明：
 1. depends_on 配置的表会自动加载所有字段，无需在 factor_field_mappings 中配置
@@ -22,8 +22,19 @@ from app.core.logger import logger
 _CACHE_TTL_SECONDS = 300  # 5 分钟后自动失效
 
 
-# 内置默认值（只包含需要特殊处理的字段）
+# 内置默认值（因子分析 + 回测共用字段）
 _DEFAULTS: Dict[str, Dict[str, Any]] = {
+    # 行情字段（因子分析 + 回测共用）
+    "open":        {"table_name": "sync_daily_data", "column_name": "open",       "extra_config": {}},
+    "high":        {"table_name": "sync_daily_data", "column_name": "high",       "extra_config": {}},
+    "low":         {"table_name": "sync_daily_data", "column_name": "low",        "extra_config": {}},
+    "close":       {"table_name": "sync_daily_data", "column_name": "close",      "extra_config": {}},
+    "volume":      {"table_name": "sync_daily_data", "column_name": "vol",        "extra_config": {}},
+    # 回测专用字段
+    "amount":      {"table_name": "sync_daily_data", "column_name": "amount",     "extra_config": {}},
+    "limit_up":    {"table_name": "sync_stk_limit",  "column_name": "up_limit",   "extra_config": {}},
+    "limit_down":  {"table_name": "sync_stk_limit",  "column_name": "down_limit", "extra_config": {}},
+    # 因子分析专用字段
     "adj_factor":  {"table_name": "", "column_name": "adj_factor",  "extra_config": {}},
     "industry_l1": {"table_name": "", "column_name": "",            "extra_config": {}},
     "industry_l2": {"table_name": "", "column_name": "",            "extra_config": {}},
@@ -100,10 +111,10 @@ class DataConfigLoader:
         _shared_cache_ts = value
 
     async def refresh(self) -> None:
-        """从 PostgreSQL factor_field_mappings 预加载配置到内存缓存"""
+        """从 PostgreSQL data_field_mappings 预加载配置到内存缓存"""
         try:
             from scheduler.db import DatabasePool
-            rows = await DatabasePool.fetch("SELECT * FROM factor_field_mappings")
+            rows = await DatabasePool.fetch("SELECT * FROM data_field_mappings")
             config: Dict[str, Dict[str, Any]] = {}
             for row in rows:
                 fk = row["field_key"]
@@ -149,6 +160,10 @@ class DataConfigLoader:
         cfg = self.get(field_key)
         return bool(cfg.get("table_name") and cfg.get("column_name"))
 
+    def load_price_fields(self, field_keys: List[str]) -> Dict[str, Dict[str, str]]:
+        """批量获取多个字段的 table_name / column_name 配置"""
+        return {k: self.get(k) for k in field_keys}
+
     def load_field_data(
         self,
         field_key: str,
@@ -193,3 +208,18 @@ class DataConfigLoader:
         except Exception as e:
             logger.error(f"加载字段 {field_key} 失败: {e}")
             return None
+
+
+class _DefaultsOnlyLoader:
+    """无 db_client 时的轻量 loader，仅读 _DEFAULTS（供 QueryBuilder 在 db 初始化前使用）"""
+
+    def get(self, field_key: str) -> Dict[str, Any]:
+        return _DEFAULTS.get(field_key, {"table_name": "", "column_name": "", "extra_config": {}})
+
+    def load_price_fields(self, field_keys: List[str]) -> Dict[str, Dict[str, str]]:
+        return {k: self.get(k) for k in field_keys}
+
+
+# 全局默认 loader（QueryBuilder 在没有 db_client 时使用）
+# 应用启动后会被 DataConfigLoader 单例替换
+data_config_loader: Any = _DefaultsOnlyLoader()

@@ -1,42 +1,87 @@
 /**
- * 数据字段映射配置 Tab
+ * 字段映射表组件
+ * 通用的字段映射显示和配置组件
  */
 import React from 'react';
 import { Button, Spin, Select, Tag } from 'antd';
 import { ReloadOutlined, SaveOutlined } from '@ant-design/icons';
-import { useDataConfig } from './hooks/useDataConfig';
+import type { DataFieldMapping } from '../../../types';
 
-const FieldMappingsTab: React.FC = () => {
-  const {
-    mappings,
-    loading,
-    saving,
-    tables,
-    tableColumns,
-    changed,
-    loadConfig,
-    loadColumnsForTable,
-    updateMapping,
-    saveConfig,
-  } = useDataConfig();
+interface FieldMappingTableProps {
+  title: string;
+  description: string;
+  mappings: DataFieldMapping[];
+  loading: boolean;
+  saving: boolean;
+  tables: string[];
+  tableColumns: Record<string, string[]>;
+  changed: boolean;
+  onLoadConfig: () => void;
+  onLoadColumnsForTable: (tableName: string) => void;
+  onUpdateMapping: (idx: number, field: Partial<DataFieldMapping>) => void;
+  onSaveConfig: () => void;
+}
+
+export const FieldMappingTable: React.FC<FieldMappingTableProps> = ({
+  title,
+  description,
+  mappings,
+  loading,
+  saving,
+  tables,
+  tableColumns,
+  changed,
+  onLoadConfig,
+  onLoadColumnsForTable,
+  onUpdateMapping,
+  onSaveConfig,
+}) => {
+  // 渲染使用模块的标签
+  const renderUsedByTags = (usedBy: string[] = []) => {
+    return usedBy.map(module => {
+      let color = 'default';
+      let text = '未指定';
+
+      if (module === 'factor') {
+        color = 'blue';
+        text = '因子分析';
+      } else if (module === 'backtest') {
+        color = 'orange';
+        text = '回测';
+      } else if (module === 'both') {
+        color = 'green';
+        text = '两者都用';
+      }
+
+      return (
+        <Tag key={module} color={color} style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>
+          {text}
+        </Tag>
+      );
+    });
+  };
 
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <div>
-          <span style={{ color: 'var(--color-primary)', fontWeight: 600, fontSize: 15 }}>数据字段映射</span>
+          <span style={{ color: 'var(--color-primary)', fontWeight: 600, fontSize: 15 }}>
+            {title}
+          </span>
           <span style={{ color: 'var(--text-muted)', fontSize: 11, marginLeft: 8 }}>
-            配置因子计算引擎使用的数据表和字段映射。留空表示使用引擎内置逻辑。
+            {description}
           </span>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <Button icon={<ReloadOutlined />} onClick={loadConfig}>刷新</Button>
+          <Button icon={<ReloadOutlined />} onClick={onLoadConfig}>
+            刷新
+          </Button>
           <Button
             type="primary"
             icon={<SaveOutlined />}
             disabled={!changed}
             loading={saving}
-            onClick={saveConfig}
+            onClick={onSaveConfig}
           >
             保存配置
           </Button>
@@ -44,7 +89,7 @@ const FieldMappingsTab: React.FC = () => {
       </div>
 
       <Spin spinning={loading}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
           {mappings.map((m, idx) => {
             const extra = (() => {
               try { return JSON.parse(m.extra_config || '{}'); } catch { return {}; }
@@ -65,7 +110,7 @@ const FieldMappingsTab: React.FC = () => {
                   border: '1px solid var(--border-color)',
                 }}
               >
-                {/* 第一行: 字段信息 + 枚举标签 + 状态 */}
+                {/* 第一行: 字段信息 + 枚举标签 + 使用模块 + 状态 */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <code style={{ color: 'var(--color-primary)', fontSize: 12, fontWeight: 600 }}>
                     {m.field_key}
@@ -86,6 +131,10 @@ const FieldMappingsTab: React.FC = () => {
                       ))}
                     </div>
                   )}
+                  {/* 显示使用模块标签 */}
+                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                    {renderUsedByTags(m.used_by)}
+                  </div>
                   <div style={{ marginLeft: 'auto' }}>
                     {hasTable ? (
                       <Tag color="green" style={{ fontSize: 11 }}>
@@ -109,8 +158,8 @@ const FieldMappingsTab: React.FC = () => {
                     showSearch
                     value={m.table_name || undefined}
                     onChange={(v) => {
-                      updateMapping(idx, { table_name: (v as string) || '', column_name: '' });
-                      if (v) loadColumnsForTable(v as string);
+                      onUpdateMapping(idx, { table_name: (v as string) || '', column_name: '' });
+                      if (v) onLoadColumnsForTable(v as string);
                     }}
                     options={tables.map(t => ({ label: t, value: t }))}
                   />
@@ -122,8 +171,8 @@ const FieldMappingsTab: React.FC = () => {
                     showSearch
                     value={m.column_name || undefined}
                     disabled={!m.table_name}
-                    onFocus={() => { if (m.table_name) loadColumnsForTable(m.table_name); }}
-                    onChange={(v) => updateMapping(idx, { column_name: (v as string) || '' })}
+                    onFocus={() => { if (m.table_name) onLoadColumnsForTable(m.table_name); }}
+                    onChange={(v) => onUpdateMapping(idx, { column_name: (v as string) || '' })}
                     options={(m.table_name ? (tableColumns[m.table_name] || []) : []).map(c => ({ label: c, value: c }))}
                   />
                 </div>
@@ -135,5 +184,3 @@ const FieldMappingsTab: React.FC = () => {
     </div>
   );
 };
-
-export default FieldMappingsTab;

@@ -390,7 +390,14 @@ async def get_task_data_status(
             """, task_type, task_id)
             if last_run and last_run.get("finished_at"):
                 finished_at = last_run["finished_at"]
-                last_sync_time = finished_at.strftime("%Y-%m-%d %H:%M:%S") if hasattr(finished_at, "strftime") else str(finished_at)
+                if hasattr(finished_at, "strftime"):
+                    from zoneinfo import ZoneInfo
+                    _TZ = ZoneInfo("Asia/Shanghai")
+                    if finished_at.tzinfo is None:
+                        finished_at = finished_at.replace(tzinfo=_TZ)
+                    last_sync_time = finished_at.isoformat()
+                else:
+                    last_sync_time = str(finished_at)
         except Exception as e:
             logger.warning(f"Failed to get last sync time for {task_type} task {task_id}: {e}")
 
@@ -574,132 +581,12 @@ async def delete_task(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@tracked_task("sync", task_id_kwarg="task_id")
-async def _execute_sync_task_background(task_id: str, start_date: Optional[str], end_date: Optional[str], run_id: str):
-    """后台执行同步任务"""
-    logger.info(f"Starting background sync task: task_id={task_id}, run_id={run_id}, start_date={start_date}, end_date={end_date}")
-    import asyncio
-    from data_manager.refactored_sync_engine import sync_engine
-    try:
-        logger.info(f"Calling sync_engine.sync_task for {task_id}")
-        rows = await asyncio.get_event_loop().run_in_executor(
-            None, lambda: sync_engine.sync_task(task_id=task_id, target_date=start_date, end_date=end_date)
-        )
-        logger.info(f"sync_engine.sync_task returned {rows} rows for {task_id}")
-        if rows < 0:
-            raise RuntimeError(f"Sync task {task_id} failed")
-        logger.info(f"Sync task {task_id} completed: run_id={run_id}, rows={rows}")
-        return {"rows": rows, "extra": {"start_date": start_date, "end_date": end_date}}
-    except Exception as e:
-        logger.error(f"Error in background sync task {task_id}: {e}", exc_info=True)
-        raise
+from app.services.task_executors import (
+    execute_sync_task as _execute_sync_task_background,
+    execute_etl_task as _execute_etl_task_background,
+    execute_factor_task as _execute_factor_task_background,
+)
 
-
-@tracked_task("etl", task_id_kwarg="task_id")
-async def _execute_etl_task_background(task_id: str, start_date: Optional[str], end_date: Optional[str], run_id: str):
-    """后台执行 ETL 任务"""
-    import asyncio
-
-    def _run_etl():
-        import psycopg2
-        import psycopg2.extras
-        from app.core.config import settings
-        from infrastructure.database.dolphindb_client import db_client
-
-        conn = psycopg2.connect(
-            host=settings.postgresql.postgres_host,
-            port=settings.postgresql.postgres_port,
-            dbname=settings.postgresql.postgres_db,
-            user=settings.postgresql.postgres_user,
-            password=settings.postgresql.postgres_password,
-        )
-        try:
-            with conn:
-                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                    cur.execute("SELECT * FROM etl_task_configs WHERE task_id = %s", (task_id,))
-                    row = cur.fetchone()
-                    if row is None:
-                        raise ValueError(f"ETL task {task_id} not found")
-                    from app.models.base_task import ETLTaskConfig
-                    task = ETLTaskConfig.from_row(dict(row)).model_dump()
-        finally:
-            conn.close()
-
-        # 执行前确保目标表存在（仅当 schema 非空时建表）
-        table_name = task.get("table_name")
-        _schema = task.get("schema") or {}
-        _pks = task.get("primary_keys") or []
-        if table_name and _schema:
-            from data_manager.sync_components import TableManager as SyncTableManager
-            _tm = SyncTableManager(db_client)
-            _tm.ensure_table_exists({
-                "table_name": table_name,
-                "schema": _schema,
-                "primary_keys": _pks,
-            })
-
-        script_template = task.get("script", "")
-        if not script_template or not script_template.strip():
-            raise ValueError("ETL script is empty")
-
-        # 替换占位符
-        if start_date and len(start_date) == 8:
-            date_str = f"{start_date[:4]}.{start_date[4:6]}.{start_date[6:]}"
-        else:
-            from datetime import datetime
-            date_str = datetime.now().strftime("%Y.%m.%d")
-
-        from app.core.config import settings as _settings
-        db_path = _settings.database.db_path
-        script = (script_template
-                  .replace("{date}", date_str)
-                  .replace("{db_ts}", db_path)
-                  .replace("{db_meta}", db_path))
-
-        # 执行 ETL 脚本，将结果写入目标表
-        try:
-            result = db_client.query(script)
-            if result is None or result.is_empty():
-                return 0
-
-            # 写入目标表
-            if table_name:
-                is_full = task.get("sync_type", "incremental") == "full"
-                db_client.upsert(
-                    table_name=table_name,
-                    df=result,
-                    key_columns=_pks,
-                    is_full_sync=is_full,
-                    trade_date=date_str.replace(".", "") if not is_full else None,
-                )
-            return len(result)
-        except Exception as e:
-            logger.error(f"Failed to execute ETL script for {task_id}: {e}")
-            raise
-
-    rows = await asyncio.get_event_loop().run_in_executor(None, _run_etl)
-    logger.info(f"ETL task {task_id} completed: run_id={run_id}, rows={rows}")
-    return {"rows": rows if isinstance(rows, int) else 0, "extra": {"start_date": start_date, "end_date": end_date}}
-
-
-@tracked_task("factor", task_id_kwarg="task_id")
-async def _execute_factor_task_background(task_id: str, start_date: Optional[str], end_date: Optional[str], run_id: str):
-    """后台执行因子任务"""
-    import asyncio
-    from app.services.factor_service import FactorComputeService
-    from infrastructure.database.dolphindb_client import db_client
-    service = FactorComputeService(db_client)
-    compute_result = await asyncio.get_event_loop().run_in_executor(
-        None, lambda: service.compute_factor(
-            factor_id=task_id,
-            start_date=start_date,
-            end_date=end_date,
-            mode="full" if start_date else "incremental"
-        )
-    )
-    rows = getattr(compute_result, "rows", 0)
-    logger.info(f"Factor task {task_id} completed: run_id={run_id}, rows={rows}")
-    return {"rows": rows, "extra": {"start_date": start_date, "end_date": end_date}}
 
 
 @router.post("/tasks/{task_type}/{task_id}/execute", response_model=TaskExecuteResponse)

@@ -1,0 +1,18 @@
+.backtest-center {
+  padding: 24px;
+}
+
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+}
+
+.history-card {
+  margin-bottom: 24px;
+}
+
+.result-card {
+  margin-top: 24px;
+}

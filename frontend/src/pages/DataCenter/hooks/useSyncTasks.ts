@@ -2,7 +2,7 @@
  * 同步任务管理 Hook
  */
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { notify } from '../../../utils/notify';
+import { notify, extractApiError } from '../../../utils/notify';
 import { dataApi } from '../../../api';
 import type { SyncTask, TaskStatus } from '../../../types';
 
@@ -138,7 +138,7 @@ export const useSyncTasks = () => {
         }, 2000);
       }
     } catch (error: any) {
-      notify.error(`任务 ${taskId} 同步失败: ${error.response?.data?.detail || error.message}`);
+      notify.error(`任务 ${taskId} 同步失败: ${extractApiError(error.response?.data?.detail, error.message)}`);
       setSyncingTasks((prev) => {
         const newSet = new Set(prev);
         newSet.delete(taskId);
@@ -195,7 +195,7 @@ export const useSyncTasks = () => {
           }, 2000);
         }
       } catch (error: any) {
-        notify.error(`任务 ${taskId} 同步失败: ${error.response?.data?.detail || error.message}`);
+        notify.error(`任务 ${taskId} 同步失败: ${extractApiError(error.response?.data?.detail, error.message)}`);
         setSyncingTasks((prev) => {
           const newSet = new Set(prev);
           newSet.delete(taskId);
@@ -216,7 +216,7 @@ export const useSyncTasks = () => {
       notify.success(`同步任务 ${taskId} 已删除`);
       await loadSyncTasks();
     } catch (error: any) {
-      notify.error(`删除任务失败: ${error.response?.data?.detail || error.message}`);
+      notify.error(`删除任务失败: ${extractApiError(error.response?.data?.detail, error.message)}`);
       throw error;
     }
   }, [loadSyncTasks]);
@@ -227,7 +227,7 @@ export const useSyncTasks = () => {
       notify.success(`同步任务 ${config.task_id} 创建成功`);
       await loadSyncTasks();
     } catch (error: any) {
-      notify.error(`创建任务失败: ${error.response?.data?.detail || error.message}`);
+      notify.error(`创建任务失败: ${extractApiError(error.response?.data?.detail, error.message)}`);
       throw error;
     }
   }, [loadSyncTasks]);
@@ -238,7 +238,7 @@ export const useSyncTasks = () => {
       notify.success(`同步任务 ${config.task_id} 更新成功`);
       await loadSyncTasks();
     } catch (error: any) {
-      notify.error(`更新任务失败: ${error.response?.data?.detail || error.message}`);
+      notify.error(`更新任务失败: ${extractApiError(error.response?.data?.detail, error.message)}`);
       throw error;
     }
   }, [loadSyncTasks]);

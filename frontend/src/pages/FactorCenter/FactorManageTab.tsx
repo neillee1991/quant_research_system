@@ -1,4 +1,4 @@
-import { notify } from '../../utils/notify';
+import { notify, extractApiError } from '../../utils/notify';
 /**
  * 因子管理标签页
  */
@@ -108,7 +108,7 @@ const FactorManageTab: React.FC = () => {
       loadFactors();
       loadHistory();
     } catch (e: any) {
-      const errorMessage = e.response?.data?.detail || '批量执行失败';
+      const errorMessage = extractApiError(e.response?.data?.detail, '批量执行失败');
       notify.error(errorMessage);
     }
     setBatchLoading(false);
@@ -145,7 +145,7 @@ const FactorManageTab: React.FC = () => {
       setCreateAlignCalendar(false);
       loadFactors();
     } catch (e: any) {
-      const errorMessage = e.response?.data?.detail || '创建失败';
+      const errorMessage = extractApiError(e.response?.data?.detail, '创建失败');
       console.error('Failed to create factor:', e);
       notify.error(errorMessage);
     }
@@ -206,7 +206,13 @@ const FactorManageTab: React.FC = () => {
       render: (_: any, record: any) => {
         const lastRun = history.find(h => h.task_id === record.factor_id);
         if (!lastRun) return <span style={{ color: 'var(--text-muted)' }}>-</span>;
-        const dateTimeStr = lastRun.started_at?.slice(0, 19).replace('T', ' ') || '-';  // YYYY-MM-DD HH:mm:ss
+        const raw = lastRun.started_at || '';
+        const normalized = raw.replace(' ', 'T');
+        const d = new Date(normalized);
+        const dateTimeStr = isNaN(d.getTime()) ? raw.slice(0, 19).replace('T', ' ') : d.toLocaleString('zh-CN', {
+          year: 'numeric', month: '2-digit', day: '2-digit',
+          hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+        });
         return (
           <Tooltip title={lastRun.started_at}>
             <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-secondary)', fontSize: '12px' }}>

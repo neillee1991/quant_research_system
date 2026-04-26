@@ -676,13 +676,15 @@ class ResultWriterProcessor(IProcessor):
         if "task_version" not in result_df.columns:
             result_df = result_df.with_columns(pl.lit(1).alias("task_version"))
 
-        if "data_version" not in result_df.columns:
-            result_df = result_df.with_columns(pl.lit("v1").alias("data_version"))
-
         if "created_at" not in result_df.columns:
             result_df = result_df.with_columns(
                 pl.lit(datetime.now()).alias("created_at")
             )
+
+        # 删除 DolphinDB 表中不存在或已废弃的列
+        for _drop_col in ("data_version",):
+            if _drop_col in result_df.columns:
+                result_df = result_df.drop(_drop_col)
 
         # 确定存储表
         storage_config = definition.storage

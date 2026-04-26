@@ -1,21 +1,34 @@
 /**
- * 数据配置管理 Hook
+ * 统一数据配置管理 Hook
+ * 同时管理因子分析和回测配置
  */
 
 import { useState, useCallback, useEffect } from 'react';
-import { notify } from '../../../utils/notify';
+import { notify, extractApiError } from '../../../utils/notify';
 import { productionApi } from '../../../api';
 import type { DataFieldMapping } from '../../../types';
 
-// 预定义字段（与后端引擎支持的字段保持一致）
+// 统一的预设字段配置，包含因子分析和回测需要的所有字段
+// 注意：后端也有一份相同的预设配置，保持两者一致
 const PRESET_FIELDS: DataFieldMapping[] = [
-  { field_key: 'adj_factor',  description: '复权因子',   table_name: '', column_name: '', extra_config: '{}' },
-  { field_key: 'industry_l1', description: '一级行业',   table_name: '', column_name: '', extra_config: '{}' },
-  { field_key: 'industry_l2', description: '二级行业',   table_name: '', column_name: '', extra_config: '{}' },
-  { field_key: 'is_limit',    description: '涨跌停标记', table_name: '', column_name: '', extra_config: '{}' },
-  { field_key: 'is_st',       description: 'ST标记',     table_name: '', column_name: '', extra_config: '{}' },
-  { field_key: 'list_date',   description: '上市日期',   table_name: '', column_name: '', extra_config: '{}' },
-  { field_key: 'market_cap',  description: '市值',       table_name: '', column_name: '', extra_config: '{}' },
+  // 因子分析专用字段
+  { field_key: 'adj_factor',    description: '复权因子',   table_name: '', column_name: '', extra_config: '{}', used_by: ['factor'] },
+  { field_key: 'industry_l1',   description: '一级行业',   table_name: '', column_name: '', extra_config: '{}', used_by: ['factor'] },
+  { field_key: 'industry_l2',   description: '二级行业',   table_name: '', column_name: '', extra_config: '{}', used_by: ['factor'] },
+  { field_key: 'is_limit',      description: '涨跌停标记', table_name: '', column_name: '', extra_config: '{}', used_by: ['factor'] },
+  { field_key: 'is_st',         description: 'ST标记',     table_name: '', column_name: '', extra_config: '{}', used_by: ['factor'] },
+  { field_key: 'list_date',     description: '上市日期',   table_name: '', column_name: '', extra_config: '{}', used_by: ['factor'] },
+  { field_key: 'market_cap',    description: '市值',       table_name: '', column_name: '', extra_config: '{}', used_by: ['factor'] },
+  // 因子分析 + 回测共用行情字段
+  { field_key: 'open',          description: '开盘价',     table_name: '', column_name: '', extra_config: '{}', used_by: ['factor', 'backtest'] },
+  { field_key: 'high',          description: '最高价',     table_name: '', column_name: '', extra_config: '{}', used_by: ['factor', 'backtest'] },
+  { field_key: 'low',           description: '最低价',     table_name: '', column_name: '', extra_config: '{}', used_by: ['factor', 'backtest'] },
+  { field_key: 'close',         description: '收盘价',     table_name: '', column_name: '', extra_config: '{}', used_by: ['factor', 'backtest'] },
+  { field_key: 'volume',        description: '成交量',     table_name: '', column_name: '', extra_config: '{}', used_by: ['factor', 'backtest'] },
+  // 回测专用字段
+  { field_key: 'amount',        description: '成交额',     table_name: '', column_name: '', extra_config: '{}', used_by: ['backtest'] },
+  { field_key: 'limit_up',      description: '涨停价',     table_name: '', column_name: '', extra_config: '{}', used_by: ['backtest'] },
+  { field_key: 'limit_down',    description: '跌停价',     table_name: '', column_name: '', extra_config: '{}', used_by: ['backtest'] },
 ];
 
 export const useDataConfig = () => {
@@ -74,10 +87,10 @@ export const useDataConfig = () => {
     setSaving(true);
     try {
       await productionApi.updateDataConfig(mappings as any);
-      notify.success('配置已保存');
+      notify.success('数据配置已保存');
       setChanged(false);
     } catch (error: any) {
-      const errorMessage = error.response?.data?.detail || '保存失败';
+      const errorMessage = extractApiError(error.response?.data?.detail, '保存失败');
       notify.error(errorMessage);
       throw error;
     } finally {

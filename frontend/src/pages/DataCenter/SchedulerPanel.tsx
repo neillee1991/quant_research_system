@@ -20,7 +20,7 @@ import {
   PlayCircleOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
-import { notify } from '../../utils/notify';
+import { notify, extractApiError } from '../../utils/notify';
 import cronstrue from 'cronstrue/i18n';
 import { flowApi, FlowListItem, FlowRun, FlowRunDetail, TaskConfig } from '../../api';
 import FlowEditor from '../../components/SchedulerFlowEditor';
@@ -142,7 +142,7 @@ const SchedulerPanel: React.FC = () => {
       notify.success(`Flow "${flowName}" 已启动，共 ${days} 天`);
       setTimeout(fetchFlowRuns, 2000);
     } catch (e: any) {
-      notify.error(e?.response?.data?.detail || '执行失败');
+      notify.error(extractApiError(e?.response?.data?.detail, '执行失败'));
     } finally {
       setRunningFlow(null);
     }
@@ -296,7 +296,7 @@ const SchedulerPanel: React.FC = () => {
       title: '开始时间',
       dataIndex: 'started_at',
       key: 'started_at',
-      render: (time?: string) => time ? new Date(time).toLocaleString('zh-CN') : '-',
+      render: (time?: string) => time ? new Date(time.includes('T') || time.includes('+') || time.endsWith('Z') ? time : time.replace(' ', 'T')).toLocaleString('zh-CN') : '-',
     },
     {
       title: '耗时',

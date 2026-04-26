@@ -101,7 +101,7 @@ async def update_task(
 async def delete_task(
     task_type: str = Path(...),
     task_id: str = Path(...),
-    drop_table: bool = Query(default=False),
+    drop_table: bool = Query(default=True),
 ):
     try:
         service = _get_service(task_type)
@@ -118,7 +118,7 @@ async def delete_task(
                         db_client.drop_table(table_name)
                     except Exception as e:
                         logger.warning(f"Failed to drop table {table_name}: {e}")
-        success = await service.delete_task(task_id=task_id)
+        success = await service.delete_task(task_id=task_id, hard_delete=True)
         return DeleteResponse(
             success=success,
             message=f"Task {task_id} deleted successfully" + (" (table dropped)" if drop_table else ""),
@@ -179,7 +179,14 @@ async def get_task_data_status(
             """, task_type, task_id)
             if last_run and last_run.get("finished_at"):
                 finished_at = last_run["finished_at"]
-                last_sync_time = finished_at.strftime("%Y-%m-%d %H:%M:%S") if hasattr(finished_at, "strftime") else str(finished_at)
+                if hasattr(finished_at, "strftime"):
+                    from zoneinfo import ZoneInfo
+                    _TZ = ZoneInfo("Asia/Shanghai")
+                    if finished_at.tzinfo is None:
+                        finished_at = finished_at.replace(tzinfo=_TZ)
+                    last_sync_time = finished_at.isoformat()
+                else:
+                    last_sync_time = str(finished_at)
         except Exception as e:
             logger.warning(f"Failed to get last sync time for {task_type} task {task_id}: {e}")
 

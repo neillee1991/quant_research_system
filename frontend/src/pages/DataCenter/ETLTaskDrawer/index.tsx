@@ -1,4 +1,4 @@
-import { notify } from '../../../utils/notify';
+import { notify, extractApiError } from '../../../utils/notify';
 /**
  * ETL 任务配置抽屉 - 组装层
  */
@@ -173,7 +173,7 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
       setTestResult({ status: 'success', rows: rowCount, preview: data.sample_data ?? data.preview ?? [] });
       notify.success(`测试通过: ${rowCount} 行`);
     } catch (error: any) {
-      const errorMsg = error.response?.data?.detail || '脚本测试失败';
+      const errorMsg = extractApiError(error.response?.data?.detail, '脚本测试失败');
       setTestResult({ status: 'error', error: errorMsg });
       notify.error(errorMsg);
     } finally {
@@ -222,7 +222,7 @@ export const ETLTaskDrawer: React.FC<ETLTaskDrawerProps> = ({
         onClose();
       }
     } catch (error: any) {
-      notify.error(error.response?.data?.detail || '保存配置失败');
+      notify.error(extractApiError(error.response?.data?.detail, '保存配置失败'));
     }
   };
 

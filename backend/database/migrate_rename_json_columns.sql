@@ -16,6 +16,10 @@ ALTER TABLE etl_task_configs RENAME COLUMN params_json       TO params;
 ALTER TABLE etl_task_configs RENAME COLUMN primary_keys_json TO primary_keys;
 ALTER TABLE etl_task_configs RENAME COLUMN schema_json       TO schema;
 
+-- 补充 params 列（旧表可能没有此列）
+ALTER TABLE etl_task_configs
+  ADD COLUMN IF NOT EXISTS params JSONB DEFAULT '{}';
+
 -- etl_task_configs: primary_keys / schema 从 TEXT 升级为 JSONB
 ALTER TABLE etl_task_configs
   ALTER COLUMN primary_keys TYPE JSONB USING primary_keys::jsonb;

@@ -1,16 +1,15 @@
 /**
  * 指数订阅管理 Tab
- * 从 DataCenter/IndexSubscribeDrawer.tsx 改造，去掉 Drawer 外壳
+ * 支持同时订阅指数的日线行情和成分股，简洁显示状态
  */
-import { notify } from '../../utils/notify';
+import { notify, extractApiError } from '../../utils/notify';
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  Button, Input, Select, Table, Tag, Space, Spin, Empty,
-  Alert, Divider, Modal, Switch,
+  Button, Input, Select, Table, Tag, Space, Spin, Empty, Alert, Divider, Modal
 } from 'antd';
 import {
-  SearchOutlined, PlusOutlined, CheckOutlined,
-  SaveOutlined, DeleteOutlined,
+  SearchOutlined, PlusOutlined, CheckOutlined, SaveOutlined, DeleteOutlined,
+  RiseOutlined, BarChartOutlined
 } from '@ant-design/icons';
 import { indexApi, productionApi } from '../../api';
 import type { IndexInfo, UserPreference, FilterFieldConfig } from '../../types/indexSubscribe';
@@ -19,6 +18,12 @@ const marketMap: Record<string, string> = {
   'SSE': '上交所',
   'SZSE': '深交所',
   'CICC': '中金所',
+};
+
+// 任务类型显示映射
+const taskTypeMap: Record<string, { label: string; icon: React.ReactNode; color: string }> = {
+  'daily': { label: '日线', icon: <RiseOutlined />, color: 'blue' },
+  'weight': { label: '成分股', icon: <BarChartOutlined />, color: 'green' }
 };
 
 const IndexSubscribeTab: React.FC = () => {
@@ -115,7 +120,7 @@ const IndexSubscribeTab: React.FC = () => {
       notify.success('配置已保存');
       setConfigDone(true);
     } catch (error: any) {
-      notify.error(`保存配置失败: ${error.response?.data?.detail || error.message}`);
+      notify.error(`保存配置失败: ${extractApiError(error.response?.data?.detail, error.message)}`);
     } finally {
       setSavingPreference(false);
     }
@@ -145,22 +150,33 @@ const IndexSubscribeTab: React.FC = () => {
     }
   }, []);
 
-  // 处理订阅
+  // 订阅指数
   const handleSubscribeClick = async (index: IndexInfo) => {
     try {
-      await indexApi.subscribeIndex({ index_code: index.ts_code });
-      notify.success(`成功订阅指数 ${index.name}`);
+      const res = await indexApi.subscribeIndex({ index_code: index.ts_code });
+      const responses = Array.isArray(res.data) ? res.data : [res.data];
+
+      const successCount = responses.filter((r: any) => r.status === 'success' || r.status === 'exists').length;
+      const newCreatedCount = responses.filter((r: any) => r.status === 'success').length;
+      const existsCount = responses.filter((r: any) => r.status === 'exists').length;
+
+      if (newCreatedCount > 0) {
+        notify.success(`成功订阅指数 ${index.name}（新建 ${newCreatedCount} 个任务${existsCount > 0 ? `，已有 ${existsCount} 个任务` : ''}）`);
+      } else if (existsCount > 0) {
+        notify.success(`指数 ${index.name} 的任务已全部存在`);
+      }
+
       loadIndices(page, pageSize, searchText, activeFilters);
     } catch (error: any) {
-      notify.error(`订阅失败: ${error.response?.data?.detail || error.message}`);
+      notify.error(`订阅失败: ${extractApiError(error.response?.data?.detail, error.message)}`);
     }
   };
 
-  // 处理取消订阅
-  const handleUnsubscribeClick = (index: IndexInfo) => {
+  // 取消整个指数的订阅
+  const handleUnsubscribeAll = (index: IndexInfo) => {
     Modal.confirm({
       title: '取消订阅',
-      content: `确定取消订阅指数 ${index.name}（${index.ts_code}）？相关同步任务及数据表将被删除，此操作不可撤销。`,
+      content: `确定取消订阅指数 ${index.name}（${index.ts_code}）吗？所有相关同步任务及数据表将被删除，此操作不可撤销。`,
       okText: '确认取消订阅',
       okButtonProps: { danger: true },
       cancelText: '取消',
@@ -170,10 +186,37 @@ const IndexSubscribeTab: React.FC = () => {
           notify.success(`已取消订阅 ${index.name}`);
           loadIndices(page, pageSize, searchText, activeFilters);
         } catch (error: any) {
-          notify.error(`取消订阅失败: ${error.response?.data?.detail || error.message}`);
+          notify.error(`取消订阅失败: ${extractApiError(error.response?.data?.detail, error.message)}`);
         }
       },
     });
+  };
+
+  // 渲染订阅状态标签
+  const renderSubscriptionTags = (index: IndexInfo) => {
+    const tags: React.ReactNode[] = [];
+
+    if (index.has_daily) {
+      tags.push(
+        <Tag key="daily" color="blue" icon={<RiseOutlined />}>
+          日线
+        </Tag>
+      );
+    }
+
+    if (index.has_weight) {
+      tags.push(
+        <Tag key="weight" color="green" icon={<BarChartOutlined />}>
+          成分股
+        </Tag>
+      );
+    }
+
+    if (tags.length === 0) {
+      return <Tag color="default">未订阅</Tag>;
+    }
+
+    return <Space size={[4, 4]} wrap>{tags}</Space>;
   };
 
   const handleSearch = () => {
@@ -214,7 +257,7 @@ const IndexSubscribeTab: React.FC = () => {
       title: '指数代码',
       dataIndex: 'ts_code',
       key: 'ts_code',
-      width: 120,
+      width: 140,
       render: (code: string) => (
         <code style={{ fontSize: '12px' }}>{code}</code>
       ),
@@ -227,9 +270,6 @@ const IndexSubscribeTab: React.FC = () => {
       render: (name: string, record: IndexInfo) => (
         <Space>
           <span>{name}</span>
-          {record.is_subscribed && (
-            <Tag color="green" icon={<CheckOutlined />}>已订阅</Tag>
-          )}
         </Space>
       ),
     },
@@ -247,6 +287,16 @@ const IndexSubscribeTab: React.FC = () => {
       },
     },
     {
+      title: '订阅状态',
+      key: 'subscription_status',
+      width: 160,
+      render: (_: any, record: IndexInfo) => (
+        <div>
+          {renderSubscriptionTags(record)}
+        </div>
+      ),
+    },
+    {
       title: '发布机构',
       dataIndex: 'publisher',
       key: 'publisher',
@@ -254,27 +304,47 @@ const IndexSubscribeTab: React.FC = () => {
       render: (publisher?: string) => publisher || '-',
     },
     {
-      title: '发布日期',
-      dataIndex: 'list_date',
-      key: 'list_date',
-      width: 100,
-    },
-    {
       title: '操作',
       key: 'action',
-      width: 120,
-      render: (_: any, record: IndexInfo) =>
-        record.is_subscribed ? (
-          <Button type="default" size="small" danger icon={<DeleteOutlined />}
-            onClick={() => handleUnsubscribeClick(record)}>
-            取消订阅
-          </Button>
-        ) : (
-          <Button type="primary" size="small" icon={<PlusOutlined />}
-            onClick={() => handleSubscribeClick(record)}>
-            订阅
-          </Button>
-        ),
+      width: 180,
+      render: (_: any, record: IndexInfo) => {
+        if (record.is_subscribed) {
+          return (
+            <Space>
+              {!record.has_daily || !record.has_weight ? (
+                <Button
+                  type="primary"
+                  size="small"
+                  icon={<PlusOutlined />}
+                  onClick={() => handleSubscribeClick(record)}
+                >
+                  补充订阅
+                </Button>
+              ) : null}
+              <Button
+                type="default"
+                size="small"
+                danger
+                icon={<DeleteOutlined />}
+                onClick={() => handleUnsubscribeAll(record)}
+              >
+                取消订阅
+              </Button>
+            </Space>
+          );
+        } else {
+          return (
+            <Button
+              type="primary"
+              size="small"
+              icon={<PlusOutlined />}
+              onClick={() => handleSubscribeClick(record)}
+            >
+              订阅
+            </Button>
+          );
+        }
+      },
     },
   ];
 
@@ -292,7 +362,7 @@ const IndexSubscribeTab: React.FC = () => {
             options={availableTables.map(t => ({ label: t, value: t }))}
             showSearch
             filterOption={(input, option) =>
-              (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+              (option?.label || '').toLowerCase().includes(input.toLowerCase())
             }
           />
           <Button

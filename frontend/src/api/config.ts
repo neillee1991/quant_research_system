@@ -22,7 +22,10 @@ export const indexApi = {
     });
   },
   subscribeIndex: (data: { index_code: string }) => api.post('/config/index/subscribe', data),
-  unsubscribeIndex: (indexCode: string) => api.delete(`/config/index/subscribe/${indexCode}`),
+  unsubscribeIndex: (indexCode: string) => api.delete(`/config/index/unsubscribe/all/${indexCode}`),
+  unsubscribeTask: (taskId: string) => api.delete(`/config/index/unsubscribe/task/${taskId}`),
+  recreateTask: (taskId: string) => api.post('/config/index/recreate-task', null, { params: { task_id: taskId } }),
+  getSubscriptionStatus: () => api.get('/config/index/subscription-status'),
   getUserPreference: () => api.get('/config/index/preference'),
   saveUserPreference: (data: {
     index_basic_table: string;
