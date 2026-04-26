@@ -179,27 +179,34 @@ export const TaskMonitor: React.FC = () => {
       const response = await taskMonitorApi.getRunningTasks();
       const newTasks = response.data.tasks;
 
-      // 检测新开始的任务
-      newTasks.forEach((t) => {
-        if (!prevRunningIds.current.has(t.run_id)) {
-          notify.info(`任务 ${t.task_id} 开始执行`);
-        }
-      });
+      // 检查任务列表是否真的发生了变化
+      const hasTasksChanged = JSON.stringify(newTasks) !== JSON.stringify(runningTasksRef.current);
 
-      // 检测刚完成的任务
-      prevRunningIds.current.forEach((id) => {
-        const stillRunning = newTasks.find((t) => t.run_id === id);
-        if (!stillRunning) {
-          const old = runningTasksRef.current.find((t) => t.run_id === id);
-          if (old) {
-            setHistoryLoaded(false);
+      if (hasTasksChanged) {
+        // 检测新开始的任务
+        newTasks.forEach((t) => {
+          if (!prevRunningIds.current.has(t.run_id)) {
+            notify.info(`任务 ${t.task_id} 开始执行`);
           }
-        }
-      });
-      prevRunningIds.current = new Set(newTasks.map((t) => t.run_id));
+        });
 
-      setRunningTasks(newTasks);
-      setLastFetched(Date.now());
+        // 检测刚完成的任务
+        prevRunningIds.current.forEach((id) => {
+          const stillRunning = newTasks.find((t) => t.run_id === id);
+          if (!stillRunning) {
+            const old = runningTasksRef.current.find((t) => t.run_id === id);
+            if (old) {
+              setHistoryLoaded(false);
+            }
+          }
+        });
+        prevRunningIds.current = new Set(newTasks.map((t) => t.run_id));
+
+        // 更新 ref 和 state
+        runningTasksRef.current = newTasks;
+        setRunningTasks(newTasks);
+        setLastFetched(Date.now());
+      }
     } catch {
       // silent
     } finally {

@@ -23,8 +23,8 @@ interface Stock {
 
 interface FormValues {
   [key: string]: any;
-  start_date?: dayjs.Dayjs;
-  end_date?: dayjs.Dayjs;
+  start_date?: string;
+  end_date?: string;
 }
 
 export const BacktestModal: React.FC<BacktestModalProps> = ({
@@ -94,12 +94,8 @@ export const BacktestModal: React.FC<BacktestModalProps> = ({
   const handleOk = () => {
     form.validateFields()
       .then(values => {
-        const config = {
-          ...values,
-          start_date: values.start_date ? dayjs(values.start_date).format('YYYYMMDD') : '',
-          end_date: values.end_date ? dayjs(values.end_date).format('YYYYMMDD') : '',
-        };
-        onOk(config);
+        // 现在 Form.Item 已经自动处理成 YYYYMMDD 格式
+        onOk(values);
       })
       .catch(info => {
         console.log('Validate Failed:', info);
@@ -119,8 +115,8 @@ export const BacktestModal: React.FC<BacktestModalProps> = ({
         fees: 0.0003,
         slippage: 0.001,
         engine_mode: 'vectorbt',
-        start_date: dayjs('20100101'),
-        end_date: dayjs('20240101'),
+        start_date: '20100101',
+        end_date: '20240101',
         strategy_code: `
 from typing import Dict, Any, List
 from backend.engine.backtest.core.base_strategy import BaseStrategy, TradingSignal
@@ -164,16 +160,20 @@ class MyStrategy(BaseStrategy):
           name="start_date"
           label="开始日期"
           rules={[{ required: true, message: '请选择开始日期' }]}
+          getValueProps={(value) => ({ value: value ? dayjs(value, 'YYYYMMDD') : undefined })}
+          getValueFromEvent={(date) => (date ? date.format('YYYYMMDD') : undefined)}
         >
-          <DatePicker style={{ width: '100%' }} />
+          <DatePicker style={{ width: '100%' }} format="YYYYMMDD" />
         </Form.Item>
 
         <Form.Item
           name="end_date"
           label="结束日期"
           rules={[{ required: true, message: '请选择结束日期' }]}
+          getValueProps={(value) => ({ value: value ? dayjs(value, 'YYYYMMDD') : undefined })}
+          getValueFromEvent={(date) => (date ? date.format('YYYYMMDD') : undefined)}
         >
-          <DatePicker style={{ width: '100%' }} />
+          <DatePicker style={{ width: '100%' }} format="YYYYMMDD" />
         </Form.Item>
 
         <Form.Item
