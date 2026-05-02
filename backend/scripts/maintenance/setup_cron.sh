@@ -4,7 +4,9 @@
 set -e
 
 # 配置
-BACKUP_SCRIPT="/Users/lisheng/Code/quantsystem/quant_research_system/backend/scripts/maintenance/backup.sh"
+# 获取脚本所在目录，自动计算备份脚本路径
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BACKUP_SCRIPT="$SCRIPT_DIR/backup.sh"
 LOG_FILE="/var/log/quant_backup.log"
 
 # 颜色输出

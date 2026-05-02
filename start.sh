@@ -4,11 +4,11 @@
 # 自动启动 DolphinDB、PostgreSQL、后端和前端服务
 # ===================================================================
 
-set -e
+# set -e  # 禁用错误终止，方便调试
 
 # 加载配置
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/config/scripts.config.sh"
+source "$SCRIPT_DIR/config/scripts/scripts.config.sh"
 
 # ==================== 工具函数 ====================
 

@@ -5,7 +5,7 @@
 
 # 加载配置
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/config/scripts.config.sh"
+source "$SCRIPT_DIR/config/scripts/scripts.config.sh"
 
 echo -e "${BLUE}=========================================${NC}"
 echo -e "${BLUE}量化研究系统 - 服务状态检查${NC}"

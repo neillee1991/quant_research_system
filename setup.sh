@@ -28,7 +28,7 @@ load_config() {
     FRONTEND_PORT="3000"
 
     # 默认 DolphinDB 数据目录
-    DOLPHINDB_DATA_DIR="/Users/lisheng/Code/application/dolphin"
+    DOLPHINDB_DATA_DIR="/Volumes/LiSh/data/dolphin"
 
     # 如果 .env 存在，覆盖默认值
     if [ -f "$SCRIPT_DIR/.env" ]; then
